@@ -1,5 +1,6 @@
 /**
- * `bg_run`, `bg_status` and `bg_logs`: what the agent can do with process tasks.
+ * `bg_run`, `bg_status`, `bg_logs` and `bg_kill`: what the agent can do with
+ * process tasks.
  *
  * The tools are thin. They translate a turn into a scope, call the store, and
  * render the result as text a model can read — all knowledge of shells,
@@ -44,6 +45,10 @@ const LogsParameters = Type.Object({
   ),
 });
 
+const KillParameters = Type.Object({
+  id: Type.String({ description: "Task id to stop, with everything its command started." }),
+});
+
 const DEFAULT_LOG_LINES = 50;
 const MAX_LOG_LINES = 2000;
 /**
@@ -79,6 +84,7 @@ export function describeTask(view: ProcessTaskView, options: { full?: boolean } 
     lines.push(`exit code: ${String(task.exitCode)}`);
   }
   if (task.error !== undefined) lines.push(`error: ${task.error}`);
+  if (task.killReason !== undefined) lines.push(`kill reason: ${task.killReason}`);
   return lines.join("\n");
 }
 
@@ -95,10 +101,11 @@ function taskDetails(view: ProcessTaskView) {
     exitCode: view.task.exitCode,
     command: view.task.command,
     outputPath: view.task.outputPath,
+    killReason: view.task.killReason,
   };
 }
 
-/** The three process-task tools, bound to one store. */
+/** The process-task tools, bound to one store. */
 export function processTaskTools(tasks: ProcessTasks): ToolDefinition[] {
   const run: ToolDefinition<typeof RunParameters> = {
     name: "bg_run",
@@ -222,5 +229,39 @@ export function processTaskTools(tasks: ProcessTasks): ToolDefinition[] {
     },
   };
 
-  return [run, status, logs];
+  const kill: ToolDefinition<typeof KillParameters> = {
+    name: "bg_kill",
+    label: "Stop a background task",
+    description:
+      "Stop a background task and every process its command started: a polite signal, a short grace period, then force. A task that already finished is reported as such instead of failing.",
+    parameters: KillParameters,
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const id = params.id.trim();
+      if (id.length === 0) {
+        return text("Pass the id of the task to stop; bg_status lists the ids of this session.");
+      }
+
+      const result = await tasks.stop(scopeOf(ctx), id);
+      if (result === undefined) {
+        return text(`No background task with id ${id} in this session.`);
+      }
+
+      const headline =
+        result.outcome === "killed"
+          ? `Stopped background task ${id} (${result.view.task.name}) in ${formatDuration(result.tookMs)}.`
+          : result.outcome === "already-finished"
+            ? `Background task ${id} had already finished (${result.view.task.status}); nothing was signalled.`
+            : `Background task ${id} could not be stopped: ${result.detail ?? "its processes are still running"}.`;
+      return {
+        content: [{ type: "text", text: [headline, "", describeTask(result.view)].join("\n") }],
+        details: {
+          ...taskDetails(result.view),
+          stopOutcome: result.outcome,
+          tookMs: result.tookMs,
+        },
+      };
+    },
+  };
+
+  return [run, status, logs, kill];
 }

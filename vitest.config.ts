@@ -12,5 +12,8 @@ export default defineConfig({
     include: ["test/**/*.test.ts"],
     exclude: ["node_modules/**", "dist/**", ".tmp/**", ".pi/**"],
     passWithNoTests: true,
+    // Tests drive real processes, and a Windows kill spends its full grace
+    // period before forcing; the default 5s is not enough headroom on a busy CI.
+    testTimeout: 30000,
   },
 });

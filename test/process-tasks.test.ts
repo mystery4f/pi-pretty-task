@@ -6,10 +6,12 @@
  * @author mystery4f <40482524+mystery4f@users.noreply.github.com>
  */
 
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createHarness, type Harness, resultText } from "./support/extension-harness.js";
-import { killTree, makeTempDir, waitFor, writeScript } from "./support/processes.js";
+import { isAlive, killTree, makeTempDir, waitFor, writeScript } from "./support/processes.js";
 
 interface TaskDetails {
   id: string;
@@ -21,6 +23,7 @@ interface TaskDetails {
   pid?: number;
   exitCode?: number | null;
   outputPath: string;
+  killReason?: string;
 }
 
 const cleanup: Array<() => Promise<void>> = [];
@@ -361,5 +364,108 @@ describe("bg_run lifetime", () => {
     expect(failed.exitCode).toBe(3);
     expect(text).toContain("exit code: 3");
     expect(resultText(await harness.call("bg_logs", { id: task.id }))).toContain("boom");
+  });
+});
+
+describe("bg_kill", () => {
+  it("stops the command, records it as killed by the user, and keeps the record readable", async () => {
+    const dir = await makeTempDir();
+    cleanup.push(dir.dispose);
+    const command = await writeScript(
+      dir.path,
+      "sleeper.js",
+      "process.stdout.write('waiting\\n');\nsetInterval(() => {}, 1000);\n",
+    );
+    const harness = createHarness({ cwd: dir.path, sessionId: "session-kill" });
+    const task = await startRunning(harness, command, "long job");
+    const pid = trackPid(task);
+
+    const killed = await harness.call("bg_kill", { id: task.id });
+    const details = killed.details as TaskDetails & { stopOutcome: string };
+
+    expect(details.stopOutcome).toBe("killed");
+    expect(details.status).toBe("killed");
+    expect(details.killReason).toBe("user");
+    expect(isAlive(pid)).toBe(false);
+
+    const text = resultText(killed);
+    expect(text).toContain(`Stopped background task ${task.id}`);
+    expect(text).toContain("kill reason: user");
+
+    // The record survives the kill: status and captured output are still readable.
+    const status = (await harness.call("bg_status", { id: task.id })).details as TaskDetails;
+    expect(status.status).toBe("killed");
+    expect(status.killReason).toBe("user");
+    expect(resultText(await harness.call("bg_logs", { id: task.id }))).toContain("waiting");
+  });
+
+  it("stops a grandchild as well as the command that started it", async () => {
+    const dir = await makeTempDir();
+    cleanup.push(dir.dispose);
+    await writeScript(
+      dir.path,
+      "grandchild.js",
+      "require('node:fs').writeFileSync(process.argv[2], String(process.pid));\nsetInterval(() => {}, 1000);\n",
+    );
+    const parentSource = [
+      "const { spawn } = require('node:child_process');",
+      "const path = require('node:path');",
+      "spawn(process.execPath, [path.join(__dirname, 'grandchild.js'), process.argv[2]], {",
+      "  stdio: 'ignore',",
+      "});",
+      "setInterval(() => {}, 1000);",
+      "",
+    ].join("\n");
+    const pidFile = join(dir.path, "grandchild.pid");
+    const program = await writeScript(dir.path, "parent.js", parentSource);
+    const harness = createHarness({ cwd: dir.path, sessionId: "session-kill-tree" });
+    const task = await startRunning(harness, `${program} "${pidFile}"`, "with a child");
+    const pid = trackPid(task);
+
+    await waitFor("the grandchild to start", async () => {
+      try {
+        return (await readFile(pidFile, "utf8")).trim().length > 0;
+      } catch {
+        return false;
+      }
+    });
+    const grandchild = Number((await readFile(pidFile, "utf8")).trim());
+    spawned.push(grandchild);
+
+    const killed = await harness.call("bg_kill", { id: task.id });
+
+    expect((killed.details as TaskDetails).status).toBe("killed");
+    await waitFor("both processes to disappear", () => !isAlive(pid) && !isAlive(grandchild));
+  });
+
+  it("answers that a finished task was already finished instead of failing", async () => {
+    const dir = await makeTempDir();
+    cleanup.push(dir.dispose);
+    const command = await writeScript(dir.path, "quick.js", "process.stdout.write('done\\n');\n");
+    const harness = createHarness({ cwd: dir.path, sessionId: "session-kill-done" });
+    const task = await startRunning(harness, command, "quick job");
+
+    await waitFor("completion", async () => {
+      const status = await harness.call("bg_status", { id: task.id });
+      return (status.details as TaskDetails).status === "completed";
+    });
+
+    const answer = await harness.call("bg_kill", { id: task.id });
+    const details = answer.details as TaskDetails & { stopOutcome: string };
+
+    expect(details.stopOutcome).toBe("already-finished");
+    expect(details.status).toBe("completed");
+    expect(details.killReason).toBeUndefined();
+    expect(resultText(answer)).toContain("had already finished");
+  });
+
+  it("names an unknown id instead of failing", async () => {
+    const dir = await makeTempDir();
+    cleanup.push(dir.dispose);
+    const harness = createHarness({ cwd: dir.path, sessionId: "session-kill-unknown" });
+
+    const answer = await harness.call("bg_kill", { id: "nope00" });
+
+    expect(resultText(answer)).toContain("No background task with id nope00");
   });
 });
