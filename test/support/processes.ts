@@ -16,7 +16,9 @@ export async function makeTempDir(): Promise<{ path: string; dispose(): Promise<
   return {
     path,
     async dispose() {
-      await rm(path, { recursive: true, force: true });
+      // A process that just exited may still hold its output file for a moment;
+      // Node retries those transient Windows errors instead of failing the test.
+      await rm(path, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     },
   };
 }

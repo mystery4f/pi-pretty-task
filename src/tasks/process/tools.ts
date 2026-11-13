@@ -112,7 +112,7 @@ export function processTaskTools(tasks: ProcessTasks): ToolDefinition[] {
         command: params.command,
         ...(params.name === undefined ? {} : { name: params.name }),
       });
-      const view = tasks.get(scopeOf(ctx), task.id) ?? {
+      const view = (await tasks.get(scopeOf(ctx), task.id)) ?? {
         task,
         elapsedMs: 0,
         outputBytes: task.outputBytes,
@@ -147,7 +147,7 @@ export function processTaskTools(tasks: ProcessTasks): ToolDefinition[] {
       const full = params.full === true;
 
       if (wantedId !== undefined && wantedId.length > 0) {
-        const view = tasks.get(scope, wantedId);
+        const view = await tasks.get(scope, wantedId);
         if (view === undefined) {
           return text(`No background task with id ${wantedId} in this session.`);
         }
@@ -157,7 +157,7 @@ export function processTaskTools(tasks: ProcessTasks): ToolDefinition[] {
         };
       }
 
-      const all = tasks.list(scope);
+      const all = await tasks.list(scope);
       if (all.length === 0) {
         return {
           content: [

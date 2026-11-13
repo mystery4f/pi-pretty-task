@@ -2,26 +2,26 @@
  * The process-task store: the one place that knows which tasks a session has,
  * how they are identified, and how a running process becomes a finished record.
  *
- * Records live in memory for the lifetime of the extension and are written to
- * disk only through the output files; history recovery is the persistence
- * ticket's job, which is why nothing here reads a task back from disk yet.
+ * Every session owns one `TaskStore` under its state directory, and every change
+ * to a record is followed by a save. Loading the first time a session is touched
+ * is what makes history survive a restart: records come back from disk, and a
+ * record that still says `running` is marked `interrupted` because whatever ran
+ * it is gone. Nothing is adopted and nothing is killed on load — the store reads
+ * files and leaves every process alone.
  *
  * @author mystery4f <40482524+mystery4f@users.noreply.github.com>
  */
 
 import { randomInt } from "node:crypto";
-import { mkdir } from "node:fs/promises";
+import { mkdir, stat } from "node:fs/promises";
 import { type OutputTail, readOutputTail } from "../base/output.js";
+import type { TaskScope } from "../base/runtime-state.js";
 import { processOutputPath, sessionTaskDirectory } from "../base/runtime-state.js";
-import type { ProcessTask } from "../base/task.js";
+import type { ProcessTask, Task } from "../base/task.js";
+import { TaskStore } from "../base/task-store.js";
 import { type RunningProcess, startProcess } from "./supervisor.js";
 
-/** Identifies which session's tasks are meant. Both fields come from the turn. */
-export interface TaskScope {
-  /** Directory the session runs in; its `.pi/` holds runtime state. */
-  cwd: string;
-  sessionId: string;
-}
+export type { TaskScope };
 
 export interface StartProcessTaskInput extends TaskScope {
   command: string;
@@ -46,7 +46,13 @@ export interface ProcessTasksOptions {
 
 interface SessionTasks {
   readonly directory: string;
-  readonly tasks: Map<string, ProcessTask>;
+  readonly store: TaskStore;
+  /**
+   * Every record of the session, both kinds. Process tasks put their own records
+   * here; loaded loop records stay in the map so a process-task save never drops
+   * them, and the loop kind's tools arrive with its ticket.
+   */
+  readonly tasks: Map<string, Task>;
   readonly running: Map<string, RunningProcess>;
 }
 
@@ -72,7 +78,12 @@ export class ProcessTasks {
   private readonly platform: NodeJS.Platform;
   private readonly env: NodeJS.ProcessEnv | undefined;
   private readonly now: () => number;
-  private readonly sessions = new Map<string, SessionTasks>();
+  /**
+   * Keyed by state directory, not session id: the directory already encodes cwd
+   * and session, and the promise keeps two turns from loading the same history
+   * twice.
+   */
+  private readonly sessions = new Map<string, Promise<SessionTasks>>();
 
   constructor(options: ProcessTasksOptions = {}) {
     this.platform = options.platform ?? process.platform;
@@ -115,6 +126,9 @@ export class ProcessTasks {
 
     task.pid = running.pid;
     session.running.set(id, running);
+    // The id is about to reach the model, so the record reaches the disk first:
+    // an extension that crashes right after this turn still knows the task.
+    await this.persist(session);
     void running.exit.then(
       (exit) => {
         this.finish(session, task, running, exit.exitCode);
@@ -127,17 +141,18 @@ export class ProcessTasks {
     return task;
   }
 
-  /** Every task of the session, oldest first. Reads nothing back from disk. */
-  list(scope: TaskScope): ProcessTaskView[] {
-    const session = this.sessions.get(scope.sessionId);
-    if (session === undefined) return [];
-    return [...session.tasks.values()].map((task) => this.view(session, task));
+  /** Every process task of the session, oldest first, including loaded history. */
+  async list(scope: TaskScope): Promise<ProcessTaskView[]> {
+    const session = await this.session(scope);
+    return [...session.tasks.values()]
+      .filter((task): task is ProcessTask => task.kind === "process")
+      .map((task) => this.view(session, task));
   }
 
-  get(scope: TaskScope, id: string): ProcessTaskView | undefined {
-    const session = this.sessions.get(scope.sessionId);
-    const task = session?.tasks.get(id);
-    return session === undefined || task === undefined ? undefined : this.view(session, task);
+  async get(scope: TaskScope, id: string): Promise<ProcessTaskView | undefined> {
+    const session = await this.session(scope);
+    const task = session.tasks.get(id);
+    return task === undefined || task.kind !== "process" ? undefined : this.view(session, task);
   }
 
   /** The tail of a task's output. Undefined when the session has no such task. */
@@ -146,9 +161,9 @@ export class ProcessTasks {
     id: string,
     options: { lines: number; maxBytes?: number },
   ): Promise<{ view: ProcessTaskView; tail: OutputTail } | undefined> {
-    const session = this.sessions.get(scope.sessionId);
-    const task = session?.tasks.get(id);
-    if (session === undefined || task === undefined) return undefined;
+    const session = await this.session(scope);
+    const task = session.tasks.get(id);
+    if (task === undefined || task.kind !== "process") return undefined;
     const tail = await readOutputTail(task.outputPath, options);
     return { view: this.view(session, task), tail };
   }
@@ -177,30 +192,60 @@ export class ProcessTasks {
     if (failure !== undefined) {
       task.status = "failed";
       task.error = failure;
-      return;
-    }
-    if (exitCode === 0) {
+    } else if (exitCode === 0) {
       task.status = "completed";
-      return;
+    } else {
+      task.status = "failed";
+      task.error =
+        exitCode === null
+          ? "the command was terminated by a signal"
+          : `exited with code ${exitCode}`;
     }
-    task.status = "failed";
-    task.error =
-      exitCode === null ? "the command was terminated by a signal" : `exited with code ${exitCode}`;
+    void this.persist(session);
   }
 
-  private async session(scope: TaskScope): Promise<SessionTasks> {
-    const existing = this.sessions.get(scope.sessionId);
+  /**
+   * Hand the current records to the store. The store queues its own writes and
+   * treats persistence as best effort, so a save never fails a turn and a full
+   * disk never fails a task. Callers that need the record durable (a fresh task
+   * whose id is about to be handed out) await it; the process exit does not.
+   */
+  private persist(session: SessionTasks): Promise<void> {
+    return session.store.save([...session.tasks.values()]);
+  }
+
+  private session(scope: TaskScope): Promise<SessionTasks> {
+    const directory = sessionTaskDirectory(scope.cwd, scope.sessionId);
+    const existing = this.sessions.get(directory);
     if (existing !== undefined) return existing;
 
-    const directory = sessionTaskDirectory(scope.cwd, scope.sessionId);
+    const opened = this.openSession(directory);
+    this.sessions.set(directory, opened);
+    return opened;
+  }
+
+  private async openSession(directory: string): Promise<SessionTasks> {
     await mkdir(directory, { recursive: true });
-    const created: SessionTasks = {
-      directory,
-      tasks: new Map(),
-      running: new Map(),
-    };
-    this.sessions.set(scope.sessionId, created);
-    return created;
+    const store = new TaskStore(directory, { now: this.now });
+    const tasks = new Map<string, Task>();
+    for (const record of await store.load()) {
+      tasks.set(record.id, await this.withCurrentOutput(record));
+    }
+    return { directory, store, tasks, running: new Map() };
+  }
+
+  /**
+   * A record read from disk carries the output size it was last written with. The
+   * file itself is the truth: a crash can lose the last save, not the bytes.
+   */
+  private async withCurrentOutput(record: Task): Promise<Task> {
+    if (record.kind !== "process") return record;
+    try {
+      const info = await stat(record.outputPath);
+      return { ...record, outputBytes: info.size };
+    } catch {
+      return record;
+    }
   }
 
   private createId(session: SessionTasks): string {

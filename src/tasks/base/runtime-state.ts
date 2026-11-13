@@ -28,6 +28,27 @@ export function sessionTaskDirectory(cwd: string, sessionId: string): string {
   return join(cwd, RUNTIME_STATE_DIRECTORY, safeSegment(sessionId));
 }
 
+/** One record file per session holds both kinds; `.prev` is its previous generation. */
+export const TASK_RECORD_FILE = "tasks.json";
+export const PREVIOUS_TASK_RECORD_FILE = `${TASK_RECORD_FILE}.prev`;
+
+/** Which session's tasks are meant. Both fields come from the turn. */
+export interface TaskScope {
+  /** Directory the session runs in; its `.pi/` holds runtime state. */
+  cwd: string;
+  sessionId: string;
+}
+
+/** The record file of one session's tasks, next to their output files. */
+export function taskRecordPath(directory: string): string {
+  return join(directory, TASK_RECORD_FILE);
+}
+
+/** The previous generation of the record file, read when the current one is corrupt. */
+export function previousTaskRecordPath(directory: string): string {
+  return join(directory, PREVIOUS_TASK_RECORD_FILE);
+}
+
 /** Output file of one process task: both streams, one file, appended in order. */
 export function processOutputPath(directory: string, taskId: string): string {
   return join(directory, `${taskId}.output`);
