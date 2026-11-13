@@ -113,6 +113,80 @@ describe("loop tools", () => {
     expect(detailsOf(result).id).toBeUndefined();
   });
 
+  it("takes a five-field cron expression and lists its raw text and next fire", async () => {
+    const task = await setup();
+    const created = await createLoop(task.harness, {
+      schedule: "0 9 * * 1-5",
+      prompt: "review the day",
+    });
+
+    expect(created.schedule).toBe("0 9 * * 1-5");
+    const nextFireAt = created.nextFireAt;
+    if (nextFireAt === undefined) throw new Error("a cron loop must have a next fire");
+    const next = new Date(nextFireAt);
+    expect(next.getHours()).toBe(9);
+    expect(next.getMinutes()).toBe(0);
+    expect([1, 2, 3, 4, 5]).toContain(next.getDay());
+    expect(nextFireAt).toBeGreaterThan(task.now);
+
+    const text = resultText(await task.harness.call("loop_list", {}));
+    expect(text).toContain("schedule: 0 9 * * 1-5");
+    expect(text).toContain(`next fire: ${next.toISOString()}`);
+  });
+
+  it("waits for the cron instant, then recomputes the next one", async () => {
+    const task = await setup();
+    const created = await createLoop(task.harness, {
+      schedule: "0 9 * * 1-5",
+      prompt: "review the day",
+    });
+    const first = created.nextFireAt;
+    if (first === undefined) throw new Error("a cron loop must have a next fire");
+
+    task.advance(first - task.now - 1);
+    expect(await task.harness.pump(task.now)).toEqual([]);
+    expect(task.harness.messages).toEqual([]);
+
+    task.advance(1);
+    expect(await task.harness.pump(task.now)).toHaveLength(1);
+    expect(task.harness.messages).toHaveLength(1);
+
+    const listed = detailsOf(await task.harness.call("loop_list", { id: created.id }));
+    expect(listed.fires).toBe(1);
+    if (listed.nextFireAt === undefined) throw new Error("the loop must keep a next fire");
+    expect(listed.nextFireAt).toBeGreaterThan(first);
+    expect(new Date(listed.nextFireAt).getHours()).toBe(9);
+  });
+
+  it("refuses a six-field cron expression and points at the interval shorthand", async () => {
+    const task = await setup();
+    const result = await task.harness.call("loop_create", {
+      schedule: "0 0 9 * * 1-5",
+      prompt: "keep going",
+    });
+
+    const text = resultText(result);
+    expect(text).toContain('Invalid schedule "0 0 9 * * 1-5"');
+    expect(text).toContain("six fields");
+    expect(text).toContain("30s, 10m or 2h");
+    expect(text).toContain("0 9 * * 1-5");
+    expect(detailsOf(result).id).toBeUndefined();
+  });
+
+  it("refuses an invalid cron expression at create time and names both shapes", async () => {
+    const task = await setup();
+    const result = await task.harness.call("loop_create", {
+      schedule: "0 25 * * *",
+      prompt: "keep going",
+    });
+
+    const text = resultText(result);
+    expect(text).toContain('Invalid schedule "0 25 * * *"');
+    expect(text).toContain("30s, 10m or 2h");
+    expect(text).toContain("0 9 * * 1-5");
+    expect(detailsOf(result).id).toBeUndefined();
+  });
+
   it("rejects a bad maxFires and a bad expiresIn", async () => {
     const task = await setup();
     const badMax = await task.harness.call("loop_create", {
