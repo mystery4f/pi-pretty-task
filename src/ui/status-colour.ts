@@ -12,6 +12,8 @@ import type { TaskStatus } from "../tasks/base/task.js";
 /** Theme foreground token per ending, so the palette stays the user's theme. */
 export const STATUS_COLOUR: Record<TaskStatus, ThemeColor> = {
   running: "accent",
+  /** A paused loop task is neither running nor finished. */
+  paused: "muted",
   completed: "success",
   failed: "error",
   killed: "warning",

@@ -82,7 +82,10 @@ describe("the output cap configuration", () => {
 
   it("fails the extension load instead of turning an invalid value into NaN", () => {
     expect(() =>
-      createHarness({ cwd: ".", sessionId: "session-bad-cap" }, { [OUTPUT_CAP_ENV]: "lots" }),
+      createHarness(
+        { cwd: ".", sessionId: "session-bad-cap" },
+        { env: { [OUTPUT_CAP_ENV]: "lots" } },
+      ),
     ).toThrow(/PI_PRETTY_TASK_OUTPUT_CAP_BYTES.*received "lots"/);
   });
 });
@@ -107,7 +110,7 @@ describe("the output cap", () => {
     const cap = 64 * 1024;
     const harness = createHarness(
       { cwd: dir.path, sessionId: "session-output-cap" },
-      { [OUTPUT_CAP_ENV]: String(cap) },
+      { env: { [OUTPUT_CAP_ENV]: String(cap) } },
     );
 
     const started = await harness.call("bg_run", { command, name: "flood" });
@@ -143,7 +146,7 @@ describe("the output cap", () => {
     );
     const harness = createHarness(
       { cwd: dir.path, sessionId: "session-output-at-cap" },
-      { [OUTPUT_CAP_ENV]: String(cap) },
+      { env: { [OUTPUT_CAP_ENV]: String(cap) } },
     );
 
     const started = await harness.call("bg_run", { command, name: "exact" });

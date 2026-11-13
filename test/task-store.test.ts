@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { previousTaskRecordPath, taskRecordPath } from "../src/tasks/base/runtime-state.js";
-import type { ProcessTask, Task } from "../src/tasks/base/task.js";
+import type { LoopTask, ProcessTask } from "../src/tasks/base/task.js";
 import { TaskStore } from "../src/tasks/base/task-store.js";
 import { makeTempDir } from "./support/processes.js";
 
@@ -44,11 +44,8 @@ function processTask(overrides: Partial<ProcessTask> = {}): ProcessTask {
   };
 }
 
-/**
- * The loop arm does not exist in the type yet; the file must already carry its
- * records so the loop ticket can land without changing the schema.
- */
-function loopRecord(overrides: Record<string, unknown> = {}): Task {
+/** A loop arm record, plus one field this version does not know, to prove it round-trips. */
+function loopRecord(overrides: Partial<LoopTask> = {}): LoopTask {
   return {
     id: "lp12cd",
     kind: "loop",
@@ -56,12 +53,14 @@ function loopRecord(overrides: Record<string, unknown> = {}): Task {
     status: "completed",
     createdAt: 1_700_000_000_000,
     endedAt: 1_700_000_002_000,
-    intervalMs: 300_000,
+    schedule: "5m",
     prompt: "review the diff",
     maxFires: 10,
+    fires: 3,
     nextFireAt: 1_700_000_300_000,
+    intervalMs: 300_000,
     ...overrides,
-  } as unknown as Task;
+  } as LoopTask;
 }
 
 describe("the task record file", () => {
@@ -155,5 +154,17 @@ describe("the task record file", () => {
     expect(record.pid).toBeUndefined();
     expect(record.name).toBe("left behind");
     expect(record.outputBytes).toBe(12);
+  });
+
+  it("keeps a running loop schedule across a restart", async () => {
+    const directory = await stateDirectory();
+    const loop = loopRecord({ status: "running", fires: 2 });
+    delete loop.endedAt;
+    await new TaskStore(directory).save([loop]);
+
+    const loaded = await new TaskStore(directory, { now: () => 1_700_000_009_000 }).load();
+
+    // A loop owns no process, so starting the store does not end it.
+    expect(loaded).toEqual([loop]);
   });
 });

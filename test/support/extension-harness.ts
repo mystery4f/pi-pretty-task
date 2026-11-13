@@ -21,7 +21,8 @@ import type {
 
 import type { Component, KeybindingsManager, TUI } from "@earendil-works/pi-tui";
 
-import extension from "../../src/index.js";
+import { createExtension } from "../../src/index.js";
+import type { LoopFire } from "../../src/tasks/loop/loop-tasks.js";
 
 /** One turn's view of the session: its working directory and session id. */
 export interface Turn {
@@ -42,6 +43,13 @@ export interface SentMessage {
   };
 }
 
+/** Knobs the tests need so no real timer or wall clock drives a loop. */
+export interface HarnessOptions {
+  readonly now?: () => number;
+  /** Environment the extension reads its configuration from; defaults to `process.env`. */
+  readonly env?: NodeJS.ProcessEnv;
+}
+
 export interface Harness {
   /** Names of every tool the extension registered. */
   readonly toolNames: readonly string[];
@@ -55,7 +63,6 @@ export interface Harness {
     params: Record<string, unknown>,
     turn?: Turn,
   ): Promise<AgentToolResult<unknown>>;
-  /** Draw a sent message through the renderer registered for its custom type. */
   /** Draw a custom message through the renderer registered for its type. */
   render(customType: string, details: unknown, options?: Partial<MessageRenderOptions>): string;
   /** Names of every command the extension registered. */
@@ -70,6 +77,10 @@ export interface Harness {
   readonly statuses: readonly StatusUpdate[];
   /** Keys passed to `setWidget`; stays empty because the panel is not a widget. */
   readonly widgetKeys: readonly string[];
+  /** Pump loops due at a fake instant, as the extension timer would. */
+  pump(at: number): Promise<LoopFire[]>;
+  /** Run the extension's session_start handlers for a turn. */
+  startSession(turn?: Turn): Promise<void>;
 }
 
 /** One call the extension made to `ctx.ui.setStatus`. */
@@ -125,11 +136,13 @@ export function fakeTheme(): Theme {
  *
  * The environment is explicit so a test can set a limit without touching the
  * process's own environment, and so an invalid value can be handed to the loader.
+ * The clock and the pump are explicit too, so no real timer drives a loop.
  */
-export function createHarness(defaultTurn: Turn, env: NodeJS.ProcessEnv = process.env): Harness {
+export function createHarness(defaultTurn: Turn, options: HarnessOptions = {}): Harness {
   const tools: ToolDefinition[] = [];
   const renderers = new Map<string, MessageRenderer>();
   const messages: SentMessage[] = [];
+  const handlers = new Map<string, Array<(event: unknown, ctx: unknown) => unknown>>();
   const commands = new Map<string, CommandDefinition>();
   const statuses: StatusUpdate[] = [];
   const widgetKeys: string[] = [];
@@ -190,6 +203,12 @@ export function createHarness(defaultTurn: Turn, env: NodeJS.ProcessEnv = proces
     registerMessageRenderer(customType: string, renderer: MessageRenderer): void {
       renderers.set(customType, renderer);
     },
+    on(event: string, handler: (event: unknown, ctx: unknown) => unknown): () => void {
+      const list = handlers.get(event) ?? [];
+      list.push(handler);
+      handlers.set(event, list);
+      return () => undefined;
+    },
     sendMessage(
       message: {
         customType: string;
@@ -209,7 +228,11 @@ export function createHarness(defaultTurn: Turn, env: NodeJS.ProcessEnv = proces
     },
   };
 
-  extension(api as unknown as ExtensionAPI, env);
+  const controller = createExtension(api as unknown as ExtensionAPI, {
+    now: options.now,
+    env: options.env ?? process.env,
+    pumpIntervalMs: 0,
+  });
 
   return {
     toolNames: tools.map((tool) => tool.name),
@@ -259,6 +282,14 @@ export function createHarness(defaultTurn: Turn, env: NodeJS.ProcessEnv = proces
     lastCustomOptions: () => opened?.options,
     statuses,
     widgetKeys,
+    pump(at) {
+      return controller.pump(at);
+    },
+    async startSession(turn = defaultTurn) {
+      for (const handler of handlers.get("session_start") ?? []) {
+        await handler({ type: "session_start", reason: "startup" }, createToolContext(turn));
+      }
+    },
   };
 }
 

@@ -394,15 +394,19 @@ export class TasksPanel implements Component {
       this.field("status", theme.fg(colour, task.status)),
       this.field("kind", task.kind),
       this.field("elapsed", formatDuration(row.elapsedMs)),
-      this.field("output", `${formatSize(row)} · ${task.outputPath}`),
+      this.field("output", formatSize(row)),
     ];
-    if (task.pid !== undefined) lines.push(this.field("pid", String(task.pid)));
-    if (task.kind === "process") lines.push(this.field("command", task.command));
-    if (task.cwd !== undefined) lines.push(this.field("cwd", task.cwd));
-    if (task.exitCode !== undefined) {
-      lines.push(this.field("exit code", theme.fg(colour, String(task.exitCode))));
+    // Only a process task carries the process facts; a loop task has none of them.
+    if (task.kind === "process") {
+      if (task.pid !== undefined) lines.push(this.field("pid", String(task.pid)));
+      lines.push(this.field("command", task.command));
+      lines.push(this.field("output file", task.outputPath));
+      if (task.cwd !== undefined) lines.push(this.field("cwd", task.cwd));
+      if (task.exitCode !== undefined) {
+        lines.push(this.field("exit code", theme.fg(colour, String(task.exitCode))));
+      }
+      if (task.killReason !== undefined) lines.push(this.field("kill reason", task.killReason));
     }
-    if (task.killReason !== undefined) lines.push(this.field("kill reason", task.killReason));
     if (task.error !== undefined) lines.push(this.field("error", theme.fg(colour, task.error)));
 
     lines.push("");
