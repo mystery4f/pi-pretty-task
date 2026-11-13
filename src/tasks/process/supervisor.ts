@@ -105,6 +105,14 @@ export interface StartProcessOptions {
   cwd: string;
   /** Output file; created or appended to. */
   outputPath: string;
+  /**
+   * Bytes the output file may hold. Chunks that would cross the cap are kept up
+   * to the cap and then dropped, so the file stops on the exact byte while the
+   * stop travels to the tree.
+   */
+  maxOutputBytes?: number;
+  /** Called once, when a chunk is dropped for crossing `maxOutputBytes`. */
+  onOutputCap?: () => void;
   platform?: NodeJS.Platform;
   env?: NodeJS.ProcessEnv;
 }
@@ -141,14 +149,27 @@ export function startProcess(options: StartProcessOptions): RunningProcess {
     windowsVerbatimArguments: invocation.windowsVerbatimArguments,
   });
 
-  child.stdout?.on("data", (chunk: Buffer) => {
-    bytesWritten += chunk.length;
-    output.write(chunk);
-  });
-  child.stderr?.on("data", (chunk: Buffer) => {
-    bytesWritten += chunk.length;
-    output.write(chunk);
-  });
+  // The cap has to hold while the stop travels, and a runaway command keeps
+  // writing until its tree is gone. Later chunks are still read and dropped:
+  // leaving them in a full pipe would block the child instead of stopping it.
+  // The callback fires on the first dropped byte, so a command that ends exactly
+  // on the cap is not reported as having crossed it.
+  const cap = options.maxOutputBytes;
+  let overCap = false;
+  const capture = (chunk: Buffer): void => {
+    const room = cap === undefined ? chunk.length : cap - bytesWritten;
+    if (room > 0) {
+      const kept = chunk.length <= room ? chunk : chunk.subarray(0, room);
+      bytesWritten += kept.length;
+      output.write(kept);
+    }
+    if (cap !== undefined && !overCap && chunk.length > room) {
+      overCap = true;
+      options.onOutputCap?.();
+    }
+  };
+  child.stdout?.on("data", capture);
+  child.stderr?.on("data", capture);
 
   const exit = new Promise<ProcessExit>((resolve, reject) => {
     // First settlement wins: a spawn failure and a close can both arrive.

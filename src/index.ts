@@ -8,6 +8,7 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { parseOutputCapBytes } from "./tasks/process/limits.js";
 import { ProcessTasks } from "./tasks/process/process-tasks.js";
 import { processTaskTools } from "./tasks/process/tools.js";
 import {
@@ -16,9 +17,17 @@ import {
   TASK_FINISHED_CUSTOM_TYPE,
 } from "./ui/notification.js";
 
-/** Extension entry: register this package's tools on the running pi. */
-export default function extension(pi: ExtensionAPI): void {
+/**
+ * Extension entry: register this package's tools on the running pi.
+ *
+ * Configuration is read here, before anything is registered: a value that is
+ * not usable has to fail the load with a message that names the key, because a
+ * limit that silently becomes `NaN` would end every task on its first byte.
+ */
+export default function extension(pi: ExtensionAPI, env: NodeJS.ProcessEnv = process.env): void {
+  const outputCapBytes = parseOutputCapBytes(env);
   const processTasks = new ProcessTasks({
+    outputCapBytes,
     // The store does not await the announcement; a notice outlives the task.
     onFinish: (view) => {
       void notifyTaskFinished(pi, view);

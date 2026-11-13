@@ -17,12 +17,19 @@ import type {
 import { Type } from "typebox";
 import { commandPreview, formatBytes, formatDuration } from "../base/format.js";
 
+import { parseTimeoutSeconds } from "./limits.js";
 import type { ProcessTasks, ProcessTaskView, TaskScope } from "./process-tasks.js";
 
 const RunParameters = Type.Object({
   command: Type.String({ description: "Shell command to run in the background." }),
   name: Type.Optional(
     Type.String({ description: "Short label for the task; defaults to the command itself." }),
+  ),
+  timeoutSeconds: Type.Optional(
+    Type.Number({
+      description:
+        "Optional runtime cap in seconds. When it passes, the task is stopped with kill reason `timeout`; without it the task runs until it ends or is stopped.",
+    }),
   ),
 });
 
@@ -53,8 +60,8 @@ const DEFAULT_LOG_LINES = 50;
 const MAX_LOG_LINES = 2000;
 /**
  * `full` reads a much larger window than a tail, but still a window: the output
- * cap ticket owns the real ceiling, and this bound keeps one call from reading
- * an arbitrarily large file into memory.
+ * cap bounds the file (20 MiB unless configured), and this bound keeps one call
+ * from reading all of it into memory.
  */
 const FULL_MAX_BYTES = 4 * 1024 * 1024;
 const COMMAND_PREVIEW_LENGTH = 80;
@@ -114,10 +121,22 @@ export function processTaskTools(tasks: ProcessTasks): ToolDefinition[] {
       "Run a shell command in the background and return a task id at once, without waiting for the command to finish. stdout and stderr are captured together in one output file.",
     parameters: RunParameters,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      // A bad runtime is reported before anything is spawned: a task that can
+      // never be capped is worse than a rejected request.
+      let timeoutMs: number | undefined;
+      if (params.timeoutSeconds !== undefined) {
+        try {
+          timeoutMs = parseTimeoutSeconds(params.timeoutSeconds);
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : String(error);
+          return text(`${reason} The task was not started.`);
+        }
+      }
       const task = await tasks.start({
         ...scopeOf(ctx),
         command: params.command,
         ...(params.name === undefined ? {} : { name: params.name }),
+        ...(timeoutMs === undefined ? {} : { timeoutMs }),
       });
       const view = (await tasks.get(scopeOf(ctx), task.id)) ?? {
         task,
@@ -213,6 +232,9 @@ export function processTaskTools(tasks: ProcessTasks): ToolDefinition[] {
       const header = [
         `${view.task.name} · ${view.task.id} · ${view.task.kind} · ${view.task.status}`,
         `elapsed ${formatDuration(view.elapsedMs)} · output ${formatBytes(view.outputBytes)}`,
+        // The output is the story here, so the reason it stopped belongs in the
+        // same header as the status instead of being a line the reader must ask for.
+        ...(view.task.killReason === undefined ? [] : [`kill reason: ${view.task.killReason}`]),
       ].join("\n");
       const note = tail.truncated ? `\n(showing the last ${String(tail.lines)} lines)` : "";
       const body = tail.text.length > 0 ? tail.text : "(no output yet)";
@@ -224,6 +246,7 @@ export function processTaskTools(tasks: ProcessTasks): ToolDefinition[] {
           lines: tail.lines,
           truncated: tail.truncated,
           outputBytes: view.outputBytes,
+          killReason: view.task.killReason,
         },
       };
     },

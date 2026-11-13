@@ -19,6 +19,7 @@ import type { TaskScope } from "../base/runtime-state.js";
 import { processOutputPath, sessionTaskDirectory } from "../base/runtime-state.js";
 import type { KillReason, ProcessTask, Task } from "../base/task.js";
 import { TaskStore } from "../base/task-store.js";
+import { DEFAULT_OUTPUT_CAP_BYTES } from "./limits.js";
 import { type RunningProcess, type StopOutcome, startProcess } from "./supervisor.js";
 
 export type { TaskScope };
@@ -26,6 +27,11 @@ export type { TaskScope };
 export interface StartProcessTaskInput extends TaskScope {
   command: string;
   name?: string;
+  /**
+   * Runtime cap in whole milliseconds, measured from the start. The tool parses
+   * seconds; the record and the timer speak milliseconds.
+   */
+  timeoutMs?: number;
 }
 
 /** A task as it looks right now: the record plus the values that keep moving. */
@@ -68,6 +74,8 @@ export interface ProcessTasksOptions {
   killGraceMs?: number;
   /** How long a forced kill gets to clear the tree; defaults to the supervisor's. */
   killConfirmMs?: number;
+  /** Bytes a task's output may hold; defaults to the documented 20 MiB. */
+  outputCapBytes?: number;
   /**
    * Called once for every task that ends, with the record as it stands after
    * the final status was written. Announcing the task — a session message, a
@@ -87,6 +95,14 @@ interface SessionTasks {
   readonly running: Map<string, RunningProcess>;
   /** Why each running task is being stopped, kept until its exit is booked. */
   readonly killReasons: Map<string, KillReason>;
+  /**
+   * The limits that have already ended tasks. Separate from `killReasons`
+   * because a limit ends the task whether or not a signal reached it: a capped
+   * command can exit on the same tick as the dropped byte.
+   */
+  readonly limitReasons: Map<string, KillReason>;
+  /** Pending runtime caps, kept so a natural end can cancel its timer. */
+  readonly runtimeCaps: Map<string, ReturnType<typeof setTimeout>>;
 }
 
 /** No 0/O/1/l: an id is meant to be retyped by a human into a later message. */
@@ -156,6 +172,7 @@ export class ProcessTasks {
   private readonly sessions = new Map<string, Promise<SessionTasks>>();
   private readonly killGraceMs: number | undefined;
   private readonly killConfirmMs: number | undefined;
+  private readonly outputCapBytes: number;
   private readonly onFinish: ((view: ProcessTaskView) => void) | undefined;
 
   constructor(options: ProcessTasksOptions = {}) {
@@ -164,6 +181,7 @@ export class ProcessTasks {
     this.now = options.now ?? Date.now;
     this.killGraceMs = options.killGraceMs;
     this.killConfirmMs = options.killConfirmMs;
+    this.outputCapBytes = options.outputCapBytes ?? DEFAULT_OUTPUT_CAP_BYTES;
     this.onFinish = options.onFinish;
   }
 
@@ -192,6 +210,14 @@ export class ProcessTasks {
         command: task.command,
         cwd: task.cwd,
         outputPath: task.outputPath,
+        maxOutputBytes: this.outputCapBytes,
+        onOutputCap: () => {
+          // The reason is recorded here, before the stop is asked for: a command
+          // can exit on the same tick as the dropped byte, and that exit must
+          // not turn a capped task back into a completed one.
+          session.limitReasons.set(id, "output_cap");
+          void this.stop(input, id, { reason: "output_cap" });
+        },
         platform: this.platform,
         env: this.env,
       });
@@ -213,6 +239,7 @@ export class ProcessTasks {
         this.finish(session, task, running, null, errorMessage(error));
       },
     );
+    this.scheduleRuntimeCap(session, input, id, input.timeoutMs);
 
     return task;
   }
@@ -267,8 +294,11 @@ export class ProcessTasks {
     }
 
     // The reason rides with the task, not with the signal: the supervisor only
-    // reports whether anything was signalled, the store knows who asked.
-    session.killReasons.set(id, options.reason ?? "user");
+    // reports whether anything was signalled, the store knows who asked. The
+    // first ask wins — a second stop joins the one already in flight instead of
+    // relabelling its end.
+    if (!session.killReasons.has(id)) session.killReasons.set(id, options.reason ?? "user");
+    this.clearRuntimeCap(session, id);
     const stopped = await running.stop({
       graceMs: options.graceMs ?? this.killGraceMs,
       confirmMs: options.confirmMs ?? this.killConfirmMs,
@@ -309,10 +339,17 @@ export class ProcessTasks {
     failure?: string,
   ): void {
     session.running.delete(task.id);
-    // A reason only counts when a signal actually went out: a task that ended on
-    // its own during a stop keeps its natural end instead of becoming a kill.
-    const killReason = running.signalled() ? session.killReasons.get(task.id) : undefined;
+    this.clearRuntimeCap(session, task.id);
+    // A limit ends the task whether or not a signal reached it: the dropped byte
+    // is the end of the story even when the command exits on the same tick.
+    const limitReason = session.limitReasons.get(task.id);
+    // A stop of our own only counts when a signal actually went out: a task that
+    // ended on its own during a stop keeps its natural end instead of becoming
+    // a kill.
+    const stopReason = running.signalled() ? session.killReasons.get(task.id) : undefined;
+    const killReason = limitReason ?? stopReason;
     session.killReasons.delete(task.id);
+    session.limitReasons.delete(task.id);
     task.outputBytes = running.bytesWritten();
     // A stop that was already answered settled this record; a late exit may only
     // improve its byte count, never overwrite what the kill said.
@@ -344,6 +381,33 @@ export class ProcessTasks {
   }
 
   /**
+   * Stop the task when its runtime cap passes. The stop is the same one the user
+   * would ask for, with the reason recorded, so a task that outlived its cap ends
+   * `killed` / `timeout` rather than `failed`.
+   */
+  private scheduleRuntimeCap(
+    session: SessionTasks,
+    scope: TaskScope,
+    id: string,
+    timeoutMs: number | undefined,
+  ): void {
+    if (timeoutMs === undefined) return;
+    const timer = setTimeout(() => {
+      void this.stop(scope, id, { reason: "timeout" });
+    }, timeoutMs);
+    // A waiting cap must not be the reason the host process stays alive.
+    timer.unref();
+    session.runtimeCaps.set(id, timer);
+  }
+
+  /** Cancel a task's runtime cap; a task that ends on its own leaves no timer. */
+  private clearRuntimeCap(session: SessionTasks, id: string): void {
+    const timer = session.runtimeCaps.get(id);
+    if (timer !== undefined) clearTimeout(timer);
+    session.runtimeCaps.delete(id);
+  }
+
+  /**
    * Hand the current records to the store. The store queues its own writes and
    * treats persistence as best effort, so a save never fails a turn and a full
    * disk never fails a task. Callers that need the record durable (a fresh task
@@ -370,7 +434,15 @@ export class ProcessTasks {
     for (const record of await store.load()) {
       tasks.set(record.id, await this.withCurrentOutput(record));
     }
-    return { directory, store, tasks, running: new Map(), killReasons: new Map() };
+    return {
+      directory,
+      store,
+      tasks,
+      running: new Map(),
+      killReasons: new Map(),
+      limitReasons: new Map(),
+      runtimeCaps: new Map(),
+    };
   }
 
   /**
