@@ -1,0 +1,18 @@
+node_modules/
+dist/
+coverage/
+.artifacts/
+*.tsbuildinfo
+*.log
+
+# local plugin state (runtime data, not source)
+.pi/
+
+# scratch space for probes and upstream clones
+.tmp/
+
+.DS_Store
+Thumbs.db
+
+# regenerable wiki search index (rebuild with wiki_reindex)
+.llm-wiki/meta/qmd/
