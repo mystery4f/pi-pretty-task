@@ -58,3 +58,13 @@ export async function killTree(pid: number | undefined): Promise<void> {
     resolve();
   });
 }
+
+/** True while a process with this pid exists. */
+export function isAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}

@@ -13,6 +13,14 @@
 /** Lifecycle of a task, shared by both kinds. */
 export type TaskStatus = "running" | "completed" | "failed" | "killed" | "interrupted";
 
+/**
+ * Why a running task was stopped, in the glossary's four words: the user asked,
+ * a timeout ran out, the output cap was reached, or the process is shutting down.
+ * A killed task always carries one, so a reader can tell a user's decision from
+ * the system's.
+ */
+export type KillReason = "user" | "timeout" | "output_cap" | "shutdown";
+
 /** Which kind of work a task represents. */
 export type TaskKind = "process" | "loop";
 
@@ -43,6 +51,8 @@ export interface ProcessTask extends TaskBase {
   outputBytes: number;
   /** Why the task ended abnormally, when that is known. */
   error?: string;
+  /** Present exactly when the task was killed, naming who asked for the kill. */
+  killReason?: KillReason;
 }
 
 /** One tracked unit of work. Grows an arm per kind; never a second list. */
