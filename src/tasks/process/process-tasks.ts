@@ -68,8 +68,13 @@ export interface ProcessTasksOptions {
   killGraceMs?: number;
   /** How long a forced kill gets to clear the tree; defaults to the supervisor's. */
   killConfirmMs?: number;
+  /**
+   * Called once for every task that ends, with the record as it stands after
+   * the final status was written. Announcing the task — a session message, a
+   * panel refresh — is the caller's business, so this store stays silent.
+   */
+  onFinish?: (view: ProcessTaskView) => void;
 }
-
 interface SessionTasks {
   readonly directory: string;
   readonly tasks: Map<string, ProcessTask>;
@@ -140,6 +145,7 @@ export class ProcessTasks {
   private readonly sessions = new Map<string, SessionTasks>();
   private readonly killGraceMs: number | undefined;
   private readonly killConfirmMs: number | undefined;
+  private readonly onFinish: ((view: ProcessTaskView) => void) | undefined;
 
   constructor(options: ProcessTasksOptions = {}) {
     this.platform = options.platform ?? process.platform;
@@ -147,6 +153,7 @@ export class ProcessTasks {
     this.now = options.now ?? Date.now;
     this.killGraceMs = options.killGraceMs;
     this.killConfirmMs = options.killConfirmMs;
+    this.onFinish = options.onFinish;
   }
 
   /** Start a command in the background and return its record immediately. */
@@ -304,15 +311,16 @@ export class ProcessTasks {
     if (failure !== undefined) {
       task.status = "failed";
       task.error = failure;
-      return;
-    }
-    if (exitCode === 0) {
+    } else if (exitCode === 0) {
       task.status = "completed";
-      return;
+    } else {
+      task.status = "failed";
+      task.error =
+        exitCode === null
+          ? "the command was terminated by a signal"
+          : `exited with code ${exitCode}`;
     }
-    task.status = "failed";
-    task.error =
-      exitCode === null ? "the command was terminated by a signal" : `exited with code ${exitCode}`;
+    this.onFinish?.(this.view(session, task));
   }
 
   private async session(scope: TaskScope): Promise<SessionTasks> {
