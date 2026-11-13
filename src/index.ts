@@ -16,9 +16,10 @@ import {
   renderTaskFinished,
   TASK_FINISHED_CUSTOM_TYPE,
 } from "./ui/notification.js";
+import { registerTasksCommand } from "./ui/tasks-command.js";
 
 /**
- * Extension entry: register this package's tools on the running pi.
+ * Extension entry: register this package's tools and commands on the running pi.
  *
  * Configuration is read here, before anything is registered: a value that is
  * not usable has to fail the load with a message that names the key, because a
@@ -35,4 +36,5 @@ export default function extension(pi: ExtensionAPI, env: NodeJS.ProcessEnv = pro
   });
   pi.registerMessageRenderer(TASK_FINISHED_CUSTOM_TYPE, renderTaskFinished);
   for (const tool of processTaskTools(processTasks)) pi.registerTool(tool);
+  registerTasksCommand(pi, processTasks);
 }

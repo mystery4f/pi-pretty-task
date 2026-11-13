@@ -6,7 +6,7 @@
  * @author mystery4f <40482524+mystery4f@users.noreply.github.com>
  */
 
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { sessionTaskDirectory, taskRecordPath } from "../src/tasks/base/runtime-state.js";
@@ -165,12 +165,16 @@ describe("recovery after a crash", () => {
     await waitForStatus(before, started.id, "completed");
 
     // Starting and finishing wrote two generations, so a damaged current file
-    // still has the one written by bg_run behind it.
-    await writeFile(
-      taskRecordPath(sessionTaskDirectory(cwd, turn.sessionId)),
-      '{"version":1,"tasks":[',
-      "utf8",
-    );
+    // still has the one written by bg_run behind it. The store writes behind the
+    // in-memory status, so wait for the finished generation to land first — a
+    // clobber that races the store's own rename can rotate the damage into .prev
+    // and leave nothing to fall back to.
+    const recordPath = taskRecordPath(sessionTaskDirectory(cwd, turn.sessionId));
+    await waitFor("the finished generation to reach disk", async () => {
+      const text = await readFile(recordPath, "utf8").catch(() => "");
+      return text.includes('"status": "completed"');
+    });
+    await writeFile(recordPath, '{"version":1,"tasks":[', "utf8");
 
     const after = createHarness(turn);
     const restored = await status(after, started.id);
