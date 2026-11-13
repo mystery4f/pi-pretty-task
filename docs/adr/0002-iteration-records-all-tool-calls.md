@@ -1,6 +1,6 @@
 # Iteration 记录该轮全部工具调用
 
-一次 Loop 触发唤醒的那一轮执行记为一条 Iteration，通过 `pi.on("tool_execution_start")` / `tool_execution_end` 把该轮内**所有**工具调用记入 Iteration，而不只是 `bg_run` 起的后台任务。
+Iteration 是 Loop task 的子记录，不是 Task：它不进面板的列表行，只在该 Loop task 的详情里展开。一次 Loop 触发唤醒的那一轮执行记为一条 Iteration，通过 `pi.on("tool_execution_start")` / `pi.on("tool_execution_end")` 把该轮内**所有**工具调用记入 Iteration，而不只是 `bg_run` 起的后台任务。
 
 ## Considered Options
 

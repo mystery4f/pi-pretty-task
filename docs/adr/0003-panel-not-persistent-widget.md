@@ -1,6 +1,6 @@
 # 面板用状态栏 + 浮层，不做常驻 widget
 
-任务列表通过 `/tasks` 打开的浮层呈现，关闭时只在状态栏留一行摘要。pi 提供了 `ctx.ui.setWidget`（编辑器上方常驻区），我们明确不用。
+Task 列表（`process` 与 `loop` 两种 kind 混排在一张表）通过 `/tasks` 打开的浮层呈现，关闭时只在状态栏留一行摘要。pi 提供了 `ctx.ui.setWidget`（编辑器上方常驻区），我们明确不用。
 
 ## Considered Options
 

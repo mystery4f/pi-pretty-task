@@ -23,9 +23,10 @@ No subagent/delegate/fusion tools, no `Monitor*`, no `Workflow*`/`Orchestration*
 
 ```
 src/extension.ts        entry: registers tools, commands, events, status line
-src/tasks/              spawn, process-tree kill, output files, snapshots
-src/loops/              schedule store, timers, fire → sendMessage, iteration recording
-src/ui/                 /tasks overlay, detail view, message renderers
+src/tasks/base/         Task supertype: kind-tagged record, store, atomic writes, snapshots
+src/tasks/process/      spawn, process-tree kill, output files, exit codes
+src/tasks/loop/         interval scheduling, pump, fire → sendMessage, iteration recording
+src/ui/                 /tasks overlay (both kinds), detail view, message renderers
 docs/                   scope + ADRs (prose docs in Chinese)
 .llm-wiki/              project wiki; its synthesis page "pi-pretty-task 文档索引" is the docs index
 ```
