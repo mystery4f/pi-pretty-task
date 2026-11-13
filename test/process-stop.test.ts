@@ -149,6 +149,6 @@ describe("the store's kill reason", () => {
     expect(result?.outcome).toBe("killed");
     expect(result?.view.task.status).toBe("killed");
     expect(result?.view.task.killReason).toBe("timeout");
-    expect(tasks.get(scope, task.id)?.task.status).toBe("killed");
+    expect((await tasks.get(scope, task.id))?.task.status).toBe("killed");
   });
 });
