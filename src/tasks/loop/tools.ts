@@ -26,7 +26,8 @@ import {
 
 const CreateParameters = Type.Object({
   schedule: Type.String({
-    description: "When to fire: interval shorthand such as 30s, 10m or 2h. Seconds are allowed.",
+    description:
+      "When to fire: interval shorthand such as 30s, 10m or 2h (seconds allowed), or a five-field cron expression in local time such as 0 9 * * 1-5 (minute hour day-of-month month day-of-week; * every, 1-5 ranges, 9,17 lists, */15 steps). Six fields are refused: use the shorthand for second-level timing.",
   }),
   prompt: Type.String({
     description:
@@ -171,7 +172,7 @@ export function loopTaskTools(loops: LoopTasks): ToolDefinition[] {
     name: "loop_create",
     label: "Create a loop",
     description:
-      "Schedule a prompt to be sent into this session on an interval, starting a new agent turn each time the loop fires. This does not run a command; the prompt is the work. Use loop_list to watch it and loop_delete to stop it.",
+      "Schedule a prompt to be sent into this session, starting a new agent turn each time the loop fires. The schedule is an interval (30s, 10m, 2h) or a five-field cron expression in local time (0 9 * * 1-5). This does not run a command; the prompt is the work. Use loop_list to watch it and loop_delete to stop it.",
     parameters: CreateParameters,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       try {

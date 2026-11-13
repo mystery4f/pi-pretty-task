@@ -2,11 +2,12 @@
  * The schedule seam: raw expression in, next-fire calculation out (ADR-0006).
  *
  * The pump, the tools and the panel depend only on {@link Recurrence}, never on
- * interval parsing itself. Cron lands later by extending {@link parseSchedule};
- * nothing else has to learn a second syntax.
+ * interval parsing itself. Interval shorthand and five-field cron both resolve
+ * here (ADR-0006); nothing else has to learn a second syntax.
  *
  * @author mystery4f <40482524+mystery4f@users.noreply.github.com>
  */
+import { parseCron } from "./cron.js";
 
 /** A schedule resolved to the one calculation the pump needs. */
 export interface Recurrence {
@@ -41,18 +42,48 @@ export function parseDurationMs(input: string): number | undefined {
   return durationMs;
 }
 
+/** Why a schedule expression was refused; the caller turns it into the message. */
+export type ScheduleProblem = "invalid" | "six-field";
+
+/** One raw expression, resolved or refused with the shape that was wrong. */
+export type ScheduleResolution =
+  | { readonly kind: "resolved"; readonly recurrence: Recurrence }
+  | { readonly kind: "rejected"; readonly problem: ScheduleProblem };
+
 /**
- * Resolves a raw schedule expression. Interval shorthand is accepted today;
- * a five-field cron expression becomes accepted here in the cron ticket.
+ * Resolves a raw schedule expression onto {@link Recurrence}: interval shorthand
+ * (`30s`, `10m`, `2h`) or a five-field cron expression (`0 9 * * 1-5`, ADR-0006).
+ *
+ * A refusal says which shape was wrong and nothing more: six whitespace-separated
+ * fields is a cron expression written with the seconds column, which cron here
+ * does not take, while everything else is simply invalid. The parser holds no
+ * prose; the caller names the accepted shapes (ADR-0006).
  */
-export function parseSchedule(expression: string): Recurrence | undefined {
+export function resolveSchedule(expression: string): ScheduleResolution {
   const text = expression.trim();
   const intervalMs = parseDurationMs(text);
-  if (intervalMs === undefined) return undefined;
+  if (intervalMs !== undefined) {
+    return {
+      kind: "resolved",
+      recurrence: {
+        expression: text,
+        // An interval always has another fire; only calendar schedules can run out.
+        nextFire: (after) => after + intervalMs,
+      },
+    };
+  }
 
-  return {
-    expression: text,
-    // An interval always has another fire; only calendar schedules can run out.
-    nextFire: (after) => after + intervalMs,
-  };
+  const fields = text.length === 0 ? [] : text.split(/\s+/);
+  if (fields.length === 6) return { kind: "rejected", problem: "six-field" };
+
+  const cron = parseCron(text);
+  return cron === undefined
+    ? { kind: "rejected", problem: "invalid" }
+    : { kind: "resolved", recurrence: { expression: text, nextFire: cron.nextFire } };
+}
+
+/** {@link resolveSchedule} for the callers that only ask "is there a schedule?". */
+export function parseSchedule(expression: string): Recurrence | undefined {
+  const resolution = resolveSchedule(expression);
+  return resolution.kind === "resolved" ? resolution.recurrence : undefined;
 }

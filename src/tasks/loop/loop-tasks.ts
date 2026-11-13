@@ -13,7 +13,7 @@
 import type { TaskScope } from "../base/runtime-state.js";
 import type { LoopTask } from "../base/task.js";
 import type { TaskSession, TaskSessions } from "../base/task-sessions.js";
-import { parseDurationMs, parseSchedule } from "./schedule.js";
+import { parseDurationMs, parseSchedule, resolveSchedule } from "./schedule.js";
 
 /** One due wake-up; the caller sends its prompt into the session. */
 export interface LoopFire {
@@ -25,7 +25,10 @@ export interface LoopFire {
 }
 
 export interface CreateLoopInput extends TaskScope {
-  /** Raw recurrence text, currently interval shorthand such as `30s`, `10m`, `2h`. */
+  /**
+   * Raw recurrence text: interval shorthand such as `30s`, `10m`, `2h`, or a
+   * five-field cron expression such as `0 9 * * 1-5` read in local time.
+   */
   schedule: string;
   prompt: string;
   name?: string;
@@ -107,12 +110,16 @@ export class LoopTasks {
   }
 
   async create(input: CreateLoopInput): Promise<LoopTaskView> {
-    const recurrence = parseSchedule(input.schedule);
-    if (recurrence === undefined) {
-      throw new LoopInputError(
-        `Invalid schedule "${input.schedule.trim()}": use a whole number followed by s, m or h, for example 30s, 10m or 2h.`,
-      );
+    const resolution = resolveSchedule(input.schedule);
+    if (resolution.kind === "rejected") {
+      // Name both accepted shapes and one correct example; never guess at intent (ADR-0006).
+      const remedy =
+        resolution.problem === "six-field"
+          ? "six fields were given: a cron expression here has five (minute, hour, day of month, month, day of week) and no seconds column — for second-level timing use the interval shorthand such as 30s, 10m or 2h; for a calendar schedule drop the seconds field, for example 0 9 * * 1-5."
+          : "use the interval shorthand such as 30s, 10m or 2h, or a five-field cron expression such as 0 9 * * 1-5 (every workday at 09:00).";
+      throw new LoopInputError(`Invalid schedule "${input.schedule.trim()}": ${remedy}`);
     }
+    const recurrence = resolution.recurrence;
 
     const prompt = input.prompt.trim();
     if (prompt.length === 0) {
