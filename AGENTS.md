@@ -22,7 +22,7 @@ No subagent/delegate/fusion tools, no `Monitor*`, no `Workflow*`/`Orchestration*
 ## Layout
 
 ```
-src/extension.ts        entry: registers tools, commands, events, status line
+src/index.ts            entry: registers tools, commands, events, status line
 src/tasks/base/         Task supertype: kind-tagged record, store, atomic writes, snapshots
 src/tasks/process/      spawn, process-tree kill, output files, exit codes
 src/tasks/loop/         interval scheduling, pump, fire → sendMessage, iteration recording
