@@ -42,8 +42,13 @@ export interface ProcessTasksOptions {
   env?: NodeJS.ProcessEnv;
   /** Clock seam for tests; defaults to `Date.now`. */
   now?: () => number;
+  /**
+   * Called once for every task that ends, with the record as it stands after
+   * the final status was written. Announcing the task — a session message, a
+   * panel refresh — is the caller's business, so this store stays silent.
+   */
+  onFinish?: (view: ProcessTaskView) => void;
 }
-
 interface SessionTasks {
   readonly directory: string;
   readonly tasks: Map<string, ProcessTask>;
@@ -73,11 +78,13 @@ export class ProcessTasks {
   private readonly env: NodeJS.ProcessEnv | undefined;
   private readonly now: () => number;
   private readonly sessions = new Map<string, SessionTasks>();
+  private readonly onFinish: ((view: ProcessTaskView) => void) | undefined;
 
   constructor(options: ProcessTasksOptions = {}) {
     this.platform = options.platform ?? process.platform;
     this.env = options.env;
     this.now = options.now ?? Date.now;
+    this.onFinish = options.onFinish;
   }
 
   /** Start a command in the background and return its record immediately. */
@@ -177,15 +184,16 @@ export class ProcessTasks {
     if (failure !== undefined) {
       task.status = "failed";
       task.error = failure;
-      return;
-    }
-    if (exitCode === 0) {
+    } else if (exitCode === 0) {
       task.status = "completed";
-      return;
+    } else {
+      task.status = "failed";
+      task.error =
+        exitCode === null
+          ? "the command was terminated by a signal"
+          : `exited with code ${exitCode}`;
     }
-    task.status = "failed";
-    task.error =
-      exitCode === null ? "the command was terminated by a signal" : `exited with code ${exitCode}`;
+    this.onFinish?.(this.view(session, task));
   }
 
   private async session(scope: TaskScope): Promise<SessionTasks> {
