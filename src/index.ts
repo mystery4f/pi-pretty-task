@@ -10,7 +10,9 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { TaskScope } from "./tasks/base/runtime-state.js";
 import { TaskSessions } from "./tasks/base/task-sessions.js";
+import { Iterations } from "./tasks/loop/iterations.js";
 import { type LoopFire, LoopTasks } from "./tasks/loop/loop-tasks.js";
 import { loopTaskTools } from "./tasks/loop/tools.js";
 import { parseOutputCapBytes } from "./tasks/process/limits.js";
@@ -31,6 +33,13 @@ export interface ExtensionOptions {
   readonly pumpIntervalMs?: number;
   /** Where the configuration is read from; defaults to `process.env`. */
   readonly env?: NodeJS.ProcessEnv;
+  /**
+   * Tool calls one Iteration keeps; defaults to ITERATION_CALL_LIMIT. Lowering it
+   * is how a test sees a truncated record without a hundred calls.
+   */
+  readonly iterationCallLimit?: number;
+  /** Iterations one Loop keeps; defaults to ITERATION_HISTORY_LIMIT. */
+  readonly iterationHistoryLimit?: number;
 }
 
 /** The wired extension, returned so tests can drive its clock explicitly. */
@@ -43,6 +52,23 @@ export interface ExtensionController {
 
 const DEFAULT_PUMP_INTERVAL_MS = 1_000;
 
+/** Recording is bookkeeping: a failure belongs on stderr, never in the session. */
+async function recordSafely(work: Promise<void>): Promise<void> {
+  try {
+    await work;
+  } catch (error) {
+    process.stderr.write(`pi-pretty-task: iteration record failed: ${String(error)}\n`);
+  }
+}
+
+/** The session a pi event belongs to, in the shape the stores take. */
+function scopeOf(ctx: {
+  readonly cwd: string;
+  readonly sessionManager: { getSessionId(): string };
+}): TaskScope {
+  return { cwd: ctx.cwd, sessionId: ctx.sessionManager.getSessionId() };
+}
+
 /** Build the stores, tools, renderers and pump; shared by production and tests. */
 export function createExtension(
   pi: ExtensionAPI,
@@ -54,10 +80,19 @@ export function createExtension(
   const outputCapBytes = parseOutputCapBytes(options.env ?? process.env);
   const now = options.now ?? Date.now;
   const sessions = new TaskSessions({ now });
+  const iterations = new Iterations({
+    sessions,
+    now,
+    callLimit: options.iterationCallLimit,
+    historyLimit: options.iterationHistoryLimit,
+  });
   const loops = new LoopTasks({
     sessions,
     now,
     onFire: (fire) => {
+      // The iteration is opened before the wake goes out, and persisted on its
+      // own, so a turn that ends before its first tool call still leaves a record.
+      void recordSafely(iterations.open(fire));
       sendLoopWake(pi, fire);
     },
   });
@@ -110,6 +145,21 @@ export function createExtension(
   // One pump on a turn boundary covers the case where the timer was delayed by
   // a long turn; a loop that became due during the turn wakes right after it.
   pi.on("turn_end", pumpSafely);
+  // The tool events are the only description of the turn a fire woke. Starts are
+  // recorded into the newest open iteration of the session, ends are paired by
+  // tool call id — parallel calls start in source order and finish in completion
+  // order, so position can never be the pairing key (ADR-0002).
+  pi.on("tool_execution_start", async (event, ctx) => {
+    await recordSafely(iterations.recordStart(scopeOf(ctx), event));
+  });
+  pi.on("tool_execution_end", async (event, ctx) => {
+    await recordSafely(iterations.recordEnd(scopeOf(ctx), event));
+  });
+  // `agent_settled` is the end of the turn: no retry, compaction or queued
+  // continuation will run after it, so the iteration can close.
+  pi.on("agent_settled", async (event, ctx) => {
+    await recordSafely(iterations.settle(scopeOf(ctx), event.aborted));
+  });
   pi.on("session_shutdown", stopTimer);
 
   return {

@@ -17,6 +17,7 @@ import type {
 import { Type } from "typebox";
 import { formatDuration } from "../base/format.js";
 import type { TaskScope } from "../base/runtime-state.js";
+import type { LoopTask } from "../base/task.js";
 import {
   LoopInputError,
   type LoopTasks,
@@ -108,6 +109,7 @@ export function describeLoop(view: LoopTaskView): string {
   if (task.lastFireAt !== undefined) {
     lines.push(`last fire: ${new Date(task.lastFireAt).toISOString()}`);
   }
+  lines.push(iterationSummary(task));
   if (task.expiresAt !== undefined) {
     lines.push(`expires: ${new Date(task.expiresAt).toISOString()}`);
   }
@@ -119,8 +121,77 @@ export function describeLoop(view: LoopTaskView): string {
   return lines.join("\n");
 }
 
-/** The facts a caller can inspect without parsing the prose. */
-function loopDetails(view: LoopTaskView): Record<string, unknown> {
+/**
+ * One line for the loop's block: how many turns it woke and what the newest one
+ * did. A loop with no iteration yet says so, because `iterations: none` is a fact
+ * a caller can act on, unlike a missing line.
+ */
+function iterationSummary(task: LoopTask): string {
+  const dropped = task.droppedIterations ?? 0;
+  const droppedText = dropped > 0 ? ` (${String(dropped)} older dropped)` : "";
+  const newest = task.iterations.at(-1);
+  if (newest === undefined) return `iterations: none${droppedText}`;
+  const ended =
+    newest.endedAt === undefined ? "" : `, ${formatDuration(newest.endedAt - newest.startedAt)}`;
+  return `iterations: ${String(task.iterations.length)}${droppedText} · newest fire ${String(newest.fire)} ${newest.status}${ended}, ${String(newest.calls.length)} calls`;
+}
+
+/**
+ * The iteration listing for one loop, newest first, with the tool calls each turn
+ * made. This is the listing `loop_list id=…` returns and the panel (#9) draws:
+ * an iteration is reachable from the loop, never as a row of its own (ADR-0002).
+ * A truncated record says how much it dropped rather than hiding it.
+ */
+export function describeIterations(task: LoopTask): string {
+  if (task.iterations.length === 0) {
+    return task.droppedIterations === undefined || task.droppedIterations === 0
+      ? "No iteration yet: this loop has not fired."
+      : `No iteration recorded; ${String(task.droppedIterations)} older ones were dropped.`;
+  }
+
+  return [...task.iterations]
+    .reverse()
+    .map((iteration) => {
+      const head = [
+        `fire ${String(iteration.fire)}`,
+        iteration.status,
+        new Date(iteration.startedAt).toISOString(),
+        iteration.endedAt === undefined
+          ? undefined
+          : formatDuration(iteration.endedAt - iteration.startedAt),
+        `${String(iteration.calls.length)} calls`,
+        iteration.droppedCalls > 0
+          ? `+${String(iteration.droppedCalls)} earlier calls dropped`
+          : undefined,
+      ]
+        .filter((part) => part !== undefined)
+        .join(" · ");
+      if (iteration.calls.length === 0) return `${head}\n  (no tool calls)`;
+      const calls = iteration.calls.map((call) => {
+        const line = [
+          `  ${call.tool}`,
+          call.subject,
+          call.status,
+          call.durationMs === undefined ? undefined : formatDuration(call.durationMs),
+        ]
+          .filter((part) => part !== undefined && part.length > 0)
+          .join(" · ");
+        return call.error === undefined ? line : `${line}\n    error: ${call.error}`;
+      });
+      return [head, ...calls].join("\n");
+    })
+    .join("\n\n");
+}
+
+/**
+ * The facts a caller can inspect without parsing the prose. The iteration
+ * summary is always here; the iterations themselves only when asked for, because
+ * a listing of every loop must not carry every tool call of every wake.
+ */
+function loopDetails(
+  view: LoopTaskView,
+  options: { readonly iterations?: boolean } = {},
+): Record<string, unknown> {
   const { task } = view;
   return {
     id: task.id,
@@ -137,6 +208,9 @@ function loopDetails(view: LoopTaskView): Record<string, unknown> {
     endedAt: task.endedAt,
     untilNextFireMs: view.untilNextFireMs,
     error: task.error,
+    iterationCount: task.iterations.length,
+    droppedIterations: task.droppedIterations,
+    ...(options.iterations === true ? { iterations: task.iterations } : {}),
   };
 }
 
@@ -209,7 +283,7 @@ export function loopTaskTools(loops: LoopTasks): ToolDefinition[] {
     name: "loop_list",
     label: "List loops",
     description:
-      "Show loops of this session with their raw schedule, next fire time, fire count and status. Pass an id for one loop, or omit it to list them all.",
+      "Show loops of this session with their raw schedule, next fire time, fire count and status. Pass an id to also get that loop's iterations, newest first, each with the tool calls the turn made. Omit the id to list them all.",
     parameters: ListParameters,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const scope = scopeOf(ctx);
@@ -221,8 +295,13 @@ export function loopTaskTools(loops: LoopTasks): ToolDefinition[] {
           return text(`No loop with id ${wantedId} in this session.`);
         }
         return {
-          content: [{ type: "text", text: describeLoop(view) }],
-          details: loopDetails(view),
+          content: [
+            {
+              type: "text",
+              text: [describeLoop(view), "", describeIterations(view.task)].join("\n"),
+            },
+          ],
+          details: loopDetails(view, { iterations: true }),
         };
       }
 

@@ -22,6 +22,8 @@ export interface LoopFire {
   readonly at: number;
   /** One-based fire number, already recorded on the task. */
   readonly fire: number;
+  /** The session the fire belongs to, so the iteration can be persisted as it opens. */
+  readonly session: TaskSession;
 }
 
 export interface CreateLoopInput extends TaskScope {
@@ -164,6 +166,7 @@ export class LoopTasks {
       schedule: recurrence.expression,
       prompt,
       fires: 0,
+      iterations: [],
       nextFireAt,
       ...(input.maxFires !== undefined ? { maxFires: input.maxFires } : {}),
       ...(expiresAt !== undefined ? { expiresAt } : {}),
@@ -332,7 +335,7 @@ export class LoopTasks {
 
         record.fires += 1;
         record.lastFireAt = at;
-        fires.push({ task: record, at, fire: record.fires });
+        fires.push({ task: record, at, fire: record.fires, session });
         changed = true;
 
         if (record.maxFires !== undefined && record.fires >= record.maxFires) {

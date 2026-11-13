@@ -10,8 +10,14 @@
  */
 
 import { open, readFile, rename } from "node:fs/promises";
+import type {
+  Iteration,
+  IterationCall,
+  IterationCallStatus,
+  IterationStatus,
+} from "../loop/iteration.js";
 import { previousTaskRecordPath, taskRecordPath } from "./runtime-state.js";
-import type { ProcessTask, Task, TaskStatus } from "./task.js";
+import type { LoopTask, ProcessTask, Task, TaskStatus } from "./task.js";
 
 /**
  * On-disk schema version. One version covers both kinds; a change that older
@@ -99,10 +105,96 @@ function parseTask(value: unknown): Task | undefined {
         return undefined;
     }
     if (value.error !== undefined && typeof value.error !== "string") return undefined;
-    return value as unknown as Task;
+    const iterations = parseIterations(value.iterations);
+    if (iterations === undefined) return undefined;
+    const droppedIterations = value.droppedIterations;
+    if (
+      droppedIterations !== undefined &&
+      (typeof droppedIterations !== "number" ||
+        !Number.isInteger(droppedIterations) ||
+        droppedIterations < 0)
+    ) {
+      return undefined;
+    }
+    return { ...value, iterations } as unknown as Task;
   }
 
   return undefined;
+}
+
+const ITERATION_STATUSES: readonly IterationStatus[] = [
+  "running",
+  "completed",
+  "aborted",
+  "interrupted",
+];
+
+const ITERATION_CALL_STATUSES: readonly IterationCallStatus[] = [
+  "running",
+  "completed",
+  "failed",
+  "aborted",
+  "interrupted",
+];
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+/**
+ * The iteration list of a loop record. A record written before iterations
+ * existed has no list and reads as empty; anything else is checked as strictly as
+ * the rest of the file, because an iteration with a broken call list is
+ * corruption rather than an older generation.
+ */
+function parseIterations(value: unknown): Iteration[] | undefined {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) return undefined;
+  const iterations: Iteration[] = [];
+  for (const entry of value) {
+    const iteration = parseIteration(entry);
+    if (iteration === undefined) return undefined;
+    iterations.push(iteration);
+  }
+  return iterations;
+}
+
+function parseIteration(value: unknown): Iteration | undefined {
+  if (!isObject(value)) return undefined;
+  if (typeof value.fire !== "number" || !Number.isInteger(value.fire) || value.fire < 1) {
+    return undefined;
+  }
+  if (!isFiniteNumber(value.startedAt)) return undefined;
+  if (value.endedAt !== undefined && !isFiniteNumber(value.endedAt)) return undefined;
+  if (!ITERATION_STATUSES.some((status) => status === value.status)) return undefined;
+  if (
+    typeof value.droppedCalls !== "number" ||
+    !Number.isInteger(value.droppedCalls) ||
+    value.droppedCalls < 0
+  ) {
+    return undefined;
+  }
+  if (!Array.isArray(value.calls)) return undefined;
+  const calls: IterationCall[] = [];
+  for (const entry of value.calls) {
+    const call = parseIterationCall(entry);
+    if (call === undefined) return undefined;
+    calls.push(call);
+  }
+  return { ...value, calls } as unknown as Iteration;
+}
+
+function parseIterationCall(value: unknown): IterationCall | undefined {
+  if (!isObject(value)) return undefined;
+  if (typeof value.id !== "string" || value.id.length === 0) return undefined;
+  if (typeof value.tool !== "string" || value.tool.length === 0) return undefined;
+  if (typeof value.subject !== "string") return undefined;
+  if (!isFiniteNumber(value.startedAt)) return undefined;
+  if (value.endedAt !== undefined && !isFiniteNumber(value.endedAt)) return undefined;
+  if (value.durationMs !== undefined && !isFiniteNumber(value.durationMs)) return undefined;
+  if (value.error !== undefined && typeof value.error !== "string") return undefined;
+  if (!ITERATION_CALL_STATUSES.some((status) => status === value.status)) return undefined;
+  return value as unknown as IterationCall;
 }
 
 /** The records of one generation, or `undefined` when the document is unusable. */
@@ -166,15 +258,47 @@ export interface TaskStoreOptions {
  * nothing here adopts or signals a pid, and the stale pid is dropped so a later
  * step cannot mistake a reused pid for the old command.
  *
- * Loop records are deliberately left alone: a loop owns no process, so restart
+ * A loop record is deliberately left alone: a loop owns no process, so restart
  * does not end it. It keeps its status and next-fire time and resumes when the
- * extension starts pumping again.
+ * extension starts pumping again. Its Iterations are different — an iteration is
+ * one turn, and no turn survives the process that was running it (see
+ * {@link interruptIterations}).
  */
 function interrupt(record: Task, at: number): Task {
-  if (record.kind !== "process" || record.status !== "running") return record;
+  if (record.kind === "loop") return interruptIterations(record, at);
+  if (record.status !== "running") return record;
   const interrupted: ProcessTask = { ...record, status: "interrupted", endedAt: at };
   delete interrupted.pid;
   return interrupted;
+}
+
+/**
+ * An iteration that still says `running` cannot: the turn that opened it ended
+ * with the process that recorded it, since nothing re-attaches to a session.
+ * Marking it `interrupted`, and stopping the calls it left running, keeps a
+ * reader from seeing work that can never finish.
+ */
+function interruptIterations(task: LoopTask, at: number): LoopTask {
+  if (!task.iterations.some((iteration) => iteration.status === "running")) return task;
+  const iterations = task.iterations.map((iteration) => {
+    if (iteration.status !== "running") return iteration;
+    return {
+      ...iteration,
+      status: "interrupted" as const,
+      endedAt: at,
+      calls: iteration.calls.map((call) =>
+        call.status === "running"
+          ? {
+              ...call,
+              status: "interrupted" as const,
+              endedAt: at,
+              durationMs: Math.max(0, at - call.startedAt),
+            }
+          : call,
+      ),
+    };
+  });
+  return { ...task, iterations };
 }
 
 /**

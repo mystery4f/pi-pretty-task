@@ -10,6 +10,8 @@
  * @author mystery4f <40482524+mystery4f@users.noreply.github.com>
  */
 
+import type { Iteration } from "../loop/iteration.js";
+
 /** Lifecycle of a task, shared by both kinds. */
 export type TaskStatus = "running" | "paused" | "completed" | "failed" | "killed" | "interrupted";
 
@@ -77,6 +79,13 @@ export interface LoopTask extends TaskBase {
   lastFireAt?: number;
   /** Why the schedule stopped abnormally, when that is known. */
   error?: string;
+  /**
+   * The turns this schedule woke, oldest first, each a child record and never a
+   * task of its own (ADR-0002). Capped by ITERATION_HISTORY_LIMIT.
+   */
+  iterations: Iteration[];
+  /** Iterations the history cap dropped; non-zero means the loop's list is truncated. */
+  droppedIterations?: number;
 }
 
 /** One tracked unit of work: a process task or a loop task, never a second list. */

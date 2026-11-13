@@ -59,6 +59,7 @@ function loopRecord(overrides: Partial<LoopTask> = {}): LoopTask {
     fires: 3,
     nextFireAt: 1_700_000_300_000,
     intervalMs: 300_000,
+    iterations: [],
     ...overrides,
   } as LoopTask;
 }
@@ -166,5 +167,47 @@ describe("the task record file", () => {
 
     // A loop owns no process, so starting the store does not end it.
     expect(loaded).toEqual([loop]);
+  });
+
+  it("interrupts the iteration a restart left running, and the calls inside it", async () => {
+    const directory = await stateDirectory();
+    const loop = loopRecord({
+      status: "running",
+      iterations: [
+        {
+          fire: 2,
+          startedAt: 1_700_000_000_100,
+          status: "running",
+          droppedCalls: 0,
+          calls: [
+            {
+              id: "call-a",
+              tool: "bash",
+              subject: "npm test",
+              startedAt: 1_700_000_000_200,
+              status: "running",
+            },
+          ],
+        },
+      ],
+    });
+    delete loop.endedAt;
+    await new TaskStore(directory).save([loop]);
+
+    const loaded = await new TaskStore(directory, { now: () => 1_700_000_009_000 }).load();
+
+    // The loop itself survives a restart; the turn it woke cannot, because no
+    // turn outlives the process that was running it.
+    expect(loaded).toHaveLength(1);
+    const record = loaded[0];
+    if (record?.kind !== "loop") throw new Error("the loop record did not load");
+    expect(record.status).toBe("running");
+    const [iteration] = record.iterations;
+    expect(iteration).toMatchObject({ status: "interrupted", endedAt: 1_700_000_009_000 });
+    expect(iteration?.calls[0]).toMatchObject({
+      status: "interrupted",
+      endedAt: 1_700_000_009_000,
+      durationMs: 8_800,
+    });
   });
 });
