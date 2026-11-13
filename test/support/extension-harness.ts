@@ -90,8 +90,13 @@ export function fakeTheme(): Theme {
   } as unknown as Theme;
 }
 
-/** Load the extension against a fake API and return a caller for its tools. */
-export function createHarness(defaultTurn: Turn): Harness {
+/**
+ * Load the extension against a fake API and return a caller for its tools.
+ *
+ * The environment is explicit so a test can set a limit without touching the
+ * process's own environment, and so an invalid value can be handed to the loader.
+ */
+export function createHarness(defaultTurn: Turn, env: NodeJS.ProcessEnv = process.env): Harness {
   const tools: ToolDefinition[] = [];
   const renderers = new Map<string, MessageRenderer>();
   const messages: SentMessage[] = [];
@@ -121,7 +126,7 @@ export function createHarness(defaultTurn: Turn): Harness {
     },
   };
 
-  extension(api as unknown as ExtensionAPI);
+  extension(api as unknown as ExtensionAPI, env);
 
   return {
     toolNames: tools.map((tool) => tool.name),

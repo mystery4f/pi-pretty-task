@@ -20,7 +20,8 @@
 | `bg_logs` | 尾部输出拉取（供无 UI 场景与 agent 自查） | 低 | 低：需自带上限，防上下文被灌 |
 | `bg_kill` | 先 SIGTERM/`taskkill /T`，宽限后强杀整棵进程树 | 中 | 中：残留后代进程 |
 | 输出落盘 | `.pi/tasks/<sessionId>-<pid>/<taskId>.output` + `.json` | 低 | 低 |
-| 输出上限 | 单任务 20MiB 后截断并终止 | 低 | 低（上游此处有 NaN 缺陷，我们做校验） |
+| 输出上限 | 单任务默认 20MiB（`PI_PRETTY_TASK_OUTPUT_CAP_BYTES` 可配置，启动时校验），超限后截断并以 `output_cap` 终止 | 低 | 低（上游此处有 NaN 缺陷，我们在入口校验） |
+| 运行超时 | `bg_run` 可选 `timeoutSeconds`，到点以 `timeout` 终止；默认不设超时 | 低 | 低：避免误杀验收里的 10 分钟长任务 |
 | 完成通知 | `registerMessageRenderer` 渲染完成卡片 | 低 | 低 |
 
 ### Task · `kind: "loop"`（定时唤醒）与其子记录 Iteration

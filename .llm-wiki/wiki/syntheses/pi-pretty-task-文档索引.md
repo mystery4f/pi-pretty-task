@@ -2,7 +2,7 @@
 type: synthesis
 title: pi-pretty-task 文档索引
 created: 2026-11-13
-updated: 2026-11-13
+updated: 2026-11-14
 ---
 
 # pi-pretty-task 文档索引
@@ -16,6 +16,7 @@ updated: 2026-11-13
 | [AGENTS.md](../../AGENTS.md) | 项目规则、产品模型、目录约定、验收标准 | 已定 |
 | [GLOSSARY.md](../../GLOSSARY.md) | 术语：Task（两种 kind：process / loop）/ Iteration / Panel / Status line | 已定 |
 | [scope-v1.md](../../docs/scope-v1.md) | v0.1 范围：做 / 不做 / 延后（含复杂度与风险） | 已定，随实现更新 |
+| [configuration.md](../../docs/configuration.md) | 配置面：`PI_PRETTY_TASK_OUTPUT_CAP_BYTES`（默认 20 MiB，启动校验）与 `bg_run` 的 `timeoutSeconds`；两类终止原因 | 已定 |
 
 ## 决策记录（ADR）
 
