@@ -48,6 +48,10 @@ export interface HarnessOptions {
   readonly now?: () => number;
   /** Environment the extension reads its configuration from; defaults to `process.env`. */
   readonly env?: NodeJS.ProcessEnv;
+  /** Tool calls one iteration keeps; omitted means the extension's default. */
+  readonly iterationCallLimit?: number;
+  /** Iterations one loop keeps; omitted means the extension's default. */
+  readonly iterationHistoryLimit?: number;
 }
 
 export interface Harness {
@@ -79,6 +83,12 @@ export interface Harness {
   readonly widgetKeys: readonly string[];
   /** Pump loops due at a fake instant, as the extension timer would. */
   pump(at: number): Promise<LoopFire[]>;
+  /**
+   * Fire one extension event, as pi would, awaited in registration order. Events
+   * such as `tool_execution_start` reach pi from outside a tool call, so this is
+   * the only way a test can drive them.
+   */
+  emit(event: { readonly type: string } & Record<string, unknown>, turn?: Turn): Promise<void>;
   /** Run the extension's session_start handlers for a turn. */
   startSession(turn?: Turn): Promise<void>;
 }
@@ -232,6 +242,12 @@ export function createHarness(defaultTurn: Turn, options: HarnessOptions = {}): 
     now: options.now,
     env: options.env ?? process.env,
     pumpIntervalMs: 0,
+    ...(options.iterationCallLimit === undefined
+      ? {}
+      : { iterationCallLimit: options.iterationCallLimit }),
+    ...(options.iterationHistoryLimit === undefined
+      ? {}
+      : { iterationHistoryLimit: options.iterationHistoryLimit }),
   });
 
   return {
@@ -284,6 +300,11 @@ export function createHarness(defaultTurn: Turn, options: HarnessOptions = {}): 
     widgetKeys,
     pump(at) {
       return controller.pump(at);
+    },
+    async emit(event, turn = defaultTurn) {
+      for (const handler of handlers.get(event.type) ?? []) {
+        await handler(event, createToolContext(turn));
+      }
     },
     async startSession(turn = defaultTurn) {
       for (const handler of handlers.get("session_start") ?? []) {
