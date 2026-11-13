@@ -27,6 +27,7 @@ export interface TaskFile {
 
 const TASK_STATUSES: readonly TaskStatus[] = [
   "running",
+  "paused",
   "completed",
   "failed",
   "killed",
@@ -42,9 +43,9 @@ function isStatus(value: unknown): value is TaskStatus {
 }
 
 /**
- * One record, checked for everything shared plus what the process arm needs.
- * The loop arm's own fields are the loop kind's business when it lands; until
- * then this store accepts a loop record on its shared fields alone.
+ * One record, checked for everything shared plus the fields of its arm. Both
+ * arms are strict here: a loop record without its schedule or prompt is
+ * corruption, not an older generation to guess at.
  */
 function parseTask(value: unknown): Task | undefined {
   if (!isObject(value)) return undefined;
@@ -70,7 +71,36 @@ function parseTask(value: unknown): Task | undefined {
     return value as unknown as ProcessTask;
   }
 
-  if (value.kind === "loop") return value as unknown as Task;
+  if (value.kind === "loop") {
+    if (typeof value.schedule !== "string" || value.schedule.trim().length === 0) return undefined;
+    if (typeof value.prompt !== "string" || value.prompt.trim().length === 0) return undefined;
+    if (typeof value.fires !== "number" || !Number.isInteger(value.fires) || value.fires < 0) {
+      return undefined;
+    }
+    if (value.maxFires !== undefined) {
+      if (
+        typeof value.maxFires !== "number" ||
+        !Number.isInteger(value.maxFires) ||
+        value.maxFires < 1
+      ) {
+        return undefined;
+      }
+    }
+    if (value.nextFireAt !== undefined) {
+      if (typeof value.nextFireAt !== "number" || !Number.isFinite(value.nextFireAt))
+        return undefined;
+    }
+    if (value.lastFireAt !== undefined) {
+      if (typeof value.lastFireAt !== "number" || !Number.isFinite(value.lastFireAt))
+        return undefined;
+    }
+    if (value.expiresAt !== undefined) {
+      if (typeof value.expiresAt !== "number" || !Number.isFinite(value.expiresAt))
+        return undefined;
+    }
+    if (value.error !== undefined && typeof value.error !== "string") return undefined;
+    return value as unknown as Task;
+  }
 
   return undefined;
 }
@@ -130,15 +160,19 @@ export interface TaskStoreOptions {
 }
 
 /**
- * A record can only be `running` while the process that wrote it is alive, and at
- * load time nothing is: this store has just started. Marking it `interrupted` is a
- * statement about the record, never an action on a process — nothing here adopts
- * or signals a pid, and the stale pid is dropped so a later step cannot mistake a
- * reused pid for the old command.
+ * A process record can only be `running` while the process that wrote it is
+ * alive, and at load time nothing is: this store has just started. Marking it
+ * `interrupted` is a statement about the record, never an action on a process —
+ * nothing here adopts or signals a pid, and the stale pid is dropped so a later
+ * step cannot mistake a reused pid for the old command.
+ *
+ * Loop records are deliberately left alone: a loop owns no process, so restart
+ * does not end it. It keeps its status and next-fire time and resumes when the
+ * extension starts pumping again.
  */
 function interrupt(record: Task, at: number): Task {
-  if (record.status !== "running") return record;
-  const interrupted: Task = { ...record, status: "interrupted", endedAt: at };
+  if (record.kind !== "process" || record.status !== "running") return record;
+  const interrupted: ProcessTask = { ...record, status: "interrupted", endedAt: at };
   delete interrupted.pid;
   return interrupted;
 }

@@ -200,8 +200,8 @@ describe("recovery after a crash", () => {
     const turn = { cwd, sessionId: "session-mixed" };
     const directory = sessionTaskDirectory(cwd, turn.sessionId);
     await mkdir(directory, { recursive: true });
-    // The loop arm does not exist in the type yet; the file already carries it,
-    // so the loop ticket can land without a schema change.
+    // A loop record in the loop arm's shape, plus a field this version does not
+    // know, so the save path is proven to preserve both kinds and unknown data.
     const loop = {
       id: "lp0001",
       kind: "loop",
@@ -209,6 +209,10 @@ describe("recovery after a crash", () => {
       status: "completed",
       createdAt: 1_700_000_000_000,
       endedAt: 1_700_000_001_000,
+      schedule: "15m",
+      prompt: "review the diff",
+      fires: 4,
+      nextFireAt: 1_700_000_900_000,
       intervalMs: 900_000,
     } as unknown as Task;
     await new TaskStore(directory).save([loop]);

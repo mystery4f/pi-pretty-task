@@ -18,7 +18,8 @@ import type {
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 
-import extension from "../../src/index.js";
+import { createExtension } from "../../src/index.js";
+import type { LoopFire } from "../../src/tasks/loop/loop-tasks.js";
 
 /** One turn's view of the session: its working directory and session id. */
 export interface Turn {
@@ -39,6 +40,11 @@ export interface SentMessage {
   };
 }
 
+/** Knobs the tests need so no real timer or wall clock drives a loop. */
+export interface HarnessOptions {
+  readonly now?: () => number;
+}
+
 export interface Harness {
   /** Names of every tool the extension registered. */
   readonly toolNames: readonly string[];
@@ -52,9 +58,12 @@ export interface Harness {
     params: Record<string, unknown>,
     turn?: Turn,
   ): Promise<AgentToolResult<unknown>>;
-  /** Draw a sent message through the renderer registered for its custom type. */
   /** Draw a custom message through the renderer registered for its type. */
   render(customType: string, details: unknown, options?: Partial<MessageRenderOptions>): string;
+  /** Pump loops due at a fake instant, as the extension timer would. */
+  pump(at: number): Promise<LoopFire[]>;
+  /** Run the extension's session_start handlers for a turn. */
+  startSession(turn?: Turn): Promise<void>;
 }
 
 let callCounter = 0;
@@ -91,16 +100,23 @@ export function fakeTheme(): Theme {
 }
 
 /** Load the extension against a fake API and return a caller for its tools. */
-export function createHarness(defaultTurn: Turn): Harness {
+export function createHarness(defaultTurn: Turn, options: HarnessOptions = {}): Harness {
   const tools: ToolDefinition[] = [];
   const renderers = new Map<string, MessageRenderer>();
   const messages: SentMessage[] = [];
+  const handlers = new Map<string, Array<(event: unknown, ctx: unknown) => unknown>>();
   const api = {
     registerTool(tool: ToolDefinition): void {
       tools.push(tool);
     },
     registerMessageRenderer(customType: string, renderer: MessageRenderer): void {
       renderers.set(customType, renderer);
+    },
+    on(event: string, handler: (event: unknown, ctx: unknown) => unknown): () => void {
+      const list = handlers.get(event) ?? [];
+      list.push(handler);
+      handlers.set(event, list);
+      return () => undefined;
     },
     sendMessage(
       message: {
@@ -121,7 +137,10 @@ export function createHarness(defaultTurn: Turn): Harness {
     },
   };
 
-  extension(api as unknown as ExtensionAPI);
+  const controller = createExtension(api as unknown as ExtensionAPI, {
+    now: options.now,
+    pumpIntervalMs: 0,
+  });
 
   return {
     toolNames: tools.map((tool) => tool.name),
@@ -156,6 +175,14 @@ export function createHarness(defaultTurn: Turn): Harness {
         fakeTheme(),
       );
       return component === undefined ? "" : component.render(80).join("\n");
+    },
+    pump(at) {
+      return controller.pump(at);
+    },
+    async startSession(turn = defaultTurn) {
+      for (const handler of handlers.get("session_start") ?? []) {
+        await handler({ type: "session_start", reason: "startup" }, createToolContext(turn));
+      }
     },
   };
 }

@@ -12,13 +12,11 @@
  * @author mystery4f <40482524+mystery4f@users.noreply.github.com>
  */
 
-import { randomInt } from "node:crypto";
-import { mkdir, stat } from "node:fs/promises";
+import { stat } from "node:fs/promises";
 import { type OutputTail, readOutputTail } from "../base/output.js";
-import type { TaskScope } from "../base/runtime-state.js";
-import { processOutputPath, sessionTaskDirectory } from "../base/runtime-state.js";
+import { processOutputPath, sessionTaskDirectory, type TaskScope } from "../base/runtime-state.js";
 import type { KillReason, ProcessTask, Task } from "../base/task.js";
-import { TaskStore } from "../base/task-store.js";
+import { type TaskSession, TaskSessions } from "../base/task-sessions.js";
 import { type RunningProcess, type StopOutcome, startProcess } from "./supervisor.js";
 
 export type { TaskScope };
@@ -74,24 +72,19 @@ export interface ProcessTasksOptions {
    * panel refresh — is the caller's business, so this store stays silent.
    */
   onFinish?: (view: ProcessTaskView) => void;
+  /** Shared session loader; one instance is passed to every kind of store. */
+  sessions?: TaskSessions;
 }
-interface SessionTasks {
-  readonly directory: string;
-  readonly store: TaskStore;
-  /**
-   * Every record of the session, both kinds. Process tasks put their own records
-   * here; loaded loop records stay in the map so a process-task save never drops
-   * them, and the loop kind's tools arrive with its ticket.
-   */
-  readonly tasks: Map<string, Task>;
+/**
+ * The process store's view of a shared session: the loaded records plus the
+ * processes this store is supervising.
+ */
+interface SessionTasks extends TaskSession {
   readonly running: Map<string, RunningProcess>;
   /** Why each running task is being stopped, kept until its exit is booked. */
   readonly killReasons: Map<string, KillReason>;
 }
 
-/** No 0/O/1/l: an id is meant to be retyped by a human into a later message. */
-const ID_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789";
-const ID_LENGTH = 6;
 const NAME_LIMIT = 48;
 
 /**
@@ -158,10 +151,13 @@ export class ProcessTasks {
   private readonly killConfirmMs: number | undefined;
   private readonly onFinish: ((view: ProcessTaskView) => void) | undefined;
 
+  /** Loads and saves the shared record set; both kinds write through it. */
+  private readonly hub: TaskSessions;
   constructor(options: ProcessTasksOptions = {}) {
     this.platform = options.platform ?? process.platform;
     this.env = options.env;
     this.now = options.now ?? Date.now;
+    this.hub = options.sessions ?? new TaskSessions({ now: this.now });
     this.killGraceMs = options.killGraceMs;
     this.killConfirmMs = options.killConfirmMs;
     this.onFinish = options.onFinish;
@@ -350,7 +346,7 @@ export class ProcessTasks {
    * whose id is about to be handed out) await it; the process exit does not.
    */
   private persist(session: SessionTasks): Promise<void> {
-    return session.store.save([...session.tasks.values()]);
+    return this.hub.persist(session);
   }
 
   private session(scope: TaskScope): Promise<SessionTasks> {
@@ -358,19 +354,20 @@ export class ProcessTasks {
     const existing = this.sessions.get(directory);
     if (existing !== undefined) return existing;
 
-    const opened = this.openSession(directory);
+    const opened = this.openSession(scope);
     this.sessions.set(directory, opened);
     return opened;
   }
 
-  private async openSession(directory: string): Promise<SessionTasks> {
-    await mkdir(directory, { recursive: true });
-    const store = new TaskStore(directory, { now: this.now });
-    const tasks = new Map<string, Task>();
-    for (const record of await store.load()) {
-      tasks.set(record.id, await this.withCurrentOutput(record));
+  private async openSession(scope: TaskScope): Promise<SessionTasks> {
+    const shared = await this.hub.session(scope);
+    // A loaded record carries the output size it was last saved with; the file
+    // itself is the truth. Refresh once per process store, even when the loop
+    // tools loaded the session first.
+    for (const record of [...shared.tasks.values()]) {
+      shared.tasks.set(record.id, await this.withCurrentOutput(record));
     }
-    return { directory, store, tasks, running: new Map(), killReasons: new Map() };
+    return { ...shared, running: new Map(), killReasons: new Map() };
   }
 
   /**
@@ -388,12 +385,6 @@ export class ProcessTasks {
   }
 
   private createId(session: SessionTasks): string {
-    for (;;) {
-      let id = "";
-      for (let index = 0; index < ID_LENGTH; index += 1) {
-        id += ID_ALPHABET.charAt(randomInt(ID_ALPHABET.length));
-      }
-      if (!session.tasks.has(id)) return id;
-    }
+    return this.hub.createId(session);
   }
 }

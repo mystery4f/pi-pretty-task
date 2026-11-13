@@ -56,6 +56,7 @@ export interface FinishedTaskMessage {
  */
 const STATUS_COLOUR: Record<TaskStatus, ThemeColor> = {
   running: "accent",
+  paused: "muted",
   completed: "success",
   failed: "error",
   killed: "warning",

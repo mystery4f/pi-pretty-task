@@ -4,14 +4,14 @@
  * A Task carries what both kinds share — id, name, status and timeline. The
  * `kind` discriminator selects the arm, so fields that only mean something for
  * one kind live on that arm instead of being optional on a single flat object.
- * Today only the `process` arm exists; the loop arm lands with the loop ticket
- * and joins the same union.
+ * The `process` and `loop` arms are the two kinds, and both live in this one
+ * union so the store and the panel can carry them together (ADR-0005).
  *
  * @author mystery4f <40482524+mystery4f@users.noreply.github.com>
  */
 
 /** Lifecycle of a task, shared by both kinds. */
-export type TaskStatus = "running" | "completed" | "failed" | "killed" | "interrupted";
+export type TaskStatus = "running" | "paused" | "completed" | "failed" | "killed" | "interrupted";
 
 /**
  * Why a running task was stopped, in the glossary's four words: the user asked,
@@ -54,6 +54,30 @@ export interface ProcessTask extends TaskBase {
   /** Present exactly when the task was killed, naming who asked for the kill. */
   killReason?: KillReason;
 }
+/**
+ * A schedule that wakes the assistant with a stored prompt (ADR-0001). It owns
+ * no command and no output file: a fire is a message, and what the resulting
+ * turn does is recorded as an Iteration.
+ */
+export interface LoopTask extends TaskBase {
+  readonly kind: "loop";
+  /** Raw schedule expression, kept verbatim for listings (ADR-0006). */
+  readonly schedule: string;
+  /** Message injected into the session on every fire. */
+  readonly prompt: string;
+  /** Stop after this many fires; absent means no fire-count limit. */
+  readonly maxFires?: number;
+  /** Epoch milliseconds after which the schedule stops; absent means no deadline. */
+  readonly expiresAt?: number;
+  /** Fires handled so far. */
+  fires: number;
+  /** Epoch milliseconds of the next fire; absent when paused or finished. */
+  nextFireAt?: number;
+  /** Epoch milliseconds of the most recent fire. */
+  lastFireAt?: number;
+  /** Why the schedule stopped abnormally, when that is known. */
+  error?: string;
+}
 
-/** One tracked unit of work. Grows an arm per kind; never a second list. */
-export type Task = ProcessTask;
+/** One tracked unit of work: a process task or a loop task, never a second list. */
+export type Task = ProcessTask | LoopTask;
