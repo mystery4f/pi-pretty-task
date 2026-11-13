@@ -103,7 +103,8 @@ async function describeFinishedTask(view: ProcessTaskView): Promise<FinishedTask
     status: view.task.status,
     durationMs: view.elapsedMs,
     exitCode: view.task.exitCode,
-    reason: view.task.error,
+    // A killed task carries no error by design, so the kill reason is the answer.
+    reason: view.task.killReason ?? view.task.error,
   };
   try {
     const tail = await readOutputTail(view.task.outputPath, { lines: NOTICE_OUTPUT_LINES });
