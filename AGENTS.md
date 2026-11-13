@@ -52,3 +52,17 @@ Source references from the two upstream plugins are cloned under `.tmp/` (git-ig
 ## Git
 
 Personal/GitHub repository: Conventional Commits in English, author `mystery4f <40482524+mystery4f@users.noreply.github.com>`. Never commit `.tmp/`, `.pi/`, or `dist/`.
+
+## Agent skills
+
+### Issue tracker
+
+Issues and specs live as GitHub issues in this repo, via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Five canonical triage roles, label strings equal to their names. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `GLOSSARY.md` plus `docs/adr/` at the root. See `docs/agents/domain.md`.
