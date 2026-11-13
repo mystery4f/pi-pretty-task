@@ -15,8 +15,9 @@ import {
   renderTaskFinished,
   TASK_FINISHED_CUSTOM_TYPE,
 } from "./ui/notification.js";
+import { registerTasksCommand } from "./ui/tasks-command.js";
 
-/** Extension entry: register this package's tools on the running pi. */
+/** Extension entry: register this package's tools and commands on the running pi. */
 export default function extension(pi: ExtensionAPI): void {
   const processTasks = new ProcessTasks({
     // The store does not await the announcement; a notice outlives the task.
@@ -26,4 +27,5 @@ export default function extension(pi: ExtensionAPI): void {
   });
   pi.registerMessageRenderer(TASK_FINISHED_CUSTOM_TYPE, renderTaskFinished);
   for (const tool of processTaskTools(processTasks)) pi.registerTool(tool);
+  registerTasksCommand(pi, processTasks);
 }

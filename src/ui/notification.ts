@@ -10,12 +10,13 @@
  * @author mystery4f <40482524+mystery4f@users.noreply.github.com>
  */
 
-import type { ExtensionAPI, MessageRenderer, ThemeColor } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, MessageRenderer } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { formatDuration } from "../tasks/base/format.js";
 import { readOutputTail } from "../tasks/base/output.js";
 import type { TaskKind, TaskStatus } from "../tasks/base/task.js";
 import type { ProcessTaskView } from "../tasks/process/process-tasks.js";
+import { STATUS_COLOUR } from "./status-colour.js";
 
 /** Custom message type the completion renderer is registered under. */
 export const TASK_FINISHED_CUSTOM_TYPE = "task-finished";
@@ -49,18 +50,6 @@ export interface FinishedTaskMessage {
   readonly content: string;
   readonly details: FinishedTaskDetails;
 }
-
-/**
- * Colour token per ending, so a finished task reads the same everywhere in the
- * session and the palette stays the user's theme rather than this package's.
- */
-const STATUS_COLOUR: Record<TaskStatus, ThemeColor> = {
-  running: "accent",
-  completed: "success",
-  failed: "error",
-  killed: "warning",
-  interrupted: "warning",
-};
 
 /** Non-empty trailing lines of an output tail, newest last. */
 function tailLines(text: string | undefined): string[] {
