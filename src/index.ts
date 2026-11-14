@@ -9,21 +9,16 @@
  * @author mystery4f <40482524+mystery4f@users.noreply.github.com>
  */
 
-import {
-  type ExtensionAPI,
-  type ExtensionUIContext,
-  getAgentDir,
-} from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import type { TaskScope } from "./tasks/base/runtime-state.js";
+import { readSettings } from "./tasks/base/settings.js";
 import { TaskSessions } from "./tasks/base/task-sessions.js";
 import { Iterations } from "./tasks/loop/iterations.js";
 import { type LoopFire, LoopTasks } from "./tasks/loop/loop-tasks.js";
 import { loopTaskTools } from "./tasks/loop/tools.js";
 import { LoopWakes } from "./tasks/loop/wake-queue.js";
-import { parseOutputCapBytes } from "./tasks/process/limits.js";
 import { ProcessTasks, type ProcessTaskView } from "./tasks/process/process-tasks.js";
-import { resolveShellPolicy } from "./tasks/process/shell.js";
-import { loadTemplates, templateConfigPaths } from "./tasks/process/templates.js";
+import { loadTemplates } from "./tasks/process/templates.js";
 import { processTaskTools } from "./tasks/process/tools.js";
 import { LOOP_WAKE_CUSTOM_TYPE, renderLoopWake, sendLoopWake } from "./ui/loop-wake.js";
 import {
@@ -32,13 +27,14 @@ import {
   TASK_FINISHED_CUSTOM_TYPE,
 } from "./ui/notification.js";
 import { publishStatus, registerTasksCommand } from "./ui/tasks-command.js";
+import { createTerminalNotifications } from "./ui/terminal-notification.js";
 
 export interface ExtensionOptions {
   /** Clock seam for tests; defaults to `Date.now`. */
   readonly now?: () => number;
   /** Pump period in milliseconds; `0` disables the timer so tests drive the pump. */
   readonly pumpIntervalMs?: number;
-  /** Where the configuration is read from; defaults to `process.env`. */
+  /** The environment the configuration is read from; defaults to `process.env`. */
   readonly env?: NodeJS.ProcessEnv;
   /**
    * Tool calls one Iteration keeps; defaults to ITERATION_CALL_LIMIT. Lowering it
@@ -49,8 +45,13 @@ export interface ExtensionOptions {
   readonly iterationHistoryLimit?: number;
   /** Project root holding `.pi/pretty-task.json`; defaults to `process.cwd()`. */
   readonly projectDir?: string;
-  /** Agent settings directory; defaults to pi's agent directory. */
+  /** Agent settings directory; defaults to `PI_CODING_AGENT_DIR`, then pi's own default. */
   readonly agentDir?: string;
+  /**
+   * Where the terminal notification bytes go; defaults to stdout, and then only
+   * when stdout is a terminal. A test captures the bytes instead of a terminal.
+   */
+  readonly writeTerminal?: (text: string) => void;
   /**
    * Receives a configuration problem as one line, without the `pi-pretty-task:`
    * prefix. Defaults to stderr: a bad template file must be loud at load and
@@ -102,17 +103,15 @@ export function createExtension(
   // Configuration is read first, before anything is registered: a value that is
   // not usable has to fail the load with a message that names the key, because a
   // limit that silently becomes `NaN` would end every task on its first byte.
-  const env = options.env ?? process.env;
-  const outputCapBytes = parseOutputCapBytes(env);
-  // The shell is settled here for the same reason: a selector that names a shell
-  // this platform does not have must fail the load, not the first `bg_run`.
-  const shellPolicy = resolveShellPolicy({ env });
+  const settings = readSettings({
+    env: options.env,
+    projectDir: options.projectDir,
+    agentDir: options.agentDir,
+  });
   // Templates are configuration too, but a bad file only costs that file's
   // names: say what is wrong, keep the extension loaded, and let the other file
   // still supply templates.
-  const templates = loadTemplates(
-    templateConfigPaths(options.projectDir ?? process.cwd(), options.agentDir ?? getAgentDir()),
-  );
+  const templates = loadTemplates(settings.templatePaths);
   const reportProblem =
     options.reportProblem ??
     ((message: string) => {
@@ -171,11 +170,20 @@ export function createExtension(
       publishStatusLine();
     },
   });
+  // Where a task's ending reaches the terminal (issue #15). The gate is a UI this
+  // session actually has: a headless run writes nothing, and a session that has
+  // shut down must not write into a terminal it no longer owns.
+  let uiAttached = false;
+  const terminal = createTerminalNotifications({
+    enabled: settings.notify,
+    attached: () => uiAttached,
+    write: options.writeTerminal,
+  });
   const processTasks = new ProcessTasks({
     sessions,
     now,
-    outputCapBytes,
-    shellPolicy,
+    outputCapBytes: settings.outputCapBytes,
+    shellPolicy: settings.shellPolicy,
     // The store does not await the announcement; a notice outlives the task.
     onFinish: (view) => {
       if (view.task.parentId === undefined) {
@@ -187,6 +195,8 @@ export function createExtension(
           process.stderr.write(`pi-pretty-task: fire record failed: ${String(error)}\n`);
         });
       }
+      // The terminal is told about every ending, fire or not: it is not a transcript.
+      terminal.finished(view.task.name, view.task.status);
       // A finished task changes the count, so the line is refreshed with it.
       publishStatusLine();
     },
@@ -217,7 +227,6 @@ export function createExtension(
     // The child is already named `loop #N`, which is the alias the notice shows.
     await notifyTaskFinished(pi, view);
   }
-
   for (const tool of processTaskTools(processTasks, templates.templates)) pi.registerTool(tool);
   for (const tool of loopTaskTools(loops)) pi.registerTool(tool);
   pi.registerMessageRenderer(TASK_FINISHED_CUSTOM_TYPE, renderTaskFinished);
@@ -243,11 +252,14 @@ export function createExtension(
     readonly cwd: string;
     readonly sessionManager: { getSessionId(): string };
     readonly ui: ExtensionUIContext;
+    /** pi says whether this mode has a UI at all; a tool call's context may omit it. */
+    readonly hasUI?: boolean;
   }): Promise<void> => {
     const fresh = statusUi === undefined;
     const scope = scopeOf(ctx);
     statusUi = ctx.ui;
     statusScope = scope;
+    uiAttached = ctx.hasUI === true;
     if (fresh) await publishStatus(ctx.ui, processTasks, loops, scope);
   };
 
@@ -313,6 +325,7 @@ export function createExtension(
     await loops.attach(scope);
     statusUi = ctx.ui;
     statusScope = scope;
+    uiAttached = ctx.hasUI;
     // The line exists before the panel is ever opened; `/tasks` only refreshes it,
     // so the first paint is awaited rather than left to race the session start.
     await publishStatus(ctx.ui, processTasks, loops, scope);
@@ -358,6 +371,7 @@ export function createExtension(
     stopTimer();
     statusUi = undefined;
     statusScope = undefined;
+    uiAttached = false;
   });
 
   return {

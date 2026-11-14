@@ -17,9 +17,9 @@ import { resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { type OutputTail, readOutputFrom, readOutputTail } from "../base/output.js";
 import { processOutputPath, sessionTaskDirectory, type TaskScope } from "../base/runtime-state.js";
+import { DEFAULT_OUTPUT_CAP_BYTES } from "../base/settings.js";
 import type { KillReason, ProcessTask, Task } from "../base/task.js";
 import { type TaskSession, TaskSessions } from "../base/task-sessions.js";
-import { DEFAULT_OUTPUT_CAP_BYTES } from "./limits.js";
 import { resolveShellPolicy, type ShellChoice, type ShellPolicy } from "./shell.js";
 import { type RunningProcess, type StopOutcome, startProcess } from "./supervisor.js";
 
