@@ -13,7 +13,13 @@
  */
 
 import type { Theme, ThemeColor } from "@earendil-works/pi-coding-agent";
-import { type Component, matchesKey, type TUI, truncateToWidth } from "@earendil-works/pi-tui";
+import {
+  type Component,
+  matchesKey,
+  type TUI,
+  truncateToWidth,
+  visibleWidth,
+} from "@earendil-works/pi-tui";
 import { formatBytes, formatClockTime, formatDuration } from "../tasks/base/format.js";
 import type { OutputTail } from "../tasks/base/output.js";
 import type { LoopTask, Task } from "../tasks/base/task.js";
@@ -105,6 +111,8 @@ export class TasksPanel implements Component {
   private rows: readonly PanelTaskView[] = [];
   private selectedId: string | undefined;
   private listTop = 0;
+  /** `l` narrows the list to loop tasks; a second press brings the process rows back. */
+  private onlyLoops = false;
 
   private detailId: string | undefined;
   private detailLines: readonly string[] = [];
@@ -156,7 +164,9 @@ export class TasksPanel implements Component {
   /** Reload rows, and the detail tail while it is being followed. */
   async refresh(): Promise<void> {
     try {
-      this.rows = [...(await this.source.list())].sort(newestFirst);
+      const all = [...(await this.source.list())].sort(newestFirst);
+      // The loop filter narrows what the reader sees, never what the store holds.
+      this.rows = this.onlyLoops ? all.filter((row) => row.task.kind === "loop") : all;
     } catch {
       // A store that cannot list is a store with nothing to show, not a crash.
       this.rows = [];
@@ -228,6 +238,8 @@ export class TasksPanel implements Component {
       return;
     }
     if (data === "k") this.stopSelected();
+    if (data === "a") this.stopAll();
+    if (data === "l") this.toggleLoopFilter();
   }
 
   private handleDetailInput(data: string): void {
@@ -452,6 +464,47 @@ export class TasksPanel implements Component {
     });
   }
 
+  /** `a` stops every row the list shows, one store call at a time. */
+  private stopAll(): void {
+    const ids = this.rows.map((row) => row.task.id);
+    if (ids.length === 0) {
+      this.notice = "No tasks to stop.";
+      this.paint();
+      return;
+    }
+    this.enqueue(async () => {
+      let stopped = 0;
+      let failed = 0;
+      for (const id of ids) {
+        try {
+          const result = await this.source.stop(id);
+          if (result === undefined) failed += 1;
+          else stopped += 1;
+        } catch {
+          failed += 1;
+        }
+      }
+      // A stop that finds nothing is not a failure the reader can act on, so the
+      // notice names both counts and leaves the detail in the rows themselves.
+      this.notice =
+        failed === 0
+          ? `stopped ${String(stopped)} tasks`
+          : `stopped ${String(stopped)} · ${String(failed)} could not be stopped`;
+      await this.refresh();
+      this.paint();
+    });
+  }
+
+  /** `l` shows only loop tasks, or everything again. */
+  private toggleLoopFilter(): void {
+    this.onlyLoops = !this.onlyLoops;
+    this.notice = this.onlyLoops ? "showing loops only" : undefined;
+    this.enqueue(async () => {
+      await this.refresh();
+      this.paint();
+    });
+  }
+
   // ---- data ----------------------------------------------------------------
   private detailRow(): PanelTaskView | undefined {
     return this.rows.find((row) => row.task.id === this.detailId);
@@ -511,7 +564,9 @@ export class TasksPanel implements Component {
       lines.push(this.listRow(row, this.listTop + offset === this.selectedIndex(), width));
     });
     if (this.notice !== undefined) lines.push(theme.fg("muted", this.notice));
-    lines.push(theme.fg("dim", "↑/↓ select · Enter details · k stop · x close"));
+    lines.push(
+      theme.fg("dim", "↑/↓ select · Enter details · k stop · a stop all · l loops · x close"),
+    );
     return lines;
   }
 
@@ -520,7 +575,8 @@ export class TasksPanel implements Component {
   }
 
   private listHeader(width: number): string {
-    return [
+    const columns = listColumns(width);
+    const cells = [
       " ",
       ` ${pad("kind", 8)}`,
       ` ${pad("name", nameWidth(width))}`,
@@ -528,16 +584,18 @@ export class TasksPanel implements Component {
       ` ${pad("status", 12)}`,
       ` ${padStart("elapsed", 9)}`,
       ` ${padStart("size", 10)}`,
-      ` ${padStart("iters", 6)}`,
-      ` ${padStart("last", 9)}`,
-    ].join("");
+    ];
+    if (columns.iters) cells.push(` ${padStart("iters", 6)}`);
+    if (columns.last) cells.push(` ${padStart("last", 9)}`);
+    return cells.join("");
   }
 
   private listRow(row: PanelTaskView, selected: boolean, width: number): string {
     const theme = this.theme;
     const marker = selected ? theme.fg("accent", ">") : " ";
     const name = truncateToWidth(row.task.name, nameWidth(width), "…", false);
-    return [
+    const columns = listColumns(width);
+    const cells = [
       marker,
       ` ${pad(row.task.kind, 8)}`,
       ` ${pad(name, nameWidth(width))}`,
@@ -545,9 +603,10 @@ export class TasksPanel implements Component {
       ` ${theme.fg(STATUS_COLOUR[row.task.status], pad(row.task.status, 12))}`,
       ` ${padStart(formatDuration(row.elapsedMs), 9)}`,
       ` ${padStart(formatSize(row), 10)}`,
-      ` ${padStart(iterationCountText(row.task), 6)}`,
-      ` ${padStart(lastFireText(row.task), 9)}`,
-    ].join("");
+    ];
+    if (columns.iters) cells.push(` ${padStart(iterationCountText(row.task), 6)}`);
+    if (columns.last) cells.push(` ${padStart(lastFireText(row.task), 9)}`);
+    return cells.join("");
   }
 
   private renderDetail(width: number): string[] {
@@ -749,17 +808,40 @@ function formatSize(row: PanelTaskView): string {
 /** Columns the fixed list fields take, marker and gaps included. */
 const FIXED_COLUMNS = 2 + 9 + 11 + 13 + 10 + 11 + 7 + 10;
 
+/** `last` and `iters` are 10 and 7 cells wide; a narrow terminal loses them first. */
+const LAST_COLUMN = 10;
+const ITERS_COLUMN = 7;
+
+/** Which optional columns a terminal this wide still fits, and what they leave the name. */
+function listColumns(width: number): { fixed: number; last: boolean; iters: boolean } {
+  const floor = 4;
+  if (width >= FIXED_COLUMNS + floor) {
+    return { fixed: FIXED_COLUMNS, last: true, iters: true };
+  }
+  const withoutLast = FIXED_COLUMNS - LAST_COLUMN;
+  if (width >= withoutLast + floor) {
+    return { fixed: withoutLast, last: false, iters: true };
+  }
+  // Below this the row keeps marker, kind, name, id, status, elapsed and size only.
+  return { fixed: FIXED_COLUMNS - LAST_COLUMN - ITERS_COLUMN, last: false, iters: false };
+}
+
 /** Space a task name may use: whatever the fixed columns leave, with a floor. */
 function nameWidth(width: number): number {
-  return Math.max(12, width - FIXED_COLUMNS);
+  // The floor is deliberately small: a narrow terminal must lose the name first,
+  // not wrap the row (scope-v1 keeps terminal size as the panel's known risk).
+  return Math.max(4, width - listColumns(width).fixed);
 }
 
 function pad(text: string, width: number): string {
-  return text.length >= width ? text.slice(0, width) : text + " ".repeat(width - text.length);
+  // Width is pixels, not code units: a CJK or emoji name must not shift the columns.
+  const used = visibleWidth(text);
+  return used >= width ? truncateToWidth(text, width, "", false) : text + " ".repeat(width - used);
 }
 
 function padStart(text: string, width: number): string {
-  return text.length >= width ? text : " ".repeat(width - text.length) + text;
+  const used = visibleWidth(text);
+  return used >= width ? text : " ".repeat(width - used) + text;
 }
 
 function messageOf(error: unknown): string {

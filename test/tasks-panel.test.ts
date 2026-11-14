@@ -430,6 +430,39 @@ describe("stopping and closing", () => {
   });
 });
 
+it("stops every row on a, one source call per task", async () => {
+  const source = new FakeSource();
+  source.rows = [view("first1"), view("second"), loopView("loop01")];
+  const { panel, drawn } = openPanel(source);
+  await panel.settle();
+
+  panel.handleInput("a");
+  await panel.settle();
+
+  expect(source.stopped.sort()).toEqual(["first1", "loop01", "second"]);
+  expect(drawn()).toContain("stopped 3 tasks");
+
+  panel.dispose();
+});
+
+it("narrows the list to loops on l and restores it on the second press", async () => {
+  const source = new FakeSource();
+  source.rows = [view("build1", { name: "build job" }), loopView("loop01", { name: "review" })];
+  const { panel, drawn } = openPanel(source);
+  await panel.settle();
+
+  panel.handleInput("l");
+  await panel.settle();
+  expect(drawn()).toContain("review");
+  expect(drawn()).not.toContain("build job");
+
+  panel.handleInput("l");
+  await panel.settle();
+  expect(drawn()).toContain("build job");
+
+  panel.dispose();
+});
+
 describe("loop tasks in the list", () => {
   it("mixes loop rows with process rows, the loop row carrying its iterations and last fire", async () => {
     const source = new FakeSource();

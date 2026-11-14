@@ -115,6 +115,19 @@ describe("status line", () => {
     expect(statusLineText([])).toContain("no tasks");
     expect(statusLineText([])).toContain("/tasks");
   });
+
+  it("is published at session start, before /tasks was ever opened", async () => {
+    const dir = await makeTempDir();
+    cleanup.push(dir.dispose);
+    const harness = createHarness({ cwd: dir.path, sessionId: "session-line" });
+
+    await harness.startSession();
+
+    const last = harness.statuses.at(-1);
+    expect(last?.key).toBe(STATUS_LINE_KEY);
+    expect(last?.text).toContain("no tasks");
+    expect(harness.widgetKeys).toEqual([]);
+  });
 });
 
 describe("/tasks command", () => {

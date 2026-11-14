@@ -357,9 +357,7 @@ export class ProcessTasks {
       // ordinary — and the reason says who asked.
       task.status = "killed";
       task.killReason = killReason;
-      return;
-    }
-    if (failure !== undefined) {
+    } else if (failure !== undefined) {
       task.status = "failed";
       task.error = failure;
     } else if (exitCode === 0) {

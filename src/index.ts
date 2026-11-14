@@ -9,7 +9,7 @@
  * @author mystery4f <40482524+mystery4f@users.noreply.github.com>
  */
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import type { TaskScope } from "./tasks/base/runtime-state.js";
 import { TaskSessions } from "./tasks/base/task-sessions.js";
 import { Iterations } from "./tasks/loop/iterations.js";
@@ -24,7 +24,7 @@ import {
   renderTaskFinished,
   TASK_FINISHED_CUSTOM_TYPE,
 } from "./ui/notification.js";
-import { registerTasksCommand } from "./ui/tasks-command.js";
+import { publishStatus, registerTasksCommand } from "./ui/tasks-command.js";
 
 export interface ExtensionOptions {
   /** Clock seam for tests; defaults to `Date.now`. */
@@ -94,6 +94,8 @@ export function createExtension(
       // own, so a turn that ends before its first tool call still leaves a record.
       void recordSafely(iterations.open(fire));
       sendLoopWake(pi, fire);
+      // A fire changes a loop's countdown, and its status line entry.
+      publishStatusLine();
     },
   });
   const processTasks = new ProcessTasks({
@@ -103,6 +105,8 @@ export function createExtension(
     // The store does not await the announcement; a notice outlives the task.
     onFinish: (view) => {
       void notifyTaskFinished(pi, view);
+      // A finished task changes the count, so the line is refreshed with it.
+      publishStatusLine();
     },
   });
 
@@ -112,6 +116,16 @@ export function createExtension(
   pi.registerMessageRenderer(LOOP_WAKE_CUSTOM_TYPE, renderLoopWake);
   registerTasksCommand(pi, processTasks, loops);
 
+  // The status line is the panel's lasting trace (ADR-0003): it has to exist
+  // before anyone opens `/tasks`, and it has to follow the tasks it counts.
+  let statusUi: ExtensionUIContext | undefined;
+  let statusScope: TaskScope | undefined;
+  const publishStatusLine = (): void => {
+    const ui = statusUi;
+    const scope = statusScope;
+    if (ui === undefined || scope === undefined) return;
+    void publishStatus(ui, processTasks, loops, scope);
+  };
   const interval = options.pumpIntervalMs ?? DEFAULT_PUMP_INTERVAL_MS;
   let timer: ReturnType<typeof setInterval> | undefined;
 
@@ -119,6 +133,7 @@ export function createExtension(
   const pumpSafely = async (): Promise<void> => {
     try {
       await loops.pump(now());
+      publishStatusLine();
     } catch (error) {
       process.stderr.write(`pi-pretty-task: loop pump failed: ${String(error)}\n`);
     }
@@ -139,7 +154,13 @@ export function createExtension(
   startTimer();
 
   pi.on("session_start", async (_event, ctx) => {
-    await loops.attach({ cwd: ctx.cwd, sessionId: ctx.sessionManager.getSessionId() });
+    const scope = { cwd: ctx.cwd, sessionId: ctx.sessionManager.getSessionId() };
+    await loops.attach(scope);
+    statusUi = ctx.ui;
+    statusScope = scope;
+    // The line exists before the panel is ever opened; `/tasks` only refreshes it,
+    // so the first paint is awaited rather than left to race the session start.
+    await publishStatus(ctx.ui, processTasks, loops, scope);
     startTimer();
   });
   // One pump on a turn boundary covers the case where the timer was delayed by
@@ -160,7 +181,11 @@ export function createExtension(
   pi.on("agent_settled", async (event, ctx) => {
     await recordSafely(iterations.settle(scopeOf(ctx), event.aborted));
   });
-  pi.on("session_shutdown", stopTimer);
+  pi.on("session_shutdown", () => {
+    stopTimer();
+    statusUi = undefined;
+    statusScope = undefined;
+  });
 
   return {
     loops,

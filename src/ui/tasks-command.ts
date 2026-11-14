@@ -130,7 +130,7 @@ async function openPanel(
 }
 
 /** Replace the status line with the panel's one-line summary of both kinds. */
-async function publishStatus(
+export async function publishStatus(
   ui: ExtensionUIContext,
   processes: ProcessTasks,
   loops: LoopTasks,

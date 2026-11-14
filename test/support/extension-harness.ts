@@ -110,10 +110,13 @@ let callCounter = 0;
 /** What pi accepts for a command: everything but the name and source info it fills in. */
 type CommandDefinition = Parameters<ExtensionAPI["registerCommand"]>[1];
 
-function createToolContext(turn: Turn): ExtensionToolContext {
+function createToolContext(turn: Turn, ui?: unknown): ExtensionToolContext {
+  // Event handlers in pi receive the same UI surface as a command, which is how
+  // the extension can publish its status line before anyone opens the panel.
   const context = {
     cwd: turn.cwd,
     sessionManager: { getSessionId: () => turn.sessionId },
+    ...(ui === undefined ? {} : { ui, hasUI: true }),
   };
   return context as unknown as ExtensionToolContext;
 }
@@ -303,12 +306,12 @@ export function createHarness(defaultTurn: Turn, options: HarnessOptions = {}): 
     },
     async emit(event, turn = defaultTurn) {
       for (const handler of handlers.get(event.type) ?? []) {
-        await handler(event, createToolContext(turn));
+        await handler(event, createToolContext(turn, ui));
       }
     },
     async startSession(turn = defaultTurn) {
       for (const handler of handlers.get("session_start") ?? []) {
-        await handler({ type: "session_start", reason: "startup" }, createToolContext(turn));
+        await handler({ type: "session_start", reason: "startup" }, createToolContext(turn, ui));
       }
     },
   };
