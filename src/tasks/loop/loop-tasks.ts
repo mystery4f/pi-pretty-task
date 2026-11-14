@@ -1,6 +1,6 @@
 /**
  * Loop tasks: the schedule store, the pump that turns a due schedule into a
- * wake-up or a fire, and the pause/resume/complete/delete transitions.
+ * wake-up or a fire, and the pause/resume/complete/retune/delete transitions.
  *
  * A loop is a {@link LlmLoopTask} or a {@link CmdLoopTask} record like a process
  * task is a {@link ProcessTask}; all of them live in one session record file
@@ -30,7 +30,12 @@ import type {
 import { FIRE_HISTORY_LIMIT } from "../base/task.js";
 import type { TaskSession, TaskSessions } from "../base/task-sessions.js";
 import type { Recurrence } from "./schedule.js";
-import { parseDurationMs, parseSchedule, resolveSchedule } from "./schedule.js";
+import {
+  parseDurationMs,
+  parseSchedule,
+  resolveSchedule,
+  type ScheduleProblem,
+} from "./schedule.js";
 
 /** Either kind of loop record; everything the panel and the tool share is on {@link LoopBase}. */
 export type LoopTask = LlmLoopTask | CmdLoopTask;
@@ -111,6 +116,18 @@ export interface CreateLoopInput extends TaskScope {
   expiresIn?: string;
 }
 
+/**
+ * What one `loop_update` call asks for: a transition, a retune, or both. The
+ * retune is applied first, so resuming onto a new schedule is one call.
+ */
+export interface UpdateLoopInput extends TaskScope {
+  readonly id: string;
+  /** Transition to apply; omit it to change only the schedule. */
+  readonly action?: LoopUpdateAction;
+  /** New schedule expression; a running loop re-arms from this moment. */
+  readonly schedule?: string;
+}
+
 /** A loop as the tools and the panel read it. */
 export interface LoopTaskView {
   readonly task: LoopTask;
@@ -118,12 +135,15 @@ export interface LoopTaskView {
   readonly untilNextFireMs?: number;
 }
 
+/** A transition `loop_update` can apply. A retune travels in `schedule`, not here. */
 export type LoopUpdateAction = "pause" | "resume" | "complete";
 
 export type LoopUpdateOutcome =
   | "paused"
   | "resumed"
   | "completed"
+  /** The schedule changed; `rescheduled` is not a status, the loop keeps its own. */
+  | "rescheduled"
   | "already-paused"
   | "already-running"
   | "already-completed"
@@ -142,6 +162,19 @@ export class LoopInputError extends Error {
     super(message);
     this.name = "LoopInputError";
   }
+}
+
+/**
+ * The one refusal for a schedule that cannot be resolved, worded once so
+ * `loop_create` and `loop_update` cannot drift apart (ADR-0006): name both
+ * accepted shapes and one correct example, never guess at what was meant.
+ */
+function invalidScheduleError(expression: string, problem: ScheduleProblem): LoopInputError {
+  const remedy =
+    problem === "six-field"
+      ? "six fields were given: a cron expression here has five (minute, hour, day of month, month, day of week) and no seconds column — for second-level timing use the interval shorthand such as 30s, 10m or 2h; for a calendar schedule drop the seconds field, for example 0 9 * * 1-5."
+      : "use the interval shorthand such as 30s, 10m or 2h, or a five-field cron expression such as 0 9 * * 1-5 (every workday at 09:00).";
+  return new LoopInputError(`Invalid schedule "${expression.trim()}": ${remedy}`);
 }
 
 /** The session limit from the product scope. Finished loops do not count. */
@@ -233,12 +266,7 @@ export class LoopTasks {
   async create(input: CreateLoopInput): Promise<LoopTaskView> {
     const resolution = resolveSchedule(input.schedule);
     if (resolution.kind === "rejected") {
-      // Name both accepted shapes and one correct example; never guess at intent (ADR-0006).
-      const remedy =
-        resolution.problem === "six-field"
-          ? "six fields were given: a cron expression here has five (minute, hour, day of month, month, day of week) and no seconds column — for second-level timing use the interval shorthand such as 30s, 10m or 2h; for a calendar schedule drop the seconds field, for example 0 9 * * 1-5."
-          : "use the interval shorthand such as 30s, 10m or 2h, or a five-field cron expression such as 0 9 * * 1-5 (every workday at 09:00).";
-      throw new LoopInputError(`Invalid schedule "${input.schedule.trim()}": ${remedy}`);
+      throw invalidScheduleError(input.schedule, resolution.problem);
     }
     const recurrence = resolution.recurrence;
 
@@ -367,21 +395,52 @@ export class LoopTasks {
     return task === undefined ? undefined : this.view(task);
   }
 
-  async update(
-    scope: TaskScope,
-    id: string,
-    action: LoopUpdateAction,
-  ): Promise<LoopUpdateResult | undefined> {
-    this.rememberScope(scope);
-    const session = await this.sessions.session(scope);
-    const task = this.findLoop(session, id);
+  /**
+   * Change one loop: a pause/resume/complete transition, a retune, or both in one
+   * call. A retune re-arms a running loop from `now` — never from the slot the old
+   * schedule had already picked — and only stores the expression on a paused one,
+   * which arms onto it when resumed. Nothing is rebuilt, so the id, the fire count
+   * and every recorded iteration survive. An unusable expression is refused before
+   * the record changes, on the same message `loop_create` gives (ADR-0006).
+   */
+  async update(input: UpdateLoopInput): Promise<LoopUpdateResult | undefined> {
+    this.rememberScope(input);
+    const session = await this.sessions.session(input);
+    const task = this.findLoop(session, input.id);
     if (task === undefined) return undefined;
 
     const now = this.now();
-    let outcome: LoopUpdateOutcome;
+    let outcome: LoopUpdateOutcome | undefined;
     let changed = false;
 
-    switch (action) {
+    if (input.schedule !== undefined) {
+      const resolution = resolveSchedule(input.schedule);
+      if (resolution.kind === "rejected") {
+        throw invalidScheduleError(input.schedule, resolution.problem);
+      }
+      const recurrence = resolution.recurrence;
+      const nextFireAt = recurrence.nextFire(now);
+      if (nextFireAt === null) {
+        throw new LoopInputError(`Schedule "${recurrence.expression}" has no next fire time.`);
+      }
+      // A finished loop keeps the schedule it finished on: there is nothing left to
+      // arm, and rewriting the record would misreport how it ended.
+      if (task.status === "running" || task.status === "paused") {
+        task.schedule = recurrence.expression;
+        // The old slot is abandoned; a paused loop keeps no next fire to move.
+        if (task.status === "running") task.nextFireAt = nextFireAt;
+        outcome = "rescheduled";
+        changed = true;
+      } else {
+        outcome = "already-completed";
+      }
+    }
+
+    switch (input.action) {
+      case undefined:
+        // A retune alone; the schedule branch above owns the outcome.
+        break;
+
       case "pause":
         if (task.status === "paused") {
           outcome = "already-paused";
@@ -443,16 +502,24 @@ export class LoopTasks {
         break;
     }
 
+    if (outcome === undefined) {
+      throw new LoopInputError(
+        "Give an action or a schedule: action pauses, resumes or completes the loop, while schedule retunes when it fires.",
+      );
+    }
+
     if (changed) {
-      // Pause, resume and complete are the user-visible transitions of a loop,
+      // Pause, resume, complete and retune are the user-visible changes of a loop,
       // so each one moves the record up in the panel (ADR-0010).
       task.updatedAt = now;
       await this.sessions.persist(session);
     }
-    // A loop that stopped must not wake the model for a fire it recorded while
-    // the agent was busy: the queued wake is dropped before this call returns.
-    // A cmd loop's running fire is stopped here too, by the same callback.
-    if (changed && task.status !== "running") await this.onCancel?.(task.id);
+    // A loop that this call stopped must not wake the model for a fire it recorded
+    // while the agent was busy: the queued wake is dropped before this call returns.
+    // A cmd loop's running fire is stopped here too, by the same callback. A retune
+    // on its own never stops a loop, so it never drops a wake.
+    const stopped = input.action !== undefined && changed && task.status !== "running";
+    if (stopped) await this.onCancel?.(task.id);
     return { view: this.view(task), outcome };
   }
 
