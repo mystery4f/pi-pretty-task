@@ -246,7 +246,7 @@ export function loopTaskTools(loops: LoopTasks): ToolDefinition[] {
     name: "loop_create",
     label: "Create a loop",
     description:
-      "Schedule a prompt to be sent into this session, starting a new agent turn each time the loop fires. The schedule is an interval (30s, 10m, 2h) or a five-field cron expression in local time (0 9 * * 1-5). This does not run a command; the prompt is the work. Use loop_list to watch it and loop_delete to stop it.",
+      "Schedule a prompt to be sent into this session, starting a new agent turn each time the loop fires. The schedule is an interval (30s, 10m, 2h) or a five-field cron expression in local time (0 9 * * 1-5). This does not run a command; the prompt is the work. A fire is delivered when the agent is idle, so a busy agent delays the wake instead of losing it. Use loop_list to watch it and loop_delete to stop it.",
     parameters: CreateParameters,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       try {
@@ -284,7 +284,7 @@ export function loopTaskTools(loops: LoopTasks): ToolDefinition[] {
     name: "loop_list",
     label: "List loops",
     description:
-      "Show loops of this session with their raw schedule, next fire time, fire count and status. Pass an id to also get that loop's iterations, newest first, each with the tool calls the turn made. Omit the id to list them all.",
+      "Show loops of this session with their raw schedule, next fire time, fire count and status. A fire is counted at its scheduled time but delivered only when the agent is idle, so a fire count can lead the wakes actually sent. Pass an id to also get that loop's iterations, newest first, each with the tool calls the turn made. Omit the id to list them all.",
     parameters: ListParameters,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const scope = scopeOf(ctx);
@@ -321,7 +321,7 @@ export function loopTaskTools(loops: LoopTasks): ToolDefinition[] {
     name: "loop_update",
     label: "Pause, resume or complete a loop",
     description:
-      "Change a loop without deleting its history: pause stops fires, resume re-arms from now, complete ends it.",
+      "Change a loop without deleting its history: pause stops fires, resume re-arms from now, complete ends it. Pausing or completing also cancels a wake that is still waiting for the agent to be idle, so the loop will not wake the model after you stop it.",
     parameters: UpdateParameters,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const id = params.id.trim();

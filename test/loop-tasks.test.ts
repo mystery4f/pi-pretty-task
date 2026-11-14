@@ -28,7 +28,9 @@ async function setup() {
   const loops = new LoopTasks({
     sessions,
     now: () => now,
-    onFire: (fire) => fires.push(fire),
+    onFire: (fire) => {
+      fires.push(fire);
+    },
   });
   const scope = { cwd: directory.path, sessionId: "session-1" };
   return {
@@ -204,6 +206,29 @@ describe("LoopTasks", () => {
     expect(view?.task.nextFireAt).toBeUndefined();
   });
 
+  it("serializes concurrent pumps so one due loop fires once", async () => {
+    const task = await setup();
+    const created = await task.loops.create({
+      ...task.scope,
+      schedule: "10s",
+      prompt: "keep going",
+    });
+    task.advance(10_000);
+
+    // A timer tick and a turn end can ask at the same instant. Both read the
+    // same `nextFireAt` unless the store serializes them.
+    const [first, second] = await Promise.all([
+      task.loops.pump(task.now),
+      task.loops.pump(task.now),
+    ]);
+
+    expect(first).toHaveLength(1);
+    expect(second).toEqual([]);
+    expect(task.fires).toHaveLength(1);
+    const view = await task.loops.get(task.scope, created.task.id);
+    expect(view?.task.fires).toBe(1);
+  });
+
   it("completes at the expiry instead of firing again", async () => {
     const task = await setup();
     const created = await task.loops.create({
@@ -281,7 +306,9 @@ describe("LoopTasks", () => {
     const revived = new LoopTasks({
       sessions,
       now: () => task.now,
-      onFire: (fire) => fires.push(fire),
+      onFire: (fire) => {
+        fires.push(fire);
+      },
     });
     await revived.attach(task.scope);
 

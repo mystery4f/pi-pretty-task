@@ -24,6 +24,11 @@ export interface LoopFire {
   readonly fire: number;
   /** The session the fire belongs to, so the iteration can be persisted as it opens. */
   readonly session: TaskSession;
+  /**
+   * This fire used the last of `maxFires`, so the loop is already completed.
+   * The wake still belongs to the model even though the loop stopped.
+   */
+  readonly final: boolean;
 }
 
 export interface CreateLoopInput extends TaskScope {
@@ -83,8 +88,18 @@ export interface LoopTasksOptions {
   readonly sessions: TaskSessions;
   /** Clock seam for tests; defaults to `Date.now`. */
   readonly now?: () => number;
-  /** Called once per due fire, after the record with its new count is persisted. */
-  readonly onFire?: (fire: LoopFire) => void;
+  /**
+   * Called once per due fire, after the record with its new count is persisted.
+   * Awaited, so the caller's own record of the fire (its iteration) is durable
+   * before the pump returns and before any flush can deliver the wake.
+   */
+  readonly onFire?: (fire: LoopFire) => Promise<void> | void;
+  /**
+   * Called when a loop stopped before waking the model for a recorded fire: it
+   * was paused, completed or deleted while the wake waited. The caller drops
+   * that queued wake — pi's follow-up queue cannot be recalled once sent.
+   */
+  readonly onCancel?: (taskId: string) => Promise<void> | void;
 }
 
 /** First line of the prompt, collapsed and capped, so a loop has a readable name. */
@@ -98,12 +113,16 @@ function deriveLoopName(prompt: string): string {
 export class LoopTasks {
   private readonly sessions: TaskSessions;
   private readonly now: () => number;
-  private readonly onFire: ((fire: LoopFire) => void) | undefined;
+  private readonly onFire: ((fire: LoopFire) => Promise<void> | void) | undefined;
+  private readonly onCancel: ((taskId: string) => Promise<void> | void) | undefined;
+  /** The pump in flight, so a timer tick and a turn end cannot interleave. */
+  private inFlight: Promise<void> | undefined;
 
   constructor(options: LoopTasksOptions) {
     this.sessions = options.sessions;
     this.now = options.now ?? Date.now;
     this.onFire = options.onFire;
+    this.onCancel = options.onCancel;
   }
 
   /** Load the session so the pump sees it even before the first loop-tool call. */
@@ -274,6 +293,9 @@ export class LoopTasks {
     }
 
     if (changed) await this.sessions.persist(session);
+    // A loop that stopped must not wake the model for a fire it recorded while
+    // the agent was busy: the queued wake is dropped before this call returns.
+    if (changed && task.status !== "running") await this.onCancel?.(task.id);
     return { view: this.view(task), outcome };
   }
 
@@ -284,6 +306,7 @@ export class LoopTasks {
     const view = this.view(task);
     session.tasks.delete(task.id);
     await this.sessions.persist(session);
+    await this.onCancel?.(task.id);
     return view;
   }
 
@@ -293,8 +316,25 @@ export class LoopTasks {
    * arrives late drops the missed fires instead of replaying them in a storm.
    * The new count is persisted before `onFire` is called, so a crash cannot
    * wake the model twice for the same fire.
+   *
+   * Calls are serialized: a timer tick and a `turn_end` can ask at the same
+   * moment, and two pumps reading the same `nextFireAt` would fire one loop
+   * twice. A pump that arrives while another runs waits for it and then sees the
+   * advanced `nextFireAt`.
    */
   async pump(at: number): Promise<LoopFire[]> {
+    const run = (this.inFlight ?? Promise.resolve()).then(
+      () => this.pumpOnce(at),
+      () => this.pumpOnce(at),
+    );
+    this.inFlight = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
+  private async pumpOnce(at: number): Promise<LoopFire[]> {
     const fires: LoopFire[] = [];
 
     for (const session of await this.sessions.loaded()) {
@@ -340,9 +380,10 @@ export class LoopTasks {
 
         if (record.nextFireAt > at) continue;
 
+        const final = record.maxFires !== undefined && record.fires + 1 >= record.maxFires;
         record.fires += 1;
         record.lastFireAt = at;
-        fires.push({ task: record, at, fire: record.fires, session });
+        fires.push({ task: record, at, fire: record.fires, session, final });
         changed = true;
 
         if (record.maxFires !== undefined && record.fires >= record.maxFires) {
@@ -361,7 +402,7 @@ export class LoopTasks {
       if (changed) await this.sessions.persist(session);
     }
 
-    for (const fire of fires) this.onFire?.(fire);
+    for (const fire of fires) await this.onFire?.(fire);
     return fires;
   }
 
