@@ -11,6 +11,7 @@
 import { join } from "node:path";
 import type {
   AgentToolResult,
+  EventBus,
   ExtensionAPI,
   ExtensionCommandContext,
   ExtensionToolContext,
@@ -19,6 +20,7 @@ import type {
   Theme,
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
+import { createEventBus } from "@earendil-works/pi-coding-agent";
 import type { Component, KeybindingsManager, TUI } from "@earendil-works/pi-tui";
 
 import { createExtension } from "../../src/index.js";
@@ -76,6 +78,11 @@ export interface Harness {
   readonly toolNames: readonly string[];
   /** The description the model reads for one registered tool. */
   toolDescription(toolName: string): string;
+  /**
+   * The shared event bus the extension publishes on, handed over exactly as pi
+   * does: a test subscribes here to see what another extension would see.
+   */
+  readonly events: EventBus;
   /** Configuration problems reported while the extension loaded, oldest first. */
   readonly problems: readonly string[];
   /** Every message sent with `sendMessage`, oldest first. */
@@ -207,6 +214,10 @@ export function createHarness(defaultTurn: Turn, options: HarnessOptions = {}): 
   const widgets: WidgetUpdate[] = [];
   let opened: { component: Component; options: CustomOptions } | undefined;
 
+  // pi's own bus, so a listener that throws is isolated the way it is in
+  // production and the tests observe the real emit/on contract.
+  const events = createEventBus();
+
   const fakeTui = { requestRender: () => undefined } as unknown as TUI;
   const ui = {
     custom<T>(
@@ -254,6 +265,8 @@ export function createHarness(defaultTurn: Turn, options: HarnessOptions = {}): 
     }) as unknown as ExtensionCommandContext;
 
   const api = {
+    // The bus pi hands every extension: same object the harness exposes.
+    events,
     registerCommand(name: string, definition: CommandDefinition): void {
       commands.set(name, definition);
     },
@@ -311,6 +324,7 @@ export function createHarness(defaultTurn: Turn, options: HarnessOptions = {}): 
   });
 
   return {
+    events,
     toolNames: tools.map((tool) => tool.name),
     toolDescription(toolName: string): string {
       const tool = tools.find((candidate) => candidate.name === toolName);
