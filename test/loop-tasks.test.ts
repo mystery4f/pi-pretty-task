@@ -74,6 +74,7 @@ describe("LoopTasks", () => {
       fires: 0,
       status: "running",
     });
+    expect(created.task.id).toMatch(/^lp-[a-z0-9]{5}$/);
     expect(created.task.nextFireAt).toBe(task.now + 600_000);
     expect(created.untilNextFireMs).toBe(600_000);
 
@@ -176,6 +177,23 @@ describe("LoopTasks", () => {
     expect(view?.task.fires).toBe(1);
     expect(view?.task.nextFireAt).toBe(task.now + 10_000);
     expect(await task.loops.pump(task.now)).toEqual([]);
+  });
+
+  it("moves updatedAt when a loop fires", async () => {
+    const task = await setup();
+    const created = await task.loops.create({
+      ...task.scope,
+      schedule: "10s",
+      prompt: "keep going",
+    });
+    expect(created.task.updatedAt).toBe(created.task.createdAt);
+
+    task.advance(10_000);
+    expect(await task.loops.pump(task.now)).toHaveLength(1);
+
+    const view = await task.loops.get(task.scope, created.task.id);
+    expect(view?.task.updatedAt).toBe(task.now);
+    expect(view?.task.updatedAt).toBeGreaterThan(view?.task.createdAt ?? 0);
   });
 
   it("completes after the maximum number of fires", async () => {

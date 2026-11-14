@@ -6,7 +6,7 @@
  * @author mystery4f <40482524+mystery4f@users.noreply.github.com>
  */
 
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -34,6 +34,7 @@ function processTask(overrides: Partial<ProcessTask> = {}): ProcessTask {
     name: "build",
     status: "completed",
     createdAt: 1_700_000_000_000,
+    updatedAt: 1_700_000_000_000,
     endedAt: 1_700_000_001_000,
     command: "npm run build",
     cwd: "/work/project",
@@ -52,6 +53,7 @@ function loopRecord(overrides: Partial<LoopTask> = {}): LoopTask {
     name: "nightly review",
     status: "completed",
     createdAt: 1_700_000_000_000,
+    updatedAt: 1_700_000_000_000,
     endedAt: 1_700_000_002_000,
     schedule: "5m",
     prompt: "review the diff",
@@ -75,6 +77,36 @@ describe("the task record file", () => {
     expect(loaded).toEqual(records);
     expect(taskRecordPath(directory)).toBe(join(directory, "tasks.json"));
     expect(previousTaskRecordPath(directory)).toBe(join(directory, "tasks.json.prev"));
+  });
+
+  it("reads a version 1 record without an update time as created, then writes version 2", async () => {
+    const directory = await stateDirectory();
+    const oldProcess: Record<string, unknown> = { ...processTask({ id: "ab12cd" }) };
+    delete oldProcess.updatedAt;
+    const oldLoop: Record<string, unknown> = { ...loopRecord({ id: "lp12cd" }) };
+    delete oldLoop.updatedAt;
+    await writeFile(
+      taskRecordPath(directory),
+      JSON.stringify({ version: 1, tasks: [oldProcess, oldLoop] }),
+      "utf8",
+    );
+
+    const loaded = await new TaskStore(directory).load();
+
+    // The old file has no recency, so the record's own creation is the closest
+    // honest answer; the six-character id is a reference and is left alone.
+    expect(loaded).toHaveLength(2);
+    for (const record of loaded) {
+      expect(record.updatedAt).toBe(record.createdAt);
+    }
+    expect(loaded[0]?.id).toBe("ab12cd");
+
+    await new TaskStore(directory).save(loaded);
+
+    const saved = JSON.parse(await readFile(taskRecordPath(directory), "utf8")) as {
+      version: number;
+    };
+    expect(saved.version).toBe(2);
   });
 
   it("has no records before the first write, and never throws for that", async () => {

@@ -27,7 +27,10 @@ const RunParameters = Type.Object({
       "Shell command to run in the background. The shell depends on the platform and on the extension's configuration; `shell` picks another one for this call. Write the command in the dialect of that shell: cmd joins with `&`, while sh and bash treat `&` as background and need `;` or `&&`. Output is stored as raw bytes.",
   }),
   name: Type.Optional(
-    Type.String({ description: "Short label for the task; defaults to the command itself." }),
+    Type.String({
+      description:
+        "Short purpose of the task, not its command: why it runs, in a few words the panel can show. Example: `为 CI 生成 changelog`. Optional; without it the task falls back to a label derived from the command.",
+    }),
   ),
   timeoutSeconds: Type.Optional(
     Type.Number({
@@ -269,7 +272,7 @@ export function processTaskTools(tasks: ProcessTasks): ToolDefinition[] {
 
       const { view, tail } = found;
       const header = [
-        `${view.task.name} · ${view.task.id} · ${view.task.kind} · ${view.task.status}`,
+        `name: ${view.task.name} · ${view.task.id} · ${view.task.kind} · ${view.task.status}`,
         `elapsed ${formatDuration(view.elapsedMs)} · output ${formatBytes(view.outputBytes)}`,
         // The output is the story here, so the reason it stopped belongs in the
         // same header as the status instead of being a line the reader must ask for.

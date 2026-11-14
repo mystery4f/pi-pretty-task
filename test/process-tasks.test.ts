@@ -81,7 +81,7 @@ describe("bg_run", () => {
     trackPid(details);
 
     expect(elapsed).toBeLessThan(1000);
-    expect(details.id).toMatch(/^[a-z0-9]{4,8}$/);
+    expect(details.id).toMatch(/^bg-[a-z0-9]{5}$/);
     expect(details.kind).toBe("process");
     expect(details.status).toBe("running");
     expect(details.outputPath.endsWith(".output")).toBe(true);

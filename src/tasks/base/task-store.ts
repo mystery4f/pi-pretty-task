@@ -22,8 +22,12 @@ import type { LoopTask, ProcessTask, Task, TaskStatus } from "./task.js";
 /**
  * On-disk schema version. One version covers both kinds; a change that older
  * code could not read any more bumps it.
+ *
+ * Version 2 added `updatedAt` (ADR-0010). A version 1 document still loads: a
+ * record from before the field takes its own `createdAt` as the recency, which
+ * is the newest change anyone can prove, and the next save writes version 2.
  */
-export const TASK_FILE_VERSION = 1;
+export const TASK_FILE_VERSION = 2;
 
 /** One session's task records as they are stored. */
 export interface TaskFile {
@@ -59,6 +63,10 @@ function parseTask(value: unknown): Task | undefined {
   if (typeof value.name !== "string") return undefined;
   if (!isStatus(value.status)) return undefined;
   if (typeof value.createdAt !== "number" || !Number.isFinite(value.createdAt)) return undefined;
+  if (value.updatedAt !== undefined && !isFiniteNumber(value.updatedAt)) return undefined;
+  // A version 1 record predates the field; creating it is then the last thing
+  // known to have happened to it (ADR-0010).
+  const updatedAt = isFiniteNumber(value.updatedAt) ? value.updatedAt : value.createdAt;
   if (value.endedAt !== undefined && typeof value.endedAt !== "number") return undefined;
 
   if (value.kind === "process") {
@@ -74,7 +82,7 @@ function parseTask(value: unknown): Task | undefined {
       if (typeof value.exitCode !== "number") return undefined;
     }
     if (value.error !== undefined && typeof value.error !== "string") return undefined;
-    return value as unknown as ProcessTask;
+    return { ...value, updatedAt } as unknown as ProcessTask;
   }
 
   if (value.kind === "loop") {
@@ -116,7 +124,7 @@ function parseTask(value: unknown): Task | undefined {
     ) {
       return undefined;
     }
-    return { ...value, iterations } as unknown as Task;
+    return { ...value, updatedAt, iterations } as unknown as Task;
   }
 
   return undefined;
@@ -206,7 +214,10 @@ function parseTaskFile(text: string): Task[] | undefined {
     return undefined;
   }
   if (!isObject(document)) return undefined;
-  if (document.version !== TASK_FILE_VERSION) return undefined;
+  // Version 1 is readable because its records only lack `updatedAt`, which
+  // `parseTask` fills from `createdAt`; any other version may mean something
+  // this code cannot see, and the earlier generation is the safer answer.
+  if (document.version !== 1 && document.version !== TASK_FILE_VERSION) return undefined;
   if (!Array.isArray(document.tasks)) return undefined;
 
   const records: Task[] = [];
@@ -267,7 +278,9 @@ export interface TaskStoreOptions {
 function interrupt(record: Task, at: number): Task {
   if (record.kind === "loop") return interruptIterations(record, at);
   if (record.status !== "running") return record;
-  const interrupted: ProcessTask = { ...record, status: "interrupted", endedAt: at };
+  // A restart that ends a record is a state change like any other, so the
+  // recency moves with the ending (ADR-0010).
+  const interrupted: ProcessTask = { ...record, status: "interrupted", endedAt: at, updatedAt: at };
   delete interrupted.pid;
   return interrupted;
 }
@@ -298,7 +311,9 @@ function interruptIterations(task: LoopTask, at: number): LoopTask {
       ),
     };
   });
-  return { ...task, iterations };
+  // The interrupted turns ended with this restart: that is the loop's newest
+  // change, so its row moves up like any other ending (ADR-0010).
+  return { ...task, updatedAt: at, iterations };
 }
 
 /**

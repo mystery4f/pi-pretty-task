@@ -60,7 +60,7 @@ function tailLines(text: string | undefined): string[] {
 /** The prose the model reads: the same facts as the renderer draws. */
 function noticeText(details: FinishedTaskDetails): string {
   const lines = [
-    `${details.name} finished`,
+    `name: ${details.name}`,
     `id: ${details.id}`,
     `kind: ${details.kind}`,
     `status: ${details.status}`,

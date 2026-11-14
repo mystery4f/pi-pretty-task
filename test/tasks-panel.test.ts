@@ -33,12 +33,14 @@ function view(
   elapsedMs = 5000,
   outputBytes = 1024,
 ): PanelTaskView {
+  const created = overrides.createdAt ?? 1_000;
   const task: ProcessTask = {
     id,
     kind: "process",
     name: `task ${id}`,
     status: "running",
-    createdAt: 1_000,
+    createdAt: created,
+    updatedAt: created,
     command: "npm run dev",
     cwd: "/work",
     outputPath: `/work/.pi/tasks/session/${id}.output`,
@@ -55,12 +57,14 @@ function loopView(
   elapsedMs = 12_000,
   untilNextFireMs?: number,
 ): PanelTaskView {
+  const created = overrides.createdAt ?? 1_000;
   const task: LoopTask = {
     id,
     kind: "loop",
     name: `loop ${id}`,
     status: "running",
-    createdAt: 1_000,
+    createdAt: created,
+    updatedAt: created,
     schedule: "10s",
     prompt: "review the diff",
     fires: 0,
@@ -144,7 +148,7 @@ interface Opened {
   drawn(): string;
 }
 
-function openPanel(source: FakeSource): Opened {
+function openPanel(source: FakeSource, now: () => number = () => 13_000): Opened {
   const done = vi.fn();
   const panel = new TasksPanel({
     tui: { requestRender: () => undefined },
@@ -153,6 +157,8 @@ function openPanel(source: FakeSource): Opened {
     source,
     // Tests advance the panel by hand; the live timer would only add races.
     refreshMs: 0,
+    // A pinned clock keeps the ages on rows and in details exact.
+    now,
   });
   return { panel, source, done, drawn: () => panel.render(WIDTH).join("\n") };
 }
@@ -174,8 +180,13 @@ function expectNoHexColour(drawn: string): void {
   expect(drawn).not.toMatch(/#[0-9a-fA-F]{6}/);
 }
 
+/** The drawn screen without the fake theme's tags, for assertions on plain text. */
+function plain(text: string): string {
+  return text.replace(/<\/?[a-zA-Z]+>/g, "");
+}
+
 describe("task list", () => {
-  it("lists tasks newest first, with kind, name, id, status, elapsed and size", async () => {
+  it("lists tasks most recently changed first, with kind, name, id, status, elapsed and size", async () => {
     const source = new FakeSource();
     source.rows = [
       view("older1", { name: "older build", createdAt: 1_000 }, 2_000, 512),
@@ -840,6 +851,196 @@ describe("history, rerun and the output path", () => {
     await panel.settle();
 
     expect(drawn()).toContain("output: /work/.pi/tasks/session/run0001.output");
+
+    panel.dispose();
+  });
+});
+
+describe("recency and search", () => {
+  const ALT_Q = "\x1bq";
+  const BACKSPACE = "\x7f";
+
+  /** Three tasks whose commands, ids and statuses each say something different. */
+  function searchFixture(): FakeSource {
+    const source = new FakeSource();
+    source.rows = [
+      view("bg-a1b2c", { name: "web build", command: "npm run build", createdAt: 1_000 }),
+      view("bg-b2c3d", { name: "unit tests", command: "npm test", createdAt: 2_000 }),
+      view(
+        "bg-c3d4e",
+        {
+          name: "lint run",
+          command: "npm run lint",
+          status: "failed",
+          createdAt: 3_000,
+          endedAt: 4_000,
+          exitCode: 1,
+        },
+        1_000,
+      ),
+    ];
+    return source;
+  }
+
+  it("orders rows by the last change, not by when they were created", async () => {
+    const source = new FakeSource();
+    source.rows = [
+      // Created first, changed last: recency, not age, decides the order.
+      view("bg-aaaaa", { name: "old build", createdAt: 2_000, updatedAt: 9_000 }),
+      view("bg-bbbbb", { name: "new task", createdAt: 8_000, updatedAt: 8_500 }),
+    ];
+    const { panel, drawn } = openPanel(source);
+    await panel.settle();
+
+    const lines = drawn().split("\n");
+    const changed = lines.findIndex((line) => line.includes("old build"));
+    const created = lines.findIndex((line) => line.includes("new task"));
+    expect(changed).toBeGreaterThan(-1);
+    expect(created).toBeGreaterThan(changed);
+
+    panel.dispose();
+  });
+
+  it("shows how long ago a task last changed, on its row and in the detail", async () => {
+    const source = new FakeSource();
+    source.rows = [view("bg-aaaaa", { name: "nightly build", updatedAt: 5_000 }, 2_000, 512)];
+    const clock = 17_000; // Twelve seconds after the last change.
+    const { panel, drawn } = openPanel(source, () => clock);
+    await panel.settle();
+
+    const row = drawn()
+      .split("\n")
+      .find((line) => line.includes("nightly build"));
+    expect(row).toContain("12.0s ago");
+
+    panel.handleInput(ENTER);
+    // The label column pads the value, so the absolute time and its age are
+    // asserted as the two things the field says.
+    expect(plain(drawn())).toContain("Updated:");
+    expect(plain(drawn())).toContain(formatClockTime(5_000));
+    expect(plain(drawn())).toContain("12.0s ago");
+
+    panel.dispose();
+  });
+
+  it("filters live rows by a command substring as the query is typed", async () => {
+    const source = searchFixture();
+    const { panel, drawn } = openPanel(source);
+    await panel.settle();
+
+    panel.handleInput("/");
+    for (const character of "build") panel.handleInput(character);
+
+    expect(plain(drawn())).toContain("filter: build");
+    expect(drawn()).toContain("web build");
+    expect(drawn()).not.toContain("unit tests");
+    // The counts still cover every task: the failed lint run is history, hidden
+    // from the list but not forgotten by the header.
+    expect(drawn()).toContain("<error>");
+
+    panel.dispose();
+  });
+
+  it("filters by an id prefix", async () => {
+    const source = searchFixture();
+    const { panel, drawn } = openPanel(source);
+    await panel.settle();
+
+    panel.handleInput("/");
+    for (const character of "bg-b") panel.handleInput(character);
+
+    expect(drawn()).toContain("unit tests");
+    expect(drawn()).not.toContain("web build");
+    expect(drawn()).not.toContain("lint run");
+
+    panel.dispose();
+  });
+
+  it("filters by the status word without revealing the history h hides", async () => {
+    const source = searchFixture();
+    const { panel, drawn } = openPanel(source);
+    await panel.settle();
+
+    panel.handleInput("/");
+    for (const character of "failed") panel.handleInput(character);
+
+    // The query matches a failed record, but history stays the reader's call.
+    expect(plain(drawn())).toContain("filter: failed");
+    expect(drawn()).not.toContain("lint run");
+    expect(plain(drawn())).toContain("History is hidden");
+
+    // Leaving search keeps the query; h then reveals the past under the filter.
+    panel.handleInput(ALT_Q);
+    panel.handleInput("h");
+    await panel.settle();
+    expect(drawn()).toContain("lint run");
+    expect(drawn()).not.toContain("web build");
+
+    panel.dispose();
+  });
+
+  it("turns a pasted command into a one-line query", async () => {
+    const source = searchFixture();
+    const { panel, drawn } = openPanel(source);
+    await panel.settle();
+
+    panel.handleInput("/");
+    panel.handleInput("\x1b[200~npm test\nnpm run lint\x1b[201~");
+
+    expect(plain(drawn())).toContain("filter: npm test npm run lint");
+    expect(plain(drawn())).not.toContain("filter: npm test\n");
+
+    panel.dispose();
+  });
+
+  it("edits the query with backspace", async () => {
+    const source = searchFixture();
+    const { panel, drawn } = openPanel(source);
+    await panel.settle();
+
+    panel.handleInput("/");
+    for (const character of "build") panel.handleInput(character);
+    panel.handleInput(BACKSPACE);
+
+    expect(plain(drawn())).toContain("filter: buil");
+    expect(drawn()).toContain("web build");
+
+    panel.dispose();
+  });
+
+  it("leaves search on alt+q with the query kept, and closes on the second alt+q", async () => {
+    const source = searchFixture();
+    const { panel, done, drawn } = openPanel(source);
+    await panel.settle();
+
+    panel.handleInput("/");
+    for (const character of "build") panel.handleInput(character);
+
+    panel.handleInput(ALT_Q);
+    expect(done).not.toHaveBeenCalled();
+    // The header keeps saying why rows are missing after search mode is left.
+    expect(plain(drawn())).toContain("filter: build");
+    expect(drawn()).toContain("web build");
+
+    panel.handleInput(ALT_Q);
+    expect(done).toHaveBeenCalledTimes(1);
+
+    panel.dispose();
+  });
+
+  it("closes nothing on escape or q", async () => {
+    const source = searchFixture();
+    const { panel, done } = openPanel(source);
+    await panel.settle();
+
+    panel.handleInput("\x1b");
+    panel.handleInput("q");
+    expect(done).not.toHaveBeenCalled();
+
+    panel.handleInput("/");
+    panel.handleInput("build");
+    panel.handleInput("\x1b");
+    expect(done).not.toHaveBeenCalled();
 
     panel.dispose();
   });

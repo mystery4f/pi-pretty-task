@@ -15,7 +15,7 @@ import { mkdir } from "node:fs/promises";
 
 import type { TaskScope } from "./runtime-state.js";
 import { sessionTaskDirectory } from "./runtime-state.js";
-import type { Task } from "./task.js";
+import type { Task, TaskKind } from "./task.js";
 import { TaskStore } from "./task-store.js";
 
 /** One session's loaded record set, shared by the stores that use it. */
@@ -33,7 +33,13 @@ export interface TaskSessionsOptions {
 
 /** No 0/O/1/l: an id is meant to be retyped by a human into a later message. */
 const ID_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789";
-const ID_LENGTH = 6;
+/** Five random characters after the kind prefix (ADR-0011). */
+const ID_SUFFIX_LENGTH = 5;
+/**
+ * The first characters of an id say which kind of task it names, so a quoted id
+ * (`bg-1a2cf`, `lp-1a2cf`) is readable without the panel in front of you.
+ */
+const ID_PREFIX: Record<TaskKind, string> = { process: "bg-", loop: "lp-" };
 
 export class TaskSessions {
   private readonly now: () => number;
@@ -69,11 +75,19 @@ export class TaskSessions {
     return session.store.save([...session.tasks.values()]);
   }
 
-  /** A fresh id that is free in this session, whatever the kind. */
-  createId(session: TaskSession): string {
+  /**
+   * A fresh id that is free in this session, whatever the kind. The prefix
+   * carries the kind and the five random characters keep an id short enough to
+   * retype; the collision check spans the whole id, so the two prefixes never
+   * compete (ADR-0011). Records written before the prefix existed keep their
+   * six-character ids: an id is a reference a later message may quote, and
+   * rewriting one would break that reference.
+   */
+  createId(session: TaskSession, kind: TaskKind): string {
+    const prefix = ID_PREFIX[kind];
     for (;;) {
-      let id = "";
-      for (let index = 0; index < ID_LENGTH; index += 1) {
+      let id = prefix;
+      for (let index = 0; index < ID_SUFFIX_LENGTH; index += 1) {
         id += ID_ALPHABET.charAt(randomInt(ID_ALPHABET.length));
       }
       if (!session.tasks.has(id)) return id;

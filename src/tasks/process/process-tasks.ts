@@ -213,12 +213,14 @@ export class ProcessTasks {
     const cwd = await this.resolveWorkingDirectory(input.cwd, input.workingDirectory);
     const id = this.createId(session);
     const name = input.name?.trim();
+    const createdAt = this.now();
     const task: ProcessTask = {
       id,
       kind: "process",
       name: name !== undefined && name.length > 0 ? name : deriveTaskName(input.command),
       status: "running",
-      createdAt: this.now(),
+      createdAt,
+      updatedAt: createdAt,
       command: input.command,
       cwd,
       outputPath: processOutputPath(session.directory, id),
@@ -397,8 +399,12 @@ export class ProcessTasks {
     // A stop that was already answered settled this record; a late exit may only
     // improve its byte count, never overwrite what the kill said.
     if (task.endedAt !== undefined) return;
+    const at = this.now();
     task.exitCode = exitCode;
-    task.endedAt = this.now();
+    task.endedAt = at;
+    // Ending is a transition a reader cares about, so the row moves up in the
+    // panel even though its output stopped growing this instant (ADR-0010).
+    task.updatedAt = at;
     if (killReason !== undefined) {
       // We asked for this end, so it is a kill even when the exit code looks
       // ordinary — and the reason says who asked.
@@ -528,6 +534,6 @@ export class ProcessTasks {
   }
 
   private createId(session: SessionTasks): string {
-    return this.hub.createId(session);
+    return this.hub.createId(session, "process");
   }
 }

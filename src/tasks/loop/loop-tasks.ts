@@ -184,11 +184,12 @@ export class LoopTasks {
 
     const name = input.name?.trim();
     const task: LoopTask = {
-      id: this.sessions.createId(session),
+      id: this.sessions.createId(session, "loop"),
       kind: "loop",
       name: name !== undefined && name.length > 0 ? name : deriveLoopName(prompt),
       status: "running",
       createdAt,
+      updatedAt: createdAt,
       schedule: recurrence.expression,
       prompt,
       fires: 0,
@@ -292,7 +293,12 @@ export class LoopTasks {
         break;
     }
 
-    if (changed) await this.sessions.persist(session);
+    if (changed) {
+      // Pause, resume and complete are the user-visible transitions of a loop,
+      // so each one moves the record up in the panel (ADR-0010).
+      task.updatedAt = now;
+      await this.sessions.persist(session);
+    }
     // A loop that stopped must not wake the model for a fire it recorded while
     // the agent was busy: the queued wake is dropped before this call returns.
     if (changed && task.status !== "running") await this.onCancel?.(task.id);
@@ -361,6 +367,7 @@ export class LoopTasks {
           record.error = `invalid schedule "${record.schedule}"`;
           record.endedAt = at;
           delete record.nextFireAt;
+          record.updatedAt = at;
           changed = true;
           continue;
         }
@@ -383,6 +390,9 @@ export class LoopTasks {
         const final = record.maxFires !== undefined && record.fires + 1 >= record.maxFires;
         record.fires += 1;
         record.lastFireAt = at;
+        // A fire is the loop's own transition, so the panel's sort key follows it
+        // even when the resulting turn records no tool calls (ADR-0010).
+        record.updatedAt = at;
         fires.push({ task: record, at, fire: record.fires, session, final });
         changed = true;
 
@@ -415,6 +425,9 @@ export class LoopTasks {
     task.status = status;
     task.endedAt = at;
     delete task.nextFireAt;
+    // Every status change ends here, so this is the one place the loop's
+    // recency moves with it (ADR-0010).
+    task.updatedAt = at;
   }
 
   private view(task: LoopTask): LoopTaskView {

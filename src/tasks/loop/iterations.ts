@@ -217,6 +217,10 @@ export class Iterations {
       const iteration = this.resolve(session, entry.taskId, entry.fire);
       if (iteration === undefined || iteration.status !== "running") continue;
       closeIteration(iteration, at, aborted ? "aborted" : "completed");
+      // The turn the loop woke has settled, which is the loop's own change: its
+      // row moves on that, not only on the fire that started the turn (ADR-0010).
+      const owner = session.tasks.get(entry.taskId);
+      if (owner?.kind === "loop") owner.updatedAt = at;
       changed = true;
     }
     if (changed) await this.sessions.persist(session);
