@@ -1190,6 +1190,27 @@ describe("the status filter", () => {
 
     panel.dispose();
   });
+
+  it("keeps a chain under running while its steps run, and under done once they end", async () => {
+    const source = new FakeSource();
+    source.rows = [
+      chainView("ch-run01", { name: "ship it" }),
+      chainView("ch-done1", { name: "old news", status: "completed" }),
+    ];
+    const { panel, drawn } = await openOn("chains", source);
+
+    panel.handleInput("f");
+    expect(drawn()).toContain("ship it");
+    expect(drawn()).not.toContain("old news");
+
+    // Failed, then done: the finished queue is the only one left on the page.
+    panel.handleInput("f");
+    panel.handleInput("f");
+    expect(drawn()).toContain("old news");
+    expect(drawn()).not.toContain("ship it");
+
+    panel.dispose();
+  });
 });
 describe("rerun and the output path", () => {
   it("reruns the selected task with R and selects the new row", async () => {
