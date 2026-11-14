@@ -511,6 +511,34 @@ describe("bg_run lifetime", () => {
   });
 });
 
+describe("bg_wait", () => {
+  it("returns the final view as soon as the task ends", async () => {
+    const dir = await makeTempDir();
+    cleanup.push(dir.dispose);
+    const command = await writeScript(
+      dir.path,
+      "short-job.js",
+      ["process.stdout.write('done\\n');", "setTimeout(() => { process.exit(0); }, 400);", ""].join(
+        "\n",
+      ),
+    );
+    const harness = createHarness({ cwd: dir.path, sessionId: "session-wait" });
+    const task = await startRunning(harness, command, "short wait job");
+
+    const started = Date.now();
+    const result = await harness.call("bg_wait", { id: task.id, timeoutSeconds: 15 });
+    const elapsed = Date.now() - started;
+    const details = result.details as TaskDetails & { waited: boolean };
+
+    // The answer is the record after the end, not whatever was true at the start.
+    expect(details.status).toBe("completed");
+    expect(details.exitCode).toBe(0);
+    expect(details.waited).toBe(true);
+    expect(elapsed).toBeLessThan(10_000);
+    expect(resultText(result)).toContain("completed");
+  });
+});
+
 describe("bg_kill", () => {
   it("stops the command, records it as killed by the user, and keeps the record readable", async () => {
     const dir = await makeTempDir();
