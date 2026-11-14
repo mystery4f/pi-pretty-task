@@ -39,7 +39,7 @@
 | 能力 | 说明 | 复杂度 | 风险 |
 |---|---|---|---|
 | 状态栏摘要 | `pi-pretty-task · 1 running · 2 loops` | 低 | 低 |
-| `/tasks` 浮层 | 顶部两行是标题带与各结局计数（Running / Succeeded / Failed / Timeout / Killed），下面一张表混排两种 kind：名字、id、状态、退出码、耗时，process 显示输出大小、loop 显示触发次数与下次触发；默认只列在跑的，`h` 看历史 | 中（`ctx.ui.custom` + 键盘交互） | 中：终端尺寸与滚动 |
+| `/tasks` 浮层 | 顶部两行是标题带与各结局计数（Running / Succeeded / Failed / Timeout / Killed），下面一张表混排两种 kind：name（用途描述）、id（`bg-`/`lp-` 前缀）、状态、退出码、耗时、距上次更新的相对时间，process 显示输出大小、loop 显示触发次数与下次触发；按更新时间降序；默认只列在跑的，`h` 看历史，`/` 进入搜索（子串匹配 name/id/命令或 prompt/状态词，支持粘贴），`alt+q` 首次退出搜索、再次关闭面板 | 中（`ctx.ui.custom` + 键盘交互 + 单行输入） | 中：终端尺寸、滚动与粘贴序列 |
 | 详情页 | process：完整命令、输出尾部、退出码，`↑/↓` 滚动、`r` 恢复跟随、`←` 返回；loop：prompt、下次触发、Iteration 列表，进入 Iteration 看该轮工具调用 | 中 | 中 |
 | 快捷操作 | `k` 停止、`a` 全部停止、`x` 关闭、`l` 按 Loop 过滤 | 低 | 低 |
 

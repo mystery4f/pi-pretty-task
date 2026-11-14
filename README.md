@@ -11,7 +11,7 @@ Two jobs, one package:
 - **Task** — run a long-lived shell command in the background, watch it from a panel, kill its whole process tree.
 - **Loop / Iteration** — wake the LLM on a schedule with a preset prompt (`30s`/`10m`/`2h`, or five-field cron such as `0 9 * * 1-5`), and record every tool call of the turn that follows, so "what did that loop actually run?" has an answer. Wakes wait for an idle agent instead of interrupting a turn.
 
-The panel is a `/tasks` overlay plus a one-line status summary — no persistent widget. Keys: `↑/↓` select, `Enter` logs, `k` stop, `a` stop all, `h` history, `R` rerun, `c` path, `l` loops, `x` close.
+The panel is a `/tasks` overlay plus one summary line above the editor — the footer row is shared with every other extension, so the count lives where it can be read. Keys: `↑/↓` select, `Enter` logs, `/` search, `alt+q` close (first press leaves search mode), `k` stop, `a` stop all, `h` history, `R` rerun, `c` path, `l` loops. Rows sort by when they last changed, and an id says its kind on sight: `bg-` runs a command, `lp-` wakes the assistant.
 
 Deliberately not here: subagent/delegate/fusion tools, monitors-with-shell, workflow/orchestration families, provider-attested runs. See [docs/scope-v1.md](docs/scope-v1.md).
 
