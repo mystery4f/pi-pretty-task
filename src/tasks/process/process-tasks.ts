@@ -342,8 +342,12 @@ export class ProcessTasks {
     const task = session.tasks.get(id);
     if (task === undefined || task.kind !== "process") return undefined;
     // A task nobody supervises has no later end to wait for: history loaded from
-    // disk, and a record another end already settled, answer right away.
-    if (!session.running.has(id)) return { view: this.view(session, task), waited: true };
+    // disk, and a record another end already settled, answer right away. `waited`
+    // still tells the truth: a record left `running` without a supervisor caught
+    // no end, so it answers false even though the wait returns at once.
+    if (!session.running.has(id)) {
+      return { view: this.view(session, task), waited: task.endedAt !== undefined };
+    }
 
     // Waiting is a listener on the end event, not a poll: `finish` resolves it on
     // the same tick the record gets its final status, so the wake-up sees the end.
