@@ -124,6 +124,8 @@ describe("bg_run with a template", () => {
     expect(description).toContain("test (");
     expect(description.indexOf("lint (")).toBeLessThan(description.indexOf("test ("));
     expect(description).not.toContain("No command templates are configured");
+    // A model that wrote a template and then saw it missing has to be told why.
+    expect(description).toContain("applies only after /reload or a new session");
     // The description is part of the prompt prefix a provider caches: the same
     // configuration must produce a byte-identical string on every load, or a
     // restart or `/reload` would re-pay for the whole prefix.
@@ -137,6 +139,31 @@ describe("bg_run with a template", () => {
     expect(harness.toolDescription("bg_run")).toContain(
       "No command templates are configured, so `template` is rejected.",
     );
+  });
+
+  it("holds the description to a fixed ceiling however many templates exist", async () => {
+    const dir = await makeTempDir();
+    cleanup.push(dir.dispose);
+    const paths = templateConfigPaths(dir.path, join(dir.path, "agent"));
+    const templates: Record<string, { command: string }> = {};
+    for (let index = 0; index < 80; index += 1) {
+      templates[`template-${String(index).padStart(2, "0")}`] = {
+        command: `node scripts/task-${String(index)}.js --with-a-long-argument`,
+      };
+    }
+    await writeConfig(paths.projectFile, { templates });
+    const harness = createHarness({ cwd: dir.path, sessionId: "session-template-many" });
+
+    const description = harness.toolDescription("bg_run");
+
+    // 190 characters of base sentence, 27 of lead-in, 300 of list, 145 of reload note.
+    expect(description.length).toBeLessThan(700);
+    expect(description).toContain("…");
+    expect(description).toContain("Command templates available here:");
+
+    const rejected = resultText(await harness.call("bg_run", { template: "nope" }));
+    expect(rejected).toContain("… (80 in total)");
+    expect(rejected.length).toBeLessThan(900);
   });
 
   it("rejects an unknown name before a task exists and lists the known names", async () => {
