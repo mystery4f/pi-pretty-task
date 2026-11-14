@@ -192,11 +192,18 @@ function iterationOf(
   };
 }
 /** A source stand-in: rows to list, tails to read, stops to record. */
+/** A source stand-in: rows to list, tails to read, stops to record. */
 class FakeSource implements PanelSource {
+  /** The session the panel belongs to; a row tagged otherwise came from elsewhere. */
+  readonly sessionId = "mine0000-0000-4000-8000-000000000000";
   rows: PanelTaskView[] = [];
+  /** Roots of the other sessions in the same checkout, tagged with their session. */
+  otherRows: PanelTaskView[] = [];
   readonly tails = new Map<string, OutputTail | Error>();
   readonly stopped: string[] = [];
   readonly tailed: string[] = [];
+  /** The session each tail was asked for; undefined means this panel's own. */
+  readonly tailedFrom: Array<string | undefined> = [];
   listCalls = 0;
 
   async list(): Promise<readonly PanelTaskView[]> {
@@ -204,8 +211,13 @@ class FakeSource implements PanelSource {
     return this.rows;
   }
 
-  async tail(id: string): Promise<OutputTail | undefined> {
+  async others(): Promise<readonly PanelTaskView[]> {
+    return this.otherRows;
+  }
+
+  async tail(id: string, sessionId?: string): Promise<OutputTail | undefined> {
     this.tailed.push(id);
+    this.tailedFrom.push(sessionId);
     const answer = this.tails.get(id);
     if (answer instanceof Error) throw answer;
     return answer ?? { text: "", lines: 0, truncated: false };
@@ -1923,6 +1935,92 @@ describe("chains in the list and in the detail", () => {
     expect(drawn()).toContain("Failed 1");
     expect(drawn()).toContain("Running 1");
     expect(drawn()).not.toContain("watch loop #7");
+
+    panel.dispose();
+  });
+});
+
+describe("the other sessions sharing a checkout", () => {
+  const STRANGER = "7f2c9d10-4b3a-4e55-9a01-6c7d8e9f0a1b";
+
+  /**
+   * One session's row of its own, and one root another session left in the same
+   * checkout: `o` is the only key that brings the second into view (ticket #27).
+   */
+  function twoSessions(): FakeSource {
+    const source = new FakeSource();
+    source.rows = [view("bg-a1b2c", { name: "web build" })];
+    source.otherRows = [{ ...view("bg-x1x2x", { name: "deploy the edge" }), sessionId: STRANGER }];
+    return source;
+  }
+
+  it("keeps another session's rows off the page until o asks for them", async () => {
+    const source = twoSessions();
+    const { panel, drawn } = await openOn("processes", source, () => 13_000, plainTheme());
+    await panel.settle();
+
+    expect(drawn()).not.toContain("deploy the edge");
+    // The counts speak for this session only: another session's run is not ours.
+    expect(drawn()).toContain("Running 1");
+
+    panel.handleInput("o");
+    await panel.settle();
+    const revealed = drawn();
+    expect(revealed).toContain("deploy the edge");
+    // The row is tagged with the session it came from, shortened to fit a column.
+    expect(revealed).toContain("@7f2c9d");
+    expect(revealed).toContain("Running 1");
+
+    panel.handleInput("o");
+    await panel.settle();
+    expect(drawn()).not.toContain("deploy the edge");
+
+    panel.dispose();
+  });
+
+  it("stops and reruns nothing on another session's row", async () => {
+    const source = twoSessions();
+    const { panel, drawn } = await openOn("processes", source, () => 13_000, plainTheme());
+    await panel.settle();
+
+    panel.handleInput("o");
+    await panel.settle();
+    panel.handleInput(DOWN);
+    panel.handleInput("k");
+    await panel.settle();
+    expect(source.stopped).toEqual([]);
+    expect(drawn()).toContain("another session's task is read-only here");
+
+    panel.handleInput("R");
+    await panel.settle();
+    expect(source.reran).toEqual([]);
+
+    // Nor does "stop all" reach across: only this session's own row stops.
+    panel.handleInput("a");
+    await panel.settle();
+    expect(source.stopped).toEqual(["bg-a1b2c"]);
+
+    panel.dispose();
+  });
+
+  it("names the whole session in the detail and reads its output from there", async () => {
+    const source = twoSessions();
+    source.tails.set("bg-x1x2x", { text: "edge ok", lines: 1, truncated: false });
+    const { panel, drawn } = await openOn("processes", source, () => 13_000, plainTheme());
+    await panel.settle();
+
+    panel.handleInput("o");
+    await panel.settle();
+    panel.handleInput(DOWN);
+    panel.handleInput(ENTER);
+    await panel.settle();
+
+    const text = drawn();
+    expect(text).toContain("deploy the edge");
+    // A six-character tag cannot be the whole truth, so the detail spells it out.
+    expect(text).toContain(STRANGER);
+    expect(source.tailed).toContain("bg-x1x2x");
+    expect(source.tailedFrom).toContain(STRANGER);
 
     panel.dispose();
   });

@@ -8,12 +8,18 @@
  * @author mystery4f <40482524+mystery4f@users.noreply.github.com>
  */
 
+import { readdir } from "node:fs/promises";
+import { join } from "node:path";
 import type {
   ExtensionAPI,
   ExtensionCommandContext,
   ExtensionUIContext,
 } from "@earendil-works/pi-coding-agent";
-import type { TaskScope } from "../tasks/base/runtime-state.js";
+import {
+  RUNTIME_STATE_DIRECTORY,
+  sessionTaskDirectory,
+  type TaskScope,
+} from "../tasks/base/runtime-state.js";
 import type { Task } from "../tasks/base/task.js";
 import type { ChainTasks, ChainTaskView } from "../tasks/chain/chain-tasks.js";
 import type { LoopTasks, LoopTaskView } from "../tasks/loop/loop-tasks.js";
@@ -83,6 +89,7 @@ export function panelSourceFor(
   });
 
   return {
+    sessionId: scope.sessionId,
     async list() {
       // Children are listed too: the header counts them even when no page shows them
       // as a row, and a chain's detail resolves its steps by id (ADR-0014).
@@ -93,8 +100,39 @@ export function panelSourceFor(
       ]);
       return [...records, ...scheduled.map(loopRow), ...queues.map(chainRow)];
     },
-    async tail(id) {
-      const logs = await processes.logs(scope, id, { lines: DETAIL_TAIL_LINES });
+    async others() {
+      // Other sessions lose nothing by being seen: each keeps its own store under the
+      // same runtime root, so the directories there name them. A session whose store
+      // cannot be read drops out alone and never hides this session's own rows.
+      const mine = sessionTaskDirectory(scope.cwd, scope.sessionId);
+      const entries = await readdir(join(scope.cwd, RUNTIME_STATE_DIRECTORY), {
+        withFileTypes: true,
+      });
+      const rows: PanelTaskView[] = [];
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        if (sessionTaskDirectory(scope.cwd, entry.name) === mine) continue;
+        try {
+          const other: TaskScope = { cwd: scope.cwd, sessionId: entry.name };
+          const [records, scheduled, queues] = await Promise.all([
+            processes.listAll(other),
+            loops.list(other),
+            chains.list(other),
+          ]);
+          const theirs = [...records, ...scheduled.map(loopRow), ...queues.map(chainRow)];
+          rows.push(...theirs.map((row) => ({ ...row, sessionId: entry.name })));
+        } catch {
+          // One unreadable session is not a reason to hide the rest.
+        }
+      }
+      return rows;
+    },
+    async tail(id, sessionId) {
+      const logs = await processes.logs(
+        sessionId === undefined ? scope : { ...scope, sessionId },
+        id,
+        { lines: DETAIL_TAIL_LINES },
+      );
       return logs?.tail;
     },
     async stop(id) {

@@ -75,6 +75,11 @@ export interface PanelTaskView {
   readonly outputBytes: number;
   /** A running loop's countdown to the next fire, when the store knows it. */
   readonly untilNextFireMs?: number;
+  /**
+   * The session the record belongs to, when it is not this panel's own. A tagged
+   * row is shown only once `o` asks for the other sessions, and only to be read.
+   */
+  readonly sessionId?: string;
 }
 
 /** What a stop attempt produced, or `undefined` when there is no such task. */
@@ -90,10 +95,20 @@ export interface PanelStopResult {
  * (`tasks-command.ts`) implements it; tests implement it with fixtures.
  */
 export interface PanelSource {
+  /** The session this panel belongs to; `others` rows carry their own instead. */
+  readonly sessionId?: string;
   /** Every task in the session, in any order; the panel sorts newest first. */
   list(): Promise<readonly PanelTaskView[]>;
-  /** Trailing output for one process task; an absent file is an empty tail, not an error. */
-  tail(id: string): Promise<OutputTail | undefined>;
+  /**
+   * The roots of the other sessions working in the same checkout, each tagged with
+   * its session. Missing when the panel cannot see them; `o` then says so.
+   */
+  others?(): Promise<readonly PanelTaskView[]>;
+  /**
+   * Trailing output for one process task; an absent file is an empty tail, not an
+   * error. The session names whose store to read, for a row shown by `o`.
+   */
+  tail(id: string, sessionId?: string): Promise<OutputTail | undefined>;
   /** Stop one task; the store ends a process tree or a loop schedule, the panel never acts. */
   stop(id: string): Promise<PanelStopResult | undefined>;
   /**
@@ -148,6 +163,12 @@ const TAB_EMPTY: Record<PanelTab, string> = {
 };
 
 /**
+ * What a key says when it would change, rather than read, a row another session
+ * owns. One wording for `k`, `a` and `R`, so the rule reads the same wherever met.
+ */
+const READ_ONLY = "another session's task is read-only here";
+
+/**
  * The page a reopened panel lands on: the last one a reader used (ADR-0012). It
  * lives outside the component because pi builds a fresh panel every time.
  */
@@ -196,6 +217,13 @@ export class TasksPanel implements Component {
   private tab: PanelTab = rememberedTab;
   /** The status filter `f` cycles, applied inside the open page. */
   private filter: PanelFilter = "all";
+  /**
+   * Whether `o` has brought in the other sessions working in this checkout. Their
+   * rows are read-only and tagged, and the counts above never include them.
+   */
+  private showOthers = false;
+  /** Roots of the other sessions, loaded on demand and merged into the page. */
+  private otherRows: PanelTaskView[] = [];
   /**
    * What each page had selected when the reader left it, keyed by page. Reopening a
    * page lands where it was left rather than at the top (ADR-0012 keeps selection by id).
@@ -267,6 +295,12 @@ export class TasksPanel implements Component {
   async refresh(): Promise<void> {
     try {
       this.allRows = [...(await this.source.list())].sort(mostRecentlyChangedFirst);
+      // The other sessions are read only when `o` asked for them, and a failure to
+      // read one of them must never empty the rows this session does own.
+      this.otherRows =
+        this.showOthers && this.source.others !== undefined
+          ? [...(await this.source.others())]
+          : [];
       this.applyFilters();
     } catch {
       // A store that cannot list is a store with nothing to show, not a crash.
@@ -298,9 +332,15 @@ export class TasksPanel implements Component {
    * follow either narrowing (ADR-0012).
    */
   private applyFilters(): void {
-    const roots = this.allRows.filter((row) => inTab(row.task, this.tab));
-    const kept = roots.filter((row) => passesFilter(row.task, this.filter));
-    this.rows = this.query.length === 0 ? kept : kept.filter((row) => this.matchesQuery(row.task));
+    const page = (rows: readonly PanelTaskView[]): PanelTaskView[] =>
+      rows
+        .filter((row) => inTab(row.task, this.tab))
+        .filter((row) => passesFilter(row.task, this.filter))
+        .filter((row) => this.query.length === 0 || this.matchesQuery(row.task));
+    // Another session's rows join the page only behind `o`, and they obey the same
+    // page, filter and query as this session's own, so a search never reaches across
+    // into another session by accident (ticket #27).
+    this.rows = [...page(this.allRows), ...page(this.otherRows)].sort(mostRecentlyChangedFirst);
     this.keepSelection();
   }
 
@@ -428,6 +468,7 @@ export class TasksPanel implements Component {
     if (data === "k") this.stopSelected();
     if (data === "a") this.stopAll();
     if (data === "f") this.cycleFilter();
+    if (data === "o") this.toggleOthers();
     if (data === "R") this.rerunSelected();
     if (data === "c") this.showOutputPath();
   }
@@ -759,8 +800,16 @@ export class TasksPanel implements Component {
   private stopSelected(): void {
     // In a task detail `k` stops what is open: an expanded fire is its own record,
     // so stopping it must not end the schedule behind it (ADR-0015).
-    const id = this.mode === "detail" ? this.detailId : this.selectedId;
+    const row = this.mode === "detail" ? this.detailRow() : this.rows[this.selectedIndex()];
+    const id = row?.task.id;
     if (id === undefined) return;
+    // Another session's task belongs to that session: this panel may read it, never
+    // end it, so `k` says why and leaves the store alone (ticket #27).
+    if (this.foreign(row)) {
+      this.notice = READ_ONLY;
+      this.paint();
+      return;
+    }
     this.enqueue(async () => {
       let result: PanelStopResult | undefined;
       try {
@@ -783,9 +832,11 @@ export class TasksPanel implements Component {
 
   /** `a` stops every row the list shows, one store call at a time. */
   private stopAll(): void {
-    const ids = this.rows.map((row) => row.task.id);
+    // `o` can put another session's rows on the page, and `a` stops only the ones
+    // this session owns: the rest are there to be read (ticket #27).
+    const ids = this.rows.filter((row) => !this.foreign(row)).map((row) => row.task.id);
     if (ids.length === 0) {
-      this.notice = "No tasks to stop.";
+      this.notice = this.rows.length === 0 ? "No tasks to stop." : READ_ONLY;
       this.paint();
       return;
     }
@@ -846,11 +897,43 @@ export class TasksPanel implements Component {
     this.paint();
   }
 
+  /**
+   * `o` brings in the other sessions working in this checkout, or puts them away
+   * again. They are read only and tagged, and the counts above stay this session's
+   * own (ticket #27); the store is asked only when they are shown.
+   */
+  private toggleOthers(): void {
+    this.showOthers = !this.showOthers;
+    if (!this.showOthers) this.otherRows = [];
+    if (this.showOthers && this.source.others === undefined) {
+      this.notice = "No other sessions can be seen from here.";
+    } else {
+      this.notice = this.showOthers
+        ? "showing other sessions read-only"
+        : "showing this session only";
+    }
+    this.applyFilters();
+    this.paint();
+    if (this.showOthers) {
+      this.enqueue(async () => {
+        await this.refresh();
+        this.paint();
+      });
+    }
+  }
+
   /** `R` runs the selected command again; the old row stays as its own record. */
   private rerunSelected(): void {
     const row = this.rows[this.selectedIndex()];
     if (row === undefined) {
       this.notice = "No task selected.";
+      this.paint();
+      return;
+    }
+    // Another session started this command, so running it again is its decision, not
+    // a reader's on a page that only borrowed the row (ticket #27).
+    if (this.foreign(row)) {
+      this.notice = READ_ONLY;
       this.paint();
       return;
     }
@@ -938,11 +1021,14 @@ export class TasksPanel implements Component {
 
   private async readTail(): Promise<void> {
     // Only a process task has an output file; a loop detail never asks the source for one.
-    if (this.detailRow()?.task.kind !== "process") return;
+    const row = this.detailRow();
+    if (row?.task.kind !== "process") return;
     const id = this.detailId;
     if (id === undefined) return;
     try {
-      const tail = await this.source.tail(id);
+      // A row `o` brought in reads the output from its own session's store, which is
+      // still only a read: the file belongs to that session, not to this panel.
+      const tail = await this.source.tail(id, row.sessionId);
       this.detailLines = tail === undefined ? [] : tailLines(tail.text, DETAIL_TAIL_LINES);
       this.detailTruncated = tail?.truncated === true;
       this.detailError = undefined;
@@ -1082,7 +1168,7 @@ export class TasksPanel implements Component {
 
   /** The list's keys, the same on every page (ADR-0012): one model, three lists. */
   private listFooter(): string {
-    return "↑/↓ · Enter logs · k stop · f filter · 1/2/3 tabs · / search · R rerun · a stop all · alt+q close";
+    return "↑/↓ · Enter logs · k stop · f filter · o others · 1/2/3 tabs · / search · R rerun · a stop all · alt+q close";
   }
 
   /** The box around the rows: the header sits above it, the keys inside the bottom. */
@@ -1160,6 +1246,11 @@ export class TasksPanel implements Component {
     return this.rows.findIndex((row) => row.task.id === this.selectedId);
   }
 
+  /** True for a row `o` brought in from another session: readable, never writable. */
+  private foreign(row: PanelTaskView | undefined): boolean {
+    return row?.sessionId !== undefined && row.sessionId !== this.source.sessionId;
+  }
+
   /**
    * One list row, in the shape of a process listing: pointer, live dot, name, id,
    * status, then the numbers. Every cell is padded before it is coloured, so the
@@ -1171,6 +1262,11 @@ export class TasksPanel implements Component {
     const pointer = selected ? theme.fg("accent", "›") : " ";
     const dot = theme.fg(dotColour(task), "●");
     const id = theme.fg("dim", pad(task.id, ID_COLUMN_WIDTH));
+    // A row `o` brought in says whose it is: the store names a session by a UUID, so
+    // the row carries its first six characters and the detail the whole id.
+    const tag =
+      row.sessionId === undefined ? "" : theme.fg("muted", ` @${row.sessionId.slice(0, 6)}`);
+    const tagPlain = row.sessionId === undefined ? "" : ` @${row.sessionId.slice(0, 6)}`;
     const separator = theme.fg("dim", "·");
     // Both kinds share one table, so the row has to say which it is: a loop runs
     // nothing and a process wakes nobody, and their numbers mean different things.
@@ -1188,7 +1284,7 @@ export class TasksPanel implements Component {
         ? theme.fg(nameColour(task), namePlain)
         : `${chain.themed}${" ".repeat(Math.max(0, nameRoom - visibleWidth(chain.plain)))}`;
     const growth = this.growthText(row);
-    const headPlain = ` ${pointer} ${dot} ${name} ${id} ${separator} ${kind} ${status}${exit} `;
+    const headPlain = ` ${pointer} ${dot} ${name} ${id}${tag} ${separator} ${kind} ${status}${exit} `;
     // The numbers get the room the head leaves, minus one space of gap, so they can
     // shed their least important parts instead of pushing the row past the border.
     // The room is measured on the bare cells: a theme adds markup, and only the
@@ -1196,10 +1292,15 @@ export class TasksPanel implements Component {
     const headCells = ` ${selected ? "›" : " "} ● ${namePlain} ${pad(
       task.id,
       ID_COLUMN_WIDTH,
-    )} · ${kindWord(task.kind)} ${pad(task.status, 11)}${exitText(task) === "" ? "" : ` ${exitText(task)}`} `;
+    )}${tagPlain} · ${kindWord(task.kind)} ${pad(task.status, 11)}${exitText(task) === "" ? "" : ` ${exitText(task)}`} `;
     const right = theme.fg(
       "dim",
-      rightText(row, this.now(), width - 2 - visibleWidth(headCells) - visibleWidth(growth) - 1),
+      rightText(
+        row,
+        this.now(),
+        width - 2 - visibleWidth(headCells) - visibleWidth(growth) - 1,
+        this.foreign(row),
+      ),
     );
     // The strip is a command loop's own column: the newest fires, oldest left, so a
     // failure count can never hide a run that never happened (ADR-0015). It drops
@@ -1246,7 +1347,9 @@ export class TasksPanel implements Component {
 
   /** The record a chain step id names, or undefined while its record is missing. */
   private stepRecord(id: string): Task | undefined {
-    return this.allRows.find((row) => row.task.id === id)?.task;
+    // Both stores are searched: a chain `o` brought in still has to name its steps,
+    // and those records live in the session that owns it (ticket #27).
+    return [...this.allRows, ...this.otherRows].find((row) => row.task.id === id)?.task;
   }
 
   /** Which step a chain is on, in words a reader does not have to decode a cursor for. */
@@ -1349,6 +1452,7 @@ export class TasksPanel implements Component {
     const body: string[] = [
       this.field("Name", theme.fg("accent", task.name)),
       this.field("ID", theme.fg("accent", task.id)),
+      ...this.sessionField(row),
       this.field("Status", theme.fg(colour, task.status)),
       this.field("Runtime", formatDuration(row.elapsedMs)),
       this.field("Updated", this.updatedText(task.updatedAt)),
@@ -1407,6 +1511,7 @@ export class TasksPanel implements Component {
     const body: string[] = [
       this.field("Name", theme.fg("accent", task.name)),
       this.field("ID", theme.fg("accent", task.id)),
+      ...this.sessionField(row),
       this.field("Status", theme.fg(colour, task.status)),
       this.field("Runtime", formatDuration(row.elapsedMs)),
       this.field("Started", formatClockTime(task.createdAt)),
@@ -1477,6 +1582,7 @@ export class TasksPanel implements Component {
     const body: string[] = [
       this.field("Status", theme.fg(colour, task.status)),
       this.field("Kind", task.kind),
+      ...this.sessionField(row),
       this.field("Runtime", formatDuration(row.elapsedMs)),
       this.field("Updated", this.updatedText(task.updatedAt)),
       this.field("Schedule", task.schedule),
@@ -1537,6 +1643,7 @@ export class TasksPanel implements Component {
     const body: string[] = [
       this.field("Status", theme.fg(colour, task.status)),
       this.field("Kind", task.kind),
+      ...this.sessionField(row),
       this.field("Runtime", formatDuration(row.elapsedMs)),
       this.field("Updated", this.updatedText(task.updatedAt)),
       this.field("Schedule", task.schedule),
@@ -1696,6 +1803,16 @@ export class TasksPanel implements Component {
     return `${this.theme.fg("muted", pad(`${label}:`, LABEL_WIDTH))}${text}`;
   }
 
+  /**
+   * The session that owns a row, printed only when it is not this one: the list had
+   * room for six characters, the detail has room to name the whole session so a
+   * reader can go and ask it (ticket #27).
+   */
+  private sessionField(row: PanelTaskView): string[] {
+    if (!this.foreign(row) || row.sessionId === undefined) return [];
+    return [this.field("Session", this.theme.fg("dim", row.sessionId))];
+  }
+
   /** Absolute clock plus age: the list shows only the age, the detail can afford both. */
   private updatedText(updatedAt: number): string {
     const age = formatDuration(Math.max(0, this.now() - updatedAt));
@@ -1730,10 +1847,22 @@ function exitText(task: Task): string {
  * changed; a loop its fires, schedule and the same age. Recency sits on the right so a
  * row that just moved to the top says why (ADR-0010).
  */
-function rightText(row: PanelTaskView, now: number, room = Number.POSITIVE_INFINITY): string {
+function rightText(
+  row: PanelTaskView,
+  now: number,
+  room = Number.POSITIVE_INFINITY,
+  foreign = false,
+): string {
   const task = row.task;
   const elapsed = formatDuration(row.elapsedMs);
   const age = ` · ${formatDuration(Math.max(0, now - task.updatedAt))} ago`;
+  // Another session's row is here to be read, not managed: the tag that names its
+  // session already costs the row width, so its numbers are the runtime and the age,
+  // and the runtime alone still fits a narrow terminal (ticket #27).
+  if (foreign) {
+    const candidates = [`${elapsed}${age}`, elapsed];
+    return candidates.find((candidate) => visibleWidth(candidate) <= room) ?? elapsed;
+  }
   if (task.kind === "process") return `${elapsed} ${formatSize(row)}${age}`;
   if (task.kind === "chain") {
     // A chain reports its place in the queue: the step it is on, and how many it holds.
