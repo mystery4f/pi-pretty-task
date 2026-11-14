@@ -119,6 +119,14 @@ async function waitForFire(
   return answer;
 }
 
+/** How far the failed-fire backoff pushed the next fire past the last one. */
+function waitUntilNextFire(loop: CmdDetails): number {
+  if (loop.nextFireAt === undefined || loop.lastFireAt === undefined) {
+    throw new Error("a running loop must be scheduled");
+  }
+  return loop.nextFireAt - loop.lastFireAt;
+}
+
 /** The pid of a running child, watched so the test can clean it up on failure. */
 async function pidOf(harness: Harness, taskId: string): Promise<number | undefined> {
   const details = (await harness.call("bg_status", { id: taskId })).details as { pid?: number };
@@ -355,6 +363,112 @@ describe("command loops", () => {
     }
     expect(after.nextFireAt - after.lastFireAt).toBeLessThanOrEqual(3_600_000);
     expect(after.nextFireAt - after.lastFireAt).toBeGreaterThan(3_500_000);
+  });
+
+  it("doubles the wait after every failed fire and drops the backoff on a success", async () => {
+    const task = await setup();
+    // The script fails twice and then succeeds, so one loop shows the whole arc.
+    const counter = `${task.directory.path}/count.txt`;
+    const script = await writeScript(
+      task.directory.path,
+      "flaky.js",
+      [
+        'const { readFileSync, writeFileSync } = require("node:fs");',
+        "let runs = 0;",
+        "try {",
+        `  runs = Number(readFileSync(${JSON.stringify(counter)}, "utf8"));`,
+        "} catch {",
+        "  runs = 0;",
+        "}",
+        `writeFileSync(${JSON.stringify(counter)}, String(runs + 1));`,
+        "process.exit(runs < 2 ? 1 : 0);",
+        "",
+      ].join("\n"),
+    );
+    const loop = await createCmd(task.harness, { command: script, name: "flaky" });
+
+    await fireDue(task, loop);
+    await waitForFire(task.harness, loop.id, 1, "failed");
+    const first = await loopDetails(task.harness, loop.id);
+    expect(first.consecutiveFailures).toBe(1);
+    // One failure on a ten-second schedule waits twenty seconds.
+    expect(waitUntilNextFire(first)).toBe(20_000);
+
+    await fireDue(task, first);
+    await waitForFire(task.harness, loop.id, 2, "failed");
+    const second = await loopDetails(task.harness, loop.id);
+    expect(second.consecutiveFailures).toBe(2);
+    // Two failures: forty seconds, so the delay doubled with the streak.
+    expect(waitUntilNextFire(second)).toBe(40_000);
+
+    await fireDue(task, second);
+    await waitForFire(task.harness, loop.id, 3, "success");
+    const third = await loopDetails(task.harness, loop.id);
+    expect(third.consecutiveFailures).toBe(0);
+    // A success ends the backoff: the next fire is one schedule interval away.
+    expect(waitUntilNextFire(third)).toBe(10_000);
+  });
+
+  it("holds the backoff at an hour while the failure streak grows", async () => {
+    const task = await setup();
+    const script = await writeScript(task.directory.path, "fail.js", "process.exit(1);\n");
+    // Eight doublings of forty minutes would be days: the cap is what keeps the
+    // loop from disappearing, so a growing streak must not push it further out.
+    const loop = await createCmd(task.harness, { command: script, schedule: "40m" });
+
+    await fireDue(task, loop);
+    await waitForFire(task.harness, loop.id, 1, "failed");
+    const first = await loopDetails(task.harness, loop.id);
+    await fireDue(task, first);
+    await waitForFire(task.harness, loop.id, 2, "failed");
+
+    const second = await loopDetails(task.harness, loop.id);
+    expect(second.consecutiveFailures).toBe(2);
+    expect(waitUntilNextFire(second)).toBe(3_600_000);
+  });
+
+  it("keeps the failure streak, the skipped count and the backoff across a restart", async () => {
+    const task = await setup("session-backoff-restart");
+    const failing = await writeScript(task.directory.path, "fail.js", "process.exit(1);\n");
+    const slow = await writeScript(
+      task.directory.path,
+      "slow.js",
+      'console.log("started");\nsetTimeout(() => console.log("done"), 1500);\n',
+    );
+    const backingOff = await createCmd(task.harness, { command: failing, name: "backing-off" });
+    const skipping = await createCmd(task.harness, { command: slow, name: "skipping" });
+
+    await fireDue(task, backingOff);
+    await waitForFire(task.harness, backingOff.id, 1, "failed");
+    const backedOff = await loopDetails(task.harness, backingOff.id);
+    expect(backedOff.consecutiveFailures).toBe(1);
+
+    await fireDue(task, skipping);
+    const running = await loopDetails(task.harness, skipping.id);
+    const child = running.fireHistory?.[0]?.taskId;
+    if (child === undefined) throw new Error("the fire must start a child");
+    await pidOf(task.harness, child);
+    task.advance(10_000);
+    await task.harness.pump(task.now);
+    const missed = await loopDetails(task.harness, skipping.id);
+    expect(missed.missedFires).toBe(1);
+
+    // A second extension over the same session directory is the restart: both the
+    // streak and the skipped count are on disk, so neither is forgiven on load.
+    const restarted = createHarness(task.turn, { now: () => task.now });
+    await restarted.startSession();
+
+    const reloadedBackoff = await loopDetails(restarted, backingOff.id);
+    expect(reloadedBackoff.consecutiveFailures).toBe(1);
+    expect(reloadedBackoff.nextFireAt).toBe(backedOff.nextFireAt);
+    expect(waitUntilNextFire(reloadedBackoff)).toBe(20_000);
+
+    const reloadedSkip = await loopDetails(restarted, skipping.id);
+    expect(reloadedSkip.missedFires).toBe(1);
+    expect(reloadedSkip.fireHistory?.map((entry) => entry.outcome)).toEqual([
+      "interrupted",
+      "skipped",
+    ]);
   });
 
   it("rewrites the loop into the current file version with its fire history", async () => {
