@@ -107,6 +107,33 @@ describe("bg_run with a template", () => {
     expect((await readFile(join(dir.path, "lint.txt"), "utf8")).trim()).toBe("agent lint");
   });
 
+  it("names the configured templates in the tool description the model reads", async () => {
+    const dir = await makeTempDir();
+    cleanup.push(dir.dispose);
+    const command = await writeScript(dir.path, "noop.js", "process.exit(0);\n");
+    const paths = templateConfigPaths(dir.path, join(dir.path, "agent"));
+    await writeConfig(paths.projectFile, {
+      templates: { test: { command }, lint: { command: `${command} --lint` } },
+    });
+    const harness = createHarness({ cwd: dir.path, sessionId: "session-template-described" });
+
+    const description = harness.toolDescription("bg_run");
+
+    expect(description).toContain("Command templates available here:");
+    expect(description).toContain("lint (");
+    expect(description).toContain("test (");
+    expect(description.indexOf("lint (")).toBeLessThan(description.indexOf("test ("));
+    expect(description).not.toContain("No command templates are configured");
+  });
+
+  it("says so when no template is configured at all", () => {
+    const harness = createHarness({ cwd: process.cwd(), sessionId: "session-template-none" });
+
+    expect(harness.toolDescription("bg_run")).toContain(
+      "No command templates are configured, so `template` is rejected.",
+    );
+  });
+
   it("rejects an unknown name before a task exists and lists the known names", async () => {
     const dir = await makeTempDir();
     cleanup.push(dir.dispose);

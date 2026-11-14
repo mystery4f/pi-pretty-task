@@ -304,6 +304,11 @@ export function createHarness(defaultTurn: Turn, options: HarnessOptions = {}): 
 
   return {
     toolNames: tools.map((tool) => tool.name),
+    toolDescription(toolName: string): string {
+      const tool = tools.find((candidate) => candidate.name === toolName);
+      if (tool === undefined) throw new Error(`tool ${toolName} is not registered`);
+      return tool.description;
+    },
     problems,
     messages,
     rendererTypes: [...renderers.keys()],

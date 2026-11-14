@@ -226,6 +226,42 @@ function taskDetails(view: ProcessTaskView) {
   };
 }
 
+/**
+ * The tool description carries the template names, because an agent cannot read
+ * `.pi/pretty-task.json` on its own: without this line the names are only
+ * discovered by failing a call. The budget keeps the description short enough
+ * to stay in a model's attention even with a large template file.
+ *
+ * @author mystery4f <40482524+mystery4f@users.noreply.github.com>
+ */
+function runDescription(templates: ReadonlyMap<string, CommandTemplate>): string {
+  const base =
+    "Run a shell command in the background and return a task id at once, without waiting for the command to finish. stdout and stderr are captured together in one output file.";
+  const names = [...templates.keys()].sort();
+  if (names.length === 0) {
+    return `${base} No command templates are configured, so \`template\` is rejected.`;
+  }
+  const shown: string[] = [];
+  let budget = 300;
+  for (const name of names) {
+    const entry = `${name} (${commandHint(templates.get(name)?.command ?? "")})`;
+    if (entry.length > budget) {
+      shown.push("…");
+      break;
+    }
+    shown.push(entry);
+    budget -= entry.length + 2;
+  }
+  return `${base} Command templates available here: ${shown.join(", ")}.`;
+}
+
+/** One template's command on a single line, short enough to sit in a sentence. */
+function commandHint(command: string): string {
+  const flat = command.replace(/\s+/g, " ").trim();
+  const room = 60;
+  return flat.length <= room ? flat : `${flat.slice(0, room - 1)}…`;
+}
+
 /** The process-task tools, bound to one store and this session's templates. */
 export function processTaskTools(
   tasks: ProcessTasks,
@@ -234,8 +270,7 @@ export function processTaskTools(
   const run: ToolDefinition<typeof RunParameters> = {
     name: "bg_run",
     label: "Run in background",
-    description:
-      "Run a shell command in the background and return a task id at once, without waiting for the command to finish. stdout and stderr are captured together in one output file.",
+    description: runDescription(templates),
     parameters: RunParameters,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       // Resolve the template before any store call: an unknown name must not
