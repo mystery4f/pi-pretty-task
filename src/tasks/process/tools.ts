@@ -837,7 +837,9 @@ export function processTaskTools(
         const headline =
           stopped.outcome === "stopped"
             ? `Stopped chain ${id} (${stopped.view.task.name})${stopped.step === undefined ? "" : `; its running step ${stopped.step.task.id} was stopped`} and the steps behind it will not run.`
-            : `Chain ${id} had already finished (${stopped.view.task.status}); nothing was signalled.`;
+            : stopped.outcome === "tree-survived"
+              ? `Chain ${id} (${stopped.view.task.name}) was ended and the steps behind it will not run, but its running step ${stopped.step?.task.id ?? "at the cursor"} could not be stopped: ${stopped.detail ?? "its processes are still running"}.`
+              : `Chain ${id} had already finished (${stopped.view.task.status}); nothing was signalled.`;
         return {
           content: [
             {

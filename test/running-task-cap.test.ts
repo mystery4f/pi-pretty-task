@@ -18,8 +18,8 @@ import {
   type ProcessTasksOptions,
   type ProcessTaskView,
 } from "../src/tasks/process/process-tasks.js";
-import type { RunningProcess, StartProcessOptions } from "../src/tasks/process/supervisor.js";
 import { createHarness, resultText } from "./support/extension-harness.js";
+import { fakeSupervisor } from "./support/fake-supervisor.js";
 import { killTree, makeTempDir, waitFor, writeScript } from "./support/processes.js";
 
 const cleanup: Array<() => Promise<void>> = [];
@@ -29,65 +29,6 @@ afterEach(async () => {
   while (spawned.length > 0) await killTree(spawned.pop());
   while (cleanup.length > 0) await cleanup.pop()?.();
 });
-
-/** One supervised command a test answers for, instead of a real process. */
-interface FakeProcess {
-  readonly running: RunningProcess;
-  /** How many stops reached this command. */
-  stops: number;
-  /** Answer every later stop with `tree-survived` and stay alive. */
-  survive: boolean;
-  /** End the command as a real exit would. */
-  end(exitCode?: number | null): void;
-}
-
-/**
- * A supervisor seam that spawns nothing: the cap counts records, not processes,
- * so the store can be driven without a process per count — and the count stays
- * put instead of moving while the test talks.
- */
-function fakeSupervisor(): {
-  supervise: (options: StartProcessOptions) => RunningProcess;
-  processes: FakeProcess[];
-} {
-  const processes: FakeProcess[] = [];
-  const supervise = (_options: StartProcessOptions): RunningProcess => {
-    let settle: (exit: { exitCode: number | null; signal: NodeJS.Signals | null }) => void =
-      () => {};
-    const exit = new Promise<{ exitCode: number | null; signal: NodeJS.Signals | null }>(
-      (resolve) => {
-        settle = resolve;
-      },
-    );
-    const fake: FakeProcess = {
-      stops: 0,
-      survive: false,
-      running: {
-        pid: undefined,
-        exit,
-        bytesWritten: () => 0,
-        signalled: () => fake.stops > 0,
-        stop: async () => {
-          fake.stops += 1;
-          if (fake.survive) {
-            return { outcome: "tree-survived", tookMs: 1, detail: "the tree did not answer" };
-          }
-          // A killed command exits on its own just after the answer.
-          setImmediate(() => {
-            settle({ exitCode: null, signal: "SIGTERM" });
-          });
-          return { outcome: "stopped", tookMs: 1 };
-        },
-      },
-      end: (exitCode = 0) => {
-        settle({ exitCode, signal: null });
-      },
-    };
-    processes.push(fake);
-    return fake.running;
-  };
-  return { supervise, processes };
-}
 
 /** The stores as the extension wires them, over one fake supervisor. */
 function makeStores(options: Pick<ProcessTasksOptions, "maxRunningTasks">) {

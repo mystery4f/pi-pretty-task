@@ -149,10 +149,13 @@ export function panelSourceFor(
       if (chain !== undefined) {
         const result = await chains.stop(scope, id);
         if (result === undefined) return undefined;
+        // A survivor says why: the outcome alone would read like part of the kill
+        // that failed, and the reader is owed the sentence the supervisor gave.
+        const why = result.detail === undefined ? "" : ` · ${result.detail}`;
         const step =
           result.step === undefined
             ? {}
-            : { detail: `step ${result.step.task.id} ${result.step.task.status}` };
+            : { detail: `step ${result.step.task.id} ${result.step.task.status}${why}` };
         return { outcome: result.outcome, view: chainRow(result.view), ...step };
       }
       return processes.stop(scope, id);

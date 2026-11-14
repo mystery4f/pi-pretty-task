@@ -149,6 +149,12 @@ export interface ProcessTasksOptions {
    */
   supervise?: (options: StartProcessOptions) => RunningProcess;
   /**
+   * How long a stop that lost to a surviving tree waits before it is tried again;
+   * defaults to a second. A kill that could not clear the tree has not ended the
+   * task, so the wait between attempts is what keeps the record honest.
+   */
+  survivedRetryMs?: number;
+  /**
    * Called once for every task that ends, with the record as it stands after
    * the final status was written. Announcing the task — a session message, a
    * panel refresh — is the caller's business, so this store stays silent.
@@ -214,6 +220,13 @@ const NAME_LIMIT = 48;
  * gone. Past that, the stop settles the record itself.
  */
 const EXIT_WAIT_MS = 2000;
+
+/**
+ * How long a stop that could not clear its tree waits before trying the kill
+ * again. A survivor is not an ending, so the reason and the deadline stay with the
+ * record, and the retry is what eventually honours them.
+ */
+const SURVIVED_RETRY_MS = 1000;
 
 /**
  * How often a follow read looks at the output file while it waits for new
@@ -282,6 +295,8 @@ export class ProcessTasks {
   /** The ceiling `docs/scope-v1.md` promises, and the key that moves it. */
   private readonly maxRunningTasks: number;
   private readonly supervise: (options: StartProcessOptions) => RunningProcess;
+  /** How long a stop that lost to a surviving tree waits before trying again. */
+  private readonly survivedRetryMs: number;
   private readonly onFinish: ((view: ProcessTaskView) => void) | undefined;
   /** The shell every task starts in, resolved once so a bad config fails at load. */
   private readonly shellPolicy: ShellPolicy;
@@ -298,6 +313,7 @@ export class ProcessTasks {
     this.outputCapBytes = options.outputCapBytes ?? DEFAULT_OUTPUT_CAP_BYTES;
     this.maxRunningTasks = options.maxRunningTasks ?? DEFAULT_MAX_RUNNING_TASKS;
     this.supervise = options.supervise ?? startProcess;
+    this.survivedRetryMs = options.survivedRetryMs ?? SURVIVED_RETRY_MS;
     this.onFinish = options.onFinish;
     this.shellPolicy =
       options.shellPolicy ?? resolveShellPolicy({ platform: this.platform, env: this.env });
@@ -692,12 +708,27 @@ export class ProcessTasks {
     // relabelling its end.
     if (!session.killReasons.has(task.id))
       session.killReasons.set(task.id, options.reason ?? "user");
-    this.clearRuntimeCap(session, task.id);
     const stopped = await running.stop({
       graceMs: options.graceMs ?? this.killGraceMs,
       confirmMs: options.confirmMs ?? this.killConfirmMs,
     });
 
+    // A tree that survived the kill has not ended anything: the record keeps
+    // running, the reason stays with it so its eventual exit is still the kill
+    // that was asked for, and the deadline stays armed now that it was not met.
+    // The answer says so on the record, because a kill that lost must be loud.
+    if (stopped.outcome === "tree-survived") {
+      this.noteSurvival(session, task, stopped.detail);
+      this.scheduleStop(session, task.id, this.survivedRetryMs, options);
+      return {
+        view: this.view(session, task),
+        outcome: STOP_OUTCOMES[stopped.outcome],
+        tookMs: stopped.tookMs,
+        detail: stopped.detail,
+      };
+    }
+
+    this.clearRuntimeCap(session, task.id);
     // A stop that got an answer must leave a finished record, never `running`:
     // the exit bookkeeping usually arrives on its own, and when it does not the
     // stop settles the record here. `finish` ignores a record already settled,
@@ -706,7 +737,6 @@ export class ProcessTasks {
       this.finish(session, task, running, null);
     }
     session.killReasons.delete(task.id);
-
     return {
       view: this.view(session, task),
       outcome: STOP_OUTCOMES[stopped.outcome],
@@ -763,6 +793,9 @@ export class ProcessTasks {
       // ordinary — and the reason says who asked.
       task.status = "killed";
       task.killReason = killReason;
+      // A note from a kill that once lost is history now that the kill landed:
+      // the record ends killed, and a stale "could not be stopped" would lie.
+      delete task.error;
     } else if (failure !== undefined) {
       task.status = "failed";
       task.error = failure;
@@ -804,17 +837,45 @@ export class ProcessTasks {
     timeoutMs: number | undefined,
   ): void {
     if (timeoutMs === undefined) return;
+    this.scheduleStop(session, id, timeoutMs, { reason: "timeout" });
+  }
+
+  /**
+   * Arm the stop at `delayMs` from now, replacing the timer already armed for the
+   * task: one task waits on one stop at a time, whether that stop comes from a
+   * deadline, a cap, or a kill that has to be tried again.
+   */
+  private scheduleStop(
+    session: SessionTasks,
+    id: string,
+    delayMs: number,
+    options: StopTaskOptions,
+  ): void {
+    this.clearRuntimeCap(session, id);
     const timer = setTimeout(() => {
       const task = session.tasks.get(id);
-      // The session is already in hand, so the cap stops the record it named and
+      // The session is already in hand, so the stop reaches the record it named and
       // needs no scope of its own — which is also what lets a launched step, whose
       // turn came long after the call that queued it, keep its cap.
       if (task === undefined || task.kind !== "process") return;
-      void this.stopRecord(session, task, { reason: "timeout" });
-    }, timeoutMs);
-    // A waiting cap must not be the reason the host process stays alive.
+      void this.stopRecord(session, task, options);
+    }, delayMs);
+    // A waiting stop must not be the reason the host process stays alive.
     timer.unref();
     session.runtimeCaps.set(id, timer);
+  }
+
+  /**
+   * Say on the record that a kill could not clear its tree. The record is still
+   * running, so this is the only place a reader — the panel, `bg_status`, the next
+   * `bg_kill` — can learn that the task outlived a stop that was already paid for.
+   */
+  private noteSurvival(session: SessionTasks, task: ProcessTask, detail: string | undefined): void {
+    task.error = `the process tree could not be stopped: ${
+      detail ?? "it was still there after the forced kill"
+    }. The task is still running; the kill will be tried again.`;
+    task.updatedAt = this.now();
+    void this.persist(session);
   }
 
   /** Cancel a task's runtime cap; a task that ends on its own leaves no timer. */

@@ -57,7 +57,14 @@ export interface QueuedStep {
 export interface StopChainResult {
   /** The chain after the stop. */
   view: ChainTaskView;
-  outcome: "stopped" | "already-finished";
+  /**
+   * `stopped` when the running step is gone, `tree-survived` when the kill could
+   * not clear it — the chain is still ended either way, because its queue must not
+   * advance, but the step that outlived the stop is not a clean stop.
+   */
+  outcome: "stopped" | "already-finished" | "tree-survived";
+  /** Why the step outlived the stop, as the supervisor said it. */
+  detail?: string;
   /** The step that was running, as it ended: stopped, and no longer the cursor's job. */
   step?: ProcessTaskView;
 }
@@ -187,9 +194,17 @@ export class ChainTasks {
     await this.sessions.persist(session);
 
     let step: ProcessTaskView | undefined;
+    let detail: string | undefined;
+    let survived = false;
     if (runningId !== undefined) {
       const stopped = await this.processes().stop(scope, runningId, options);
-      if (stopped !== undefined) step = stopped.view;
+      if (stopped !== undefined) {
+        step = stopped.view;
+        // The queue is ended regardless, but a step that outlived its kill is not
+        // a clean stop, and the answer says so instead of filing it as one.
+        survived = stopped.outcome === "tree-survived";
+        detail = survived ? stopped.detail : undefined;
+      }
     }
     // Everything that never got its turn is told so: a reader can see how far the
     // queue got without opening the steps one by one.
@@ -207,7 +222,8 @@ export class ChainTasks {
 
     return {
       view: this.view(chain),
-      outcome: "stopped",
+      outcome: survived ? "tree-survived" : "stopped",
+      ...(detail === undefined ? {} : { detail }),
       ...(step === undefined ? {} : { step }),
     };
   }
