@@ -377,12 +377,20 @@ export class TasksPanel implements Component {
     return bestFieldMatch(task, this.query, steps);
   }
 
-  /** Hold the selected task across a refresh, or fall back to the first row. */
+  /**
+   * Hold the selected task across a refresh or a narrower query, or fall back to
+   * the first row. Ranking can lift the held task above the scroll window, so the
+   * window follows it; a query never hides the row a reader is standing on.
+   */
   private keepSelection(): void {
-    if (!this.rows.some((row) => row.task.id === this.selectedId)) {
+    const index = this.rows.findIndex((row) => row.task.id === this.selectedId);
+    if (index < 0) {
       this.selectedId = this.rows[0]?.task.id;
       this.listTop = 0;
+      return;
     }
+    if (index < this.listTop) this.listTop = index;
+    if (index >= this.listTop + LIST_VISIBLE_ROWS) this.listTop = index - LIST_VISIBLE_ROWS + 1;
   }
   /**
    * Remember how much each task grew since the last look, so a list row can say

@@ -833,6 +833,74 @@ describe("the three pages", () => {
 
     panel.dispose();
   });
+
+  it("keeps the selected row on screen when a query lifts it above the scroll", async () => {
+    const source = new FakeSource();
+    source.rows = Array.from({ length: 13 }, (_, index) =>
+      view(`bg-000${String(index).padStart(2, "0")}`, {
+        name: `task ${index}`,
+        updatedAt: 1_000 + index,
+      }),
+    );
+    source.rows.push(view("bg-00013", { name: "zebra", updatedAt: 1_000 }));
+    const { panel, drawn } = openPanel(source, () => 13_000, plainTheme());
+    await panel.settle();
+
+    // Walk to the oldest row, which scrolls the list down.
+    for (let step = 0; step < 13; step += 1) panel.handleInput(DOWN);
+    await panel.settle();
+
+    panel.handleInput("/");
+    for (const character of "zeb") panel.handleInput(character);
+    await panel.settle();
+
+    const row = drawn()
+      .split("\n")
+      .find((line) => line.includes("zebra"));
+    expect(row).toBeDefined();
+    expect(row).toContain("›");
+    expect(row).toContain("bg-00013");
+
+    panel.dispose();
+  });
+
+  it("hands the recency order back when the query empties, selection unchanged", async () => {
+    const source = new FakeSource();
+    source.rows = [
+      view("bg-aaaaa", { name: "deploy-bg", updatedAt: 1_000 }),
+      view("bg-bbbbb", { name: "debug", updatedAt: 9_000 }),
+    ];
+    const { panel } = openPanel(source, () => 13_000, plainTheme());
+    await panel.settle();
+
+    const order = (): string[] =>
+      panel
+        .render(WIDTH)
+        .filter((line) => line.includes("bg-"))
+        .map((line) => line.split(/\s+/).find((word) => word.startsWith("bg-")) ?? "");
+    expect(order()).toEqual(["bg-bbbbb", "bg-aaaaa"]);
+
+    // Hold the older row, then let a query that prefers it rewrite the order.
+    panel.handleInput(DOWN);
+    await panel.settle();
+    panel.handleInput("/");
+    for (const character of "dbg") panel.handleInput(character);
+    await panel.settle();
+
+    // Deleting the query must not reshuffle the list around the held selection.
+    for (let step = 0; step < 3; step += 1) panel.handleInput("\u007f");
+    await panel.settle();
+
+    expect(order()).toEqual(["bg-bbbbb", "bg-aaaaa"]);
+    const selected = panel
+      .render(WIDTH)
+      .find((line) => line.includes("›"))
+      ?.split(/\s+/)
+      .find((word) => word.startsWith("bg-"));
+    expect(selected).toBe("bg-aaaaa");
+
+    panel.dispose();
+  });
 });
 
 describe("loop tasks in the list", () => {
