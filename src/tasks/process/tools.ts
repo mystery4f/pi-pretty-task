@@ -86,7 +86,10 @@ const RunParameters = Type.Object({
 
 const StatusParameters = Type.Object({
   id: Type.Optional(
-    Type.String({ description: "Task id to describe. Omit it to list every task of the session." }),
+    Type.String({
+      description:
+        "Task or chain id to describe. Omit it to list the session's roots: its chains and the tasks that belong to no chain. A step or a loop fire answers by its own id, but is not a row of that list.",
+    }),
   ),
   full: Type.Optional(
     Type.Boolean({ description: "Show the untruncated record, including the whole command." }),
@@ -116,7 +119,10 @@ const LogsParameters = Type.Object({
 });
 
 const KillParameters = Type.Object({
-  id: Type.String({ description: "Task id to stop, with everything its command started." }),
+  id: Type.String({
+    description:
+      "Task or chain id to stop, with everything its command started. Stopping a chain stops the step at its cursor and marks the steps behind it `stopped`, so they never run.",
+  }),
 });
 
 const WaitParameters = Type.Object({
