@@ -11,7 +11,7 @@
  * @author mystery4f <40482524+mystery4f@users.noreply.github.com>
  */
 
-import { readFile, readdir, rm, stat } from "node:fs/promises";
+import { readdir, readFile, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 
 import { formatBytes } from "./format.js";
@@ -19,8 +19,8 @@ import {
   previousTaskRecordPath,
   RUNTIME_STATE_DIRECTORY,
   sessionTaskDirectory,
-  taskRecordPath,
   type TaskScope,
+  taskRecordPath,
 } from "./runtime-state.js";
 import type { Task, TaskStatus } from "./task.js";
 import { parseTaskFile } from "./task-store.js";

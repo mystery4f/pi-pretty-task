@@ -18,6 +18,7 @@ import {
 } from "../src/tasks/base/runtime-state.js";
 import type { LlmLoopTask, ProcessTask, Task } from "../src/tasks/base/task.js";
 import { TaskStore } from "../src/tasks/base/task-store.js";
+import { createHarness } from "./support/extension-harness.js";
 import { makeTempDir } from "./support/processes.js";
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -138,9 +139,9 @@ describe("retention", () => {
     "keeps a session holding a %s task",
     async (status) => {
       const root = await projectRoot();
-      const directory = await storedSession(root, "busy-session", [
-        processTask({ status }),
-      ], { ageDays: 30 });
+      const directory = await storedSession(root, "busy-session", [processTask({ status })], {
+        ageDays: 30,
+      });
 
       const report = await pruneSessions({
         scope: { cwd: root, sessionId: "current-session" },
@@ -301,8 +302,34 @@ describe("retention", () => {
     await expect(store.load()).resolves.toEqual([]);
     await mkdir(directory, { recursive: true });
     await store.save([processTask({ id: "bg1a2cf", status: "running" })]);
-    await expect(store.load()).resolves.toEqual([
-      expect.objectContaining({ id: "bg1a2cf" }),
-    ]);
+    await expect(store.load()).resolves.toEqual([expect.objectContaining({ id: "bg1a2cf" })]);
+  });
+
+  describe("at session start", () => {
+    it("reclaims old sessions before the session does anything else", async () => {
+      const root = await projectRoot();
+      const directory = await storedSession(root, "old-session", [processTask()], {
+        ageDays: 30,
+      });
+      const harness = createHarness(
+        { cwd: root, sessionId: "current-session" },
+        { env: {}, now: () => NOW },
+      );
+
+      await harness.startSession({ cwd: root, sessionId: "current-session" });
+
+      await expect(stat(directory)).rejects.toMatchObject({ code: "ENOENT" });
+      expect(harness.problems.filter((line) => line.startsWith("pruned "))).toHaveLength(1);
+      expect(harness.problems.join("\n")).toContain("pruned 1 session, ");
+    });
+
+    it("fails the load instead of silently changing the window", () => {
+      expect(() =>
+        createHarness(
+          { cwd: ".", sessionId: "session-bad-window" },
+          { env: { PI_PRETTY_TASK_RETENTION_DAYS: "week" } },
+        ),
+      ).toThrow(/PI_PRETTY_TASK_RETENTION_DAYS.*received "week"/);
+    });
   });
 });
