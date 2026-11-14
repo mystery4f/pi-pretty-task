@@ -29,6 +29,7 @@ updated: 2026-11-14
 | [0005 Task 是 process 与 loop 的上位概念](../../docs/adr/0005-task-is-the-supertype.md) | 一种 Task、两种 kind、一张面板表；Iteration 是子记录 |
 | [0006 调度吃间隔简写与五段 cron](../../docs/adr/0006-cron-alongside-intervals.md) | 两种语法共用一个 `nextFire(after)`；六段拒绝 |
 | [0007 Iteration 历史上限与重启修复](../../docs/adr/0007-iteration-history-cap-and-restart-repair.md) | 各留最近 N 条并计数；重启把未完成的标 interrupted |
+| [0008 命令用哪个 shell、输出按什么编码读](../../docs/adr/0008-shell-choice-and-output-decoding.md) | 环境变量定默认 + `bg_run.shell` 覆盖；读取层 UTF-8 → Windows GB18030 回退 |
 
 ## 工具链与代码风格
 
