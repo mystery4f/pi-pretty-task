@@ -43,6 +43,9 @@ export const DETAIL_TAIL_LINES = 200;
 /** Task rows drawn at once in the list. */
 export const LIST_VISIBLE_ROWS = 12;
 
+/** Width of a detail label column, colon included, so the values line up. */
+const LABEL_WIDTH = 12;
+
 /** Refresh period; the tail of a running task should look alive. */
 const REFRESH_MS = 1000;
 
@@ -624,7 +627,7 @@ export class TasksPanel implements Component {
       body.push(
         theme.fg(
           "dim",
-          `  showing ${String(first)}-${String(last)} of ${String(this.rows.length)}`,
+          `  Showing ${String(first)}-${String(last)} of ${String(this.rows.length)}`,
         ),
       );
     }
@@ -664,7 +667,12 @@ export class TasksPanel implements Component {
     const exit = theme.fg("dim", pad(exitText(task), exitRoom));
     const right = theme.fg("dim", padStart(rightText(row), rightRoom));
 
-    return ` ${pointer} ${dot} ${name} ${id} ${kind}${separator}${status}${exit}${right}`;
+    const line = ` ${pointer} ${dot} ${name} ${id} ${kind}${separator}${status}${exit}${right}`;
+    // A selected row is washed in one block of background, the way the panel this
+    // replaces marks its cursor: the eye finds it without a colour of its own.
+    return selected
+      ? theme.bg("selectedBg", line + " ".repeat(Math.max(0, width - visibleWidth(line))))
+      : line;
   }
 
   private renderDetail(width: number): string[] {
@@ -682,22 +690,23 @@ export class TasksPanel implements Component {
     const task = row.task;
     const colour = STATUS_COLOUR[task.status];
     const body: string[] = [
-      this.field("status", theme.fg(colour, task.status)),
-      this.field("elapsed", formatDuration(row.elapsedMs)),
-      this.field("output", formatSize(row)),
+      this.field("Status", theme.fg(colour, task.status)),
+      this.field("Runtime", formatDuration(row.elapsedMs)),
+      this.field("Output", formatSize(row)),
     ];
-    if (task.pid !== undefined) body.push(this.field("pid", String(task.pid)));
-    body.push(this.field("command", singleLine(task.command, Math.max(1, width - 14))));
-    body.push(this.field("output file", task.outputPath));
-    if (task.cwd !== undefined) body.push(this.field("cwd", task.cwd));
+    if (task.pid !== undefined) body.push(this.field("PID", String(task.pid)));
+    body.push(this.field("Command", singleLine(task.command, Math.max(1, width - 14))));
+    body.push(this.field("Output file", task.outputPath));
+    if (task.cwd !== undefined) body.push(this.field("CWD", task.cwd));
     if (task.exitCode !== undefined) {
-      body.push(this.field("exit code", theme.fg(colour, String(task.exitCode))));
+      body.push(this.field("Exit code", theme.fg(colour, String(task.exitCode))));
     }
-    if (task.killReason !== undefined) body.push(this.field("kill reason", task.killReason));
-    if (task.error !== undefined) body.push(this.field("error", theme.fg(colour, task.error)));
+    if (task.killReason !== undefined) body.push(this.field("Kill reason", task.killReason));
+    if (task.error !== undefined) body.push(this.field("Error", theme.fg(colour, task.error)));
 
-    body.push(theme.fg("muted", `output · ${this.position()}`));
+    body.push(theme.fg("muted", " Output tail:"));
     body.push(...this.outputBox(width - 2));
+    body.push(theme.fg("dim", ` ${this.position()}`));
 
     if (this.notice !== undefined) body.push(theme.fg("warning", `  ${this.notice}`));
     const live = task.status === "running" ? "live tail refreshes every second" : "final output";
@@ -741,25 +750,25 @@ export class TasksPanel implements Component {
     if (task.kind !== "loop") return this.renderList(width);
     const colour = STATUS_COLOUR[task.status];
     const body: string[] = [
-      this.field("status", theme.fg(colour, task.status)),
-      this.field("kind", task.kind),
-      this.field("elapsed", formatDuration(row.elapsedMs)),
-      this.field("schedule", task.schedule),
-      this.field("fires", firesText(task)),
-      this.field("next fire", nextFireText(task, row)),
+      this.field("Status", theme.fg(colour, task.status)),
+      this.field("Kind", task.kind),
+      this.field("Runtime", formatDuration(row.elapsedMs)),
+      this.field("Schedule", task.schedule),
+      this.field("Fires", firesText(task)),
+      this.field("Next fire", nextFireText(task, row)),
       this.field(
-        "last fire",
+        "Last fire",
         task.lastFireAt === undefined ? "—" : formatClockTime(task.lastFireAt),
       ),
     ];
     if (task.expiresAt !== undefined) {
-      body.push(this.field("expires", formatClockTime(task.expiresAt)));
+      body.push(this.field("Expires", formatClockTime(task.expiresAt)));
     }
     if (task.endedAt !== undefined) {
-      body.push(this.field("ended", formatClockTime(task.endedAt)));
+      body.push(this.field("Ended", formatClockTime(task.endedAt)));
     }
-    if (task.error !== undefined) body.push(this.field("error", theme.fg(colour, task.error)));
-    body.push(this.field("prompt", singleLine(task.prompt, Math.max(1, width - 14))));
+    if (task.error !== undefined) body.push(this.field("Error", theme.fg(colour, task.error)));
+    body.push(this.field("Prompt", singleLine(task.prompt, Math.max(1, width - 14))));
     body.push("", theme.fg("muted", iterationsText(task)));
 
     const newestFirst = [...task.iterations].reverse();
@@ -802,13 +811,13 @@ export class TasksPanel implements Component {
     if (iteration === undefined) return this.renderLoopDetail(row, width);
 
     const body: string[] = [
-      this.field("status", theme.fg(ITERATION_COLOUR[iteration.status], iteration.status)),
-      this.field("started", formatClockTime(iteration.startedAt)),
+      this.field("Status", theme.fg(ITERATION_COLOUR[iteration.status], iteration.status)),
+      this.field("Started", formatClockTime(iteration.startedAt)),
     ];
     if (iteration.endedAt !== undefined) {
-      body.push(this.field("took", formatDuration(iteration.endedAt - iteration.startedAt)));
+      body.push(this.field("Took", formatDuration(iteration.endedAt - iteration.startedAt)));
     }
-    body.push(this.field("calls", callsText(iteration)));
+    body.push(this.field("Calls", callsText(iteration)));
     body.push("", theme.fg("muted", callsHeading(iteration, this.callTop)));
 
     const top = callTopFor(iteration, this.callTop);
@@ -857,9 +866,10 @@ export class TasksPanel implements Component {
 
   /** Where the visible window sits: following the newest line, or a frozen range. */
   private position(): string {
-    if (this.following || this.detailLines.length === 0) return "following";
+    if (this.following || this.detailLines.length === 0) return "following tail · ↑ scroll";
     const [from, to] = this.window();
-    return `lines ${String(from + 1)}–${String(to)} of ${String(this.detailLines.length)} · r resumes following`;
+    const total = this.detailLines.length;
+    return `lines ${String(from + 1)}–${String(to)} of ${String(total)} · ↑/↓ scroll · r follows`;
   }
 
   /** Visible slice of the detail buffer, as half-open `[from, to)`. */
@@ -871,9 +881,9 @@ export class TasksPanel implements Component {
 
   private field(label: string, value: string): string {
     // Cut here, once, against the frame: the border and the label take their share first.
-    const room = Math.max(8, this.renderWidth - 2 - 10 - 2);
+    const room = Math.max(8, this.renderWidth - 2 - LABEL_WIDTH - 2);
     const text = visibleWidth(value) > room ? truncateToWidth(value, room, "…", false) : value;
-    return `${this.theme.fg("muted", pad(label, 10))}${text}`;
+    return `${this.theme.fg("muted", pad(`${label}:`, LABEL_WIDTH))}${text}`;
   }
 }
 

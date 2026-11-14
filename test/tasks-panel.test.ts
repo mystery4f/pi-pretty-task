@@ -249,7 +249,7 @@ describe("detail view", () => {
     expect(drawn()).toContain("nightly build");
     expect(drawn()).toContain("node build.js --nightly");
     expect(drawn()).toContain("4242");
-    expect(drawn()).toContain("exit code");
+    expect(drawn()).toContain("Exit code");
     expect(drawn()).toContain("exited with code 3");
     expect(drawn()).toContain("build1");
 
@@ -280,7 +280,7 @@ describe("detail view", () => {
     // Two lines up: the window ends two lines above the newest.
     expect(frozen).toContain("output-18");
     expect(frozen).not.toContain("output-19");
-    expect(frozen).toContain("r resumes following");
+    expect(frozen).toContain("r follows");
 
     // New output arrives; the frozen view must not move under the reader.
     source.tails.set("build1", tailOf(numberedOutput(24)));
