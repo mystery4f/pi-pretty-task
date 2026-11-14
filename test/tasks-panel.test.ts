@@ -7,8 +7,10 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
+import { formatClockTime } from "../src/tasks/base/format.js";
 import type { OutputTail } from "../src/tasks/base/output.js";
-import type { ProcessTask } from "../src/tasks/base/task.js";
+import type { LoopTask, ProcessTask } from "../src/tasks/base/task.js";
+import type { Iteration, IterationCall } from "../src/tasks/loop/iteration.js";
 import {
   DETAIL_OUTPUT_LINES,
   type PanelSource,
@@ -46,6 +48,58 @@ function view(
   return { task, elapsedMs, outputBytes };
 }
 
+/** One loop row, with the iterations the store keeps under it. */
+function loopView(
+  id: string,
+  overrides: Partial<LoopTask> = {},
+  elapsedMs = 12_000,
+  untilNextFireMs?: number,
+): PanelTaskView {
+  const task: LoopTask = {
+    id,
+    kind: "loop",
+    name: `loop ${id}`,
+    status: "running",
+    createdAt: 1_000,
+    schedule: "10s",
+    prompt: "review the diff",
+    fires: 0,
+    iterations: [],
+    ...overrides,
+  };
+  return {
+    task,
+    elapsedMs,
+    outputBytes: 0,
+    ...(untilNextFireMs === undefined ? {} : { untilNextFireMs }),
+  };
+}
+
+const CLOCK = Date.UTC(2026, 0, 1, 9, 0, 0);
+
+function callOf(
+  id: string,
+  tool: string,
+  subject: string,
+  overrides: Partial<IterationCall> = {},
+): IterationCall {
+  return { id, tool, subject, startedAt: CLOCK, status: "completed", ...overrides };
+}
+
+function iterationOf(
+  fire: number,
+  calls: IterationCall[] = [],
+  overrides: Partial<Iteration> = {},
+): Iteration {
+  return {
+    fire,
+    startedAt: CLOCK + fire * 10_000,
+    status: "completed",
+    calls,
+    droppedCalls: 0,
+    ...overrides,
+  };
+}
 /** A source stand-in: rows to list, tails to read, stops to record. */
 class FakeSource implements PanelSource {
   rows: PanelTaskView[] = [];
@@ -373,5 +427,253 @@ describe("stopping and closing", () => {
     second.panel.handleInput("x");
     expect(second.done).toHaveBeenCalledTimes(1);
     second.panel.dispose();
+  });
+});
+
+describe("loop tasks in the list", () => {
+  it("mixes loop rows with process rows, the loop row carrying its iterations and last fire", async () => {
+    const source = new FakeSource();
+    const lastFireAt = CLOCK;
+    source.rows = [
+      loopView(
+        "loop01",
+        {
+          name: "review loop",
+          createdAt: 9_000,
+          fires: 5,
+          lastFireAt,
+          iterations: [iterationOf(4), iterationOf(5)],
+          droppedIterations: 3,
+        },
+        12_000,
+        4_000,
+      ),
+      view("build1", { name: "nightly build", createdAt: 1_000 }, 5000, 1536),
+    ];
+    const { panel, drawn } = openPanel(source);
+    await panel.settle();
+
+    const lines = drawn().split("\n");
+    const loopRow = lines.find((line) => line.includes("review loop"));
+    const processRow = lines.find((line) => line.includes("nightly build"));
+    if (loopRow === undefined || processRow === undefined) throw new Error("both rows must render");
+
+    expect(drawn().indexOf("review loop")).toBeLessThan(drawn().indexOf("nightly build"));
+    expect(loopRow).toContain("loop");
+    expect(loopRow).toContain("2+3");
+    expect(loopRow).toContain(formatClockTime(lastFireAt));
+    expect(loopRow).not.toContain("KiB");
+    expect(processRow).toContain("1.5 KiB");
+    expect(processRow).not.toContain("iterations");
+
+    panel.dispose();
+  });
+
+  it("opens a loop without asking the source for an output tail", async () => {
+    const source = new FakeSource();
+    source.rows = [loopView("loop01", { name: "review loop" })];
+    const { panel } = openPanel(source);
+    await panel.settle();
+
+    panel.handleInput(ENTER);
+    await panel.settle();
+
+    expect(source.tailed).toEqual([]);
+
+    panel.dispose();
+  });
+});
+
+describe("the loop detail view", () => {
+  it("shows the schedule, fire counts, next fire and iterations newest first", async () => {
+    const source = new FakeSource();
+    const lastFireAt = CLOCK + 30_000;
+    source.rows = [
+      loopView(
+        "loop01",
+        {
+          name: "review loop",
+          schedule: "10s",
+          prompt: "review the diff and report",
+          fires: 5,
+          maxFires: 10,
+          lastFireAt,
+          nextFireAt: lastFireAt + 10_000,
+          iterations: [iterationOf(3), iterationOf(4), iterationOf(5)],
+          droppedIterations: 2,
+        },
+        12_000,
+        4_000,
+      ),
+    ];
+    const { panel, drawn } = openPanel(source);
+    await panel.settle();
+
+    panel.handleInput(ENTER);
+    await panel.settle();
+
+    const screen = drawn();
+    expect(screen).toContain("review loop");
+    expect(screen).toContain("10s");
+    expect(screen).toContain("5 / 10");
+    expect(screen).toContain("review the diff and report");
+    expect(screen).toContain(formatClockTime(lastFireAt + 10_000));
+    expect(screen).toContain("in 4.0s");
+    expect(screen).toContain("3 kept · 2 older dropped");
+    expect(screen.indexOf("fire 5")).toBeLessThan(screen.indexOf("fire 3"));
+
+    panel.dispose();
+  });
+
+  it("states dropped iterations even when no iteration record is left", async () => {
+    const source = new FakeSource();
+    source.rows = [loopView("loop01", { name: "review loop", fires: 40, droppedIterations: 40 })];
+    const { panel, drawn } = openPanel(source);
+    await panel.settle();
+
+    panel.handleInput(ENTER);
+    await panel.settle();
+
+    expect(drawn()).toContain("iterations · none kept · 40 older dropped");
+
+    panel.dispose();
+  });
+
+  it("opens an iteration with its tool calls in order, commands highlighted and errors kept", async () => {
+    const source = new FakeSource();
+    const calls = [
+      callOf("c1", "bash", "npm test", { durationMs: 1_200, endedAt: CLOCK + 1_200 }),
+      callOf("c2", "read", "src/index.ts"),
+      callOf("c3", "bash", "npm run lint", {
+        status: "failed",
+        endedAt: CLOCK + 300,
+        error: "biome: 3 errors",
+      }),
+    ];
+    source.rows = [
+      loopView("loop01", {
+        name: "review loop",
+        fires: 1,
+        iterations: [iterationOf(1, calls, { endedAt: CLOCK + 2_000, droppedCalls: 4 })],
+      }),
+    ];
+    const { panel, drawn } = openPanel(source);
+    await panel.settle();
+
+    panel.handleInput(ENTER);
+    await panel.settle();
+    panel.handleInput(ENTER);
+    await panel.settle();
+
+    const screen = drawn();
+    expect(screen).toContain("fire 1");
+    expect(screen.indexOf("npm test")).toBeLessThan(screen.indexOf("src/index.ts"));
+    expect(screen.indexOf("src/index.ts")).toBeLessThan(screen.indexOf("npm run lint"));
+    expect(screen).toContain("<accent>npm test</accent>");
+    expect(screen).toContain("biome: 3 errors");
+    expect(screen).toContain("+4 earlier calls dropped");
+
+    panel.dispose();
+  });
+
+  it("walks older iterations with the arrows and returns through the left arrow", async () => {
+    const source = new FakeSource();
+    source.rows = [
+      loopView("loop01", {
+        name: "review loop",
+        fires: 3,
+        iterations: [
+          iterationOf(1, [callOf("a", "bash", "command one")]),
+          iterationOf(2, [callOf("b", "bash", "command two")]),
+          iterationOf(3, [callOf("c", "bash", "command three")]),
+        ],
+      }),
+    ];
+    const { panel, drawn } = openPanel(source);
+    await panel.settle();
+
+    panel.handleInput(ENTER);
+    await panel.settle();
+    panel.handleInput(ENTER);
+    await panel.settle();
+    expect(drawn()).toContain("command three");
+
+    panel.handleInput(LEFT);
+    panel.handleInput(DOWN);
+    panel.handleInput(ENTER);
+    await panel.settle();
+    expect(drawn()).toContain("command two");
+    expect(drawn()).not.toContain("command three");
+
+    panel.handleInput(LEFT);
+    panel.handleInput(DOWN);
+    panel.handleInput(ENTER);
+    await panel.settle();
+    expect(drawn()).toContain("command one");
+
+    panel.handleInput(LEFT);
+    panel.handleInput(LEFT);
+    await panel.settle();
+    expect(drawn()).toContain("Enter details");
+
+    panel.dispose();
+  });
+
+  it("scrolls a long list of calls and reports the visible range", async () => {
+    const source = new FakeSource();
+    const calls = Array.from({ length: 20 }, (_, index) =>
+      callOf(`c${String(index)}`, "bash", `step-${String(index + 1).padStart(2, "0")}`),
+    );
+    source.rows = [
+      loopView("loop01", {
+        name: "review loop",
+        fires: 1,
+        iterations: [iterationOf(1, calls)],
+      }),
+    ];
+    const { panel, drawn } = openPanel(source);
+    await panel.settle();
+
+    panel.handleInput(ENTER);
+    await panel.settle();
+    panel.handleInput(ENTER);
+    await panel.settle();
+
+    expect(drawn()).toContain(`calls 1–${String(DETAIL_OUTPUT_LINES)} of 20`);
+    expect(drawn()).toContain("step-01");
+    expect(drawn()).not.toContain("step-20");
+
+    panel.handleInput(DOWN);
+    await panel.settle();
+    expect(drawn()).toContain(`calls 2–${String(DETAIL_OUTPUT_LINES + 1)} of 20`);
+
+    panel.handleInput("\u001b[6~");
+    await panel.settle();
+    expect(drawn()).toContain("calls 9–20 of 20");
+    expect(drawn()).toContain("step-20");
+    expect(drawn()).not.toContain("step-01");
+
+    panel.dispose();
+  });
+
+  it("stops a loop from its detail view with k", async () => {
+    const source = new FakeSource();
+    source.rows = [loopView("loop01", { name: "review loop" })];
+    source.stop = async (id: string): Promise<PanelStopResult | undefined> => {
+      source.stopped.push(id);
+      return { outcome: "completed", view: loopView(id, { status: "completed" }) };
+    };
+    const { panel, drawn } = openPanel(source);
+    await panel.settle();
+
+    panel.handleInput(ENTER);
+    await panel.settle();
+    panel.handleInput("k");
+    await panel.settle();
+
+    expect(source.stopped).toEqual(["loop01"]);
+    expect(drawn()).toContain("stopped loop01 · completed");
+
+    panel.dispose();
   });
 });

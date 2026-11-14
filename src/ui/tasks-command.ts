@@ -15,8 +15,14 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import type { TaskScope } from "../tasks/base/runtime-state.js";
 import type { Task } from "../tasks/base/task.js";
+import type { LoopTasks, LoopTaskView } from "../tasks/loop/loop-tasks.js";
 import type { ProcessTasks } from "../tasks/process/process-tasks.js";
-import { DETAIL_TAIL_LINES, type PanelSource, TasksPanel } from "./tasks-panel.js";
+import {
+  DETAIL_TAIL_LINES,
+  type PanelSource,
+  type PanelTaskView,
+  TasksPanel,
+} from "./tasks-panel.js";
 
 /** Command name the user types, without the leading slash. */
 export const TASKS_COMMAND = "tasks";
@@ -39,17 +45,42 @@ export function statusLineText(tasks: readonly Task[]): string {
 }
 
 /**
- * Bind the panel to one session's store. The panel only ever sees these three
- * calls, so it cannot signal a process or bypass the store's rules.
+ * Bind the panel to one session's stores. Process tasks and loop tasks arrive as
+ * one list; the panel still only ever sees these three calls, so it cannot signal
+ * a process, fire a loop or bypass the stores' rules.
  */
-export function panelSourceFor(tasks: ProcessTasks, scope: TaskScope): PanelSource {
+export function panelSourceFor(
+  processes: ProcessTasks,
+  loops: LoopTasks,
+  scope: TaskScope,
+  now: () => number = Date.now,
+): PanelSource {
+  const loopRow = (view: LoopTaskView): PanelTaskView => ({
+    task: view.task,
+    elapsedMs: Math.max(0, (view.task.endedAt ?? now()) - view.task.createdAt),
+    outputBytes: 0,
+    ...(view.untilNextFireMs === undefined ? {} : { untilNextFireMs: view.untilNextFireMs }),
+  });
+
   return {
-    list: () => tasks.list(scope),
+    async list() {
+      const [running, scheduled] = await Promise.all([processes.list(scope), loops.list(scope)]);
+      return [...running, ...scheduled.map(loopRow)];
+    },
     async tail(id) {
-      const logs = await tasks.logs(scope, id, { lines: DETAIL_TAIL_LINES });
+      const logs = await processes.logs(scope, id, { lines: DETAIL_TAIL_LINES });
       return logs?.tail;
     },
-    stop: (id) => tasks.stop(scope, id),
+    async stop(id) {
+      // A loop is stopped by ending its schedule; a process by killing its tree.
+      const loop = await loops.get(scope, id);
+      if (loop !== undefined) {
+        const result = await loops.update(scope, id, "complete");
+        if (result === undefined) return undefined;
+        return { outcome: result.outcome, view: loopRow(result.view) };
+      }
+      return processes.stop(scope, id);
+    },
   };
 }
 
@@ -57,16 +88,24 @@ export function panelSourceFor(tasks: ProcessTasks, scope: TaskScope): PanelSour
  * Register `/tasks`. The panel is an overlay component, and the only lasting
  * trace of it is one status line — never a widget, never a footer.
  */
-export function registerTasksCommand(pi: ExtensionAPI, tasks: ProcessTasks): void {
+export function registerTasksCommand(
+  pi: ExtensionAPI,
+  processes: ProcessTasks,
+  loops: LoopTasks,
+): void {
   pi.registerCommand(TASKS_COMMAND, {
-    description: "Open the task panel: running and finished background tasks",
+    description: "Open the task panel: background processes and scheduled loops",
     handler: async (_args, ctx) => {
-      await openPanel(ctx, tasks);
+      await openPanel(ctx, processes, loops);
     },
   });
 }
 
-async function openPanel(ctx: ExtensionCommandContext, tasks: ProcessTasks): Promise<void> {
+async function openPanel(
+  ctx: ExtensionCommandContext,
+  processes: ProcessTasks,
+  loops: LoopTasks,
+): Promise<void> {
   if (ctx.mode !== "tui" || !ctx.hasUI) {
     ctx.ui.notify(
       "The task panel needs the interactive UI; use bg_status and bg_logs here.",
@@ -75,7 +114,7 @@ async function openPanel(ctx: ExtensionCommandContext, tasks: ProcessTasks): Pro
     return;
   }
   const scope: TaskScope = { cwd: ctx.cwd, sessionId: ctx.sessionManager.getSessionId() };
-  const source = panelSourceFor(tasks, scope);
+  const source = panelSourceFor(processes, loops, scope);
 
   await ctx.ui.custom<void>(
     (tui, theme, _keybindings, done) =>
@@ -87,18 +126,20 @@ async function openPanel(ctx: ExtensionCommandContext, tasks: ProcessTasks): Pro
     },
   );
 
-  await publishStatus(ctx.ui, tasks, scope);
+  await publishStatus(ctx.ui, processes, loops, scope);
 }
 
-/** Replace the status line with the panel's one-line summary. */
+/** Replace the status line with the panel's one-line summary of both kinds. */
 async function publishStatus(
   ui: ExtensionUIContext,
-  tasks: ProcessTasks,
+  processes: ProcessTasks,
+  loops: LoopTasks,
   scope: TaskScope,
 ): Promise<void> {
   try {
-    const views = await tasks.list(scope);
-    ui.setStatus(STATUS_LINE_KEY, statusLineText(views.map((view) => view.task)));
+    const [running, scheduled] = await Promise.all([processes.list(scope), loops.list(scope)]);
+    const tasks = [...running.map((view) => view.task), ...scheduled.map((view) => view.task)];
+    ui.setStatus(STATUS_LINE_KEY, statusLineText(tasks));
   } catch {
     // The count is a courtesy: a store that cannot list still gets the way back in.
     ui.setStatus(STATUS_LINE_KEY, `/${TASKS_COMMAND}`);

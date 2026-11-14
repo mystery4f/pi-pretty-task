@@ -5,14 +5,24 @@
  * pixels: records and processes belong to the store, and the panel reaches them
  * only through `PanelSource`. Nothing here signals a process or touches a file.
  *
+ * Both kinds share one table and one key set. A loop task opens onto its
+ * iterations, newest first; an iteration opens onto the tool calls that turn
+ * made, in order — the panel only renders records the loop store already kept.
+ *
  * @author mystery4f <40482524+mystery4f@users.noreply.github.com>
  */
 
-import type { Theme } from "@earendil-works/pi-coding-agent";
+import type { Theme, ThemeColor } from "@earendil-works/pi-coding-agent";
 import { type Component, matchesKey, type TUI, truncateToWidth } from "@earendil-works/pi-tui";
-import { formatBytes, formatDuration } from "../tasks/base/format.js";
+import { formatBytes, formatClockTime, formatDuration } from "../tasks/base/format.js";
 import type { OutputTail } from "../tasks/base/output.js";
-import type { Task } from "../tasks/base/task.js";
+import type { LoopTask, Task } from "../tasks/base/task.js";
+import type {
+  Iteration,
+  IterationCall,
+  IterationCallStatus,
+  IterationStatus,
+} from "../tasks/loop/iteration.js";
 import { STATUS_COLOUR } from "./status-colour.js";
 
 /** Output lines the detail view shows at once. */
@@ -35,6 +45,8 @@ export interface PanelTaskView {
   readonly task: Task;
   readonly elapsedMs: number;
   readonly outputBytes: number;
+  /** A running loop's countdown to the next fire, when the store knows it. */
+  readonly untilNextFireMs?: number;
 }
 
 /** What a stop attempt produced, or `undefined` when there is no such task. */
@@ -52,9 +64,9 @@ export interface PanelStopResult {
 export interface PanelSource {
   /** Every task in the session, in any order; the panel sorts newest first. */
   list(): Promise<readonly PanelTaskView[]>;
-  /** Trailing output for one task; an absent file is an empty tail, not an error. */
+  /** Trailing output for one process task; an absent file is an empty tail, not an error. */
   tail(id: string): Promise<OutputTail | undefined>;
-  /** Stop one task; the store kills the process tree, the panel never signals. */
+  /** Stop one task; the store ends a process tree or a loop schedule, the panel never acts. */
   stop(id: string): Promise<PanelStopResult | undefined>;
 }
 
@@ -68,7 +80,8 @@ export interface TasksPanelOptions {
   readonly refreshMs?: number;
 }
 
-type PanelMode = "list" | "detail";
+/** List → task detail → iteration detail; the third level exists only under a loop. */
+type PanelMode = "list" | "detail" | "iteration";
 
 /** Newest first: the row the reader most likely wants is on top. */
 function newestFirst(left: PanelTaskView, right: PanelTaskView): number {
@@ -101,6 +114,13 @@ export class TasksPanel implements Component {
   private scrollBack = 0;
   /** False while scrolled up: the buffer stays frozen so the view does not move. */
   private following = true;
+
+  /** Which iteration of the open loop is selected, by fire number. */
+  private iterationFire: number | undefined;
+  /** First iteration row drawn in the loop detail's newest-first list. */
+  private iterationTop = 0;
+  /** First call drawn in the iteration view, counted from the oldest call. */
+  private callTop = 0;
 
   private notice: string | undefined;
   /** Serialises async work so a keypress never races the refresh it started. */
@@ -145,10 +165,24 @@ export class TasksPanel implements Component {
       this.selectedId = this.rows[0]?.task.id;
       this.listTop = 0;
     }
-    if (this.mode === "detail" && this.following) await this.readTail();
+    if (this.mode === "detail" && this.following && this.detailRow()?.task.kind === "process") {
+      await this.readTail();
+    }
+    if (this.mode === "iteration") {
+      const open = this.detailRow();
+      if (
+        open === undefined ||
+        open.task.kind !== "loop" ||
+        this.currentIteration(open.task) === undefined
+      ) {
+        // The open iteration fell out of the store's history cap, or its loop vanished.
+        this.mode = "detail";
+      }
+    }
   }
 
   render(width: number): string[] {
+    if (this.mode === "iteration") return this.renderIterationDetail(width);
     return this.mode === "detail" ? this.renderDetail(width) : this.renderList(width);
   }
 
@@ -157,7 +191,8 @@ export class TasksPanel implements Component {
       this.done();
       return;
     }
-    if (this.mode === "detail") this.handleDetailInput(data);
+    if (this.mode === "iteration") this.handleIterationInput(data);
+    else if (this.mode === "detail") this.handleDetailInput(data);
     else this.handleListInput(data);
   }
 
@@ -196,6 +231,16 @@ export class TasksPanel implements Component {
   }
 
   private handleDetailInput(data: string): void {
+    const row = this.detailRow();
+    if (row?.task.kind === "loop") {
+      this.handleLoopDetailInput(data, row.task);
+      return;
+    }
+    this.handleProcessDetailInput(data);
+  }
+
+  /** A process detail scrolls its output; a loop detail walks its iterations instead. */
+  private handleProcessDetailInput(data: string): void {
     if (matchesKey(data, "left")) {
       this.mode = "list";
       this.paint();
@@ -224,6 +269,109 @@ export class TasksPanel implements Component {
     if (data === "k") this.stopSelected();
   }
 
+  private handleLoopDetailInput(data: string, task: LoopTask): void {
+    if (matchesKey(data, "left")) {
+      this.mode = "list";
+      this.iterationTop = 0;
+      this.callTop = 0;
+      this.paint();
+      return;
+    }
+    if (matchesKey(data, "up")) {
+      this.moveIteration(-1, task);
+      return;
+    }
+    if (matchesKey(data, "down")) {
+      this.moveIteration(1, task);
+      return;
+    }
+    if (matchesKey(data, "pageUp")) {
+      this.moveIteration(-LIST_VISIBLE_ROWS, task);
+      return;
+    }
+    if (matchesKey(data, "pageDown")) {
+      this.moveIteration(LIST_VISIBLE_ROWS, task);
+      return;
+    }
+    if (matchesKey(data, "enter") || matchesKey(data, "right")) {
+      this.openIteration();
+      return;
+    }
+    if (data === "k") this.stopSelected();
+  }
+
+  /** The iteration view scrolls the turn's calls; the left arrow goes back to the loop. */
+  private handleIterationInput(data: string): void {
+    if (matchesKey(data, "left")) {
+      this.mode = "detail";
+      this.callTop = 0;
+      this.paint();
+      return;
+    }
+    if (matchesKey(data, "up")) {
+      this.scrollCalls(-1);
+      return;
+    }
+    if (matchesKey(data, "down")) {
+      this.scrollCalls(1);
+      return;
+    }
+    if (matchesKey(data, "pageUp")) {
+      this.scrollCalls(-DETAIL_OUTPUT_LINES);
+      return;
+    }
+    if (matchesKey(data, "pageDown")) {
+      this.scrollCalls(DETAIL_OUTPUT_LINES);
+      return;
+    }
+    if (data === "k") this.stopSelected();
+  }
+
+  /** Walk the newest-first iteration list, keeping the selected row on screen. */
+  private moveIteration(delta: number, task: LoopTask): void {
+    const newestFirst = [...task.iterations].reverse();
+    if (newestFirst.length === 0) return;
+    const selected = this.currentIteration(task);
+    const current = newestFirst.findIndex((iteration) => iteration.fire === selected?.fire);
+    const base = current === -1 ? 0 : current;
+    const next = Math.min(newestFirst.length - 1, Math.max(0, base + delta));
+    const chosen = newestFirst[next];
+    if (chosen === undefined) return;
+    this.iterationFire = chosen.fire;
+    if (next < this.iterationTop) this.iterationTop = next;
+    if (next >= this.iterationTop + LIST_VISIBLE_ROWS) {
+      this.iterationTop = next - LIST_VISIBLE_ROWS + 1;
+    }
+    this.paint();
+  }
+
+  private openIteration(): void {
+    const row = this.detailRow();
+    if (row === undefined || row.task.kind !== "loop") return;
+    const iteration = this.currentIteration(row.task);
+    if (iteration === undefined) {
+      this.notice = "No iteration to open yet — this loop has not fired.";
+      this.paint();
+      return;
+    }
+    this.iterationFire = iteration.fire;
+    this.callTop = 0;
+    this.mode = "iteration";
+    this.paint();
+  }
+
+  private scrollCalls(delta: number): void {
+    const row = this.detailRow();
+    if (row === undefined || row.task.kind !== "loop") return;
+    const iteration = this.currentIteration(row.task);
+    if (iteration === undefined) return;
+    const oldest = Math.max(0, iteration.calls.length - DETAIL_OUTPUT_LINES);
+    const next = Math.min(oldest, Math.max(0, this.callTop + delta));
+    if (next === this.callTop) return;
+    this.callTop = next;
+    this.paint();
+  }
+
   private moveSelection(delta: number): void {
     if (this.rows.length === 0) return;
     const current = this.rows.findIndex((row) => row.task.id === this.selectedId);
@@ -245,6 +393,11 @@ export class TasksPanel implements Component {
     this.mode = "detail";
     this.following = true;
     this.scrollBack = 0;
+    this.callTop = 0;
+    const row = this.detailRow();
+    // A loop opens on its newest iteration; a process opens on the tail of its output.
+    this.iterationFire = row?.task.kind === "loop" ? row.task.iterations.at(-1)?.fire : undefined;
+    this.iterationTop = 0;
     this.enqueue(async () => {
       await this.readTail();
       this.paint();
@@ -304,7 +457,18 @@ export class TasksPanel implements Component {
     return this.rows.find((row) => row.task.id === this.detailId);
   }
 
+  /** The iteration under the cursor, or the newest one when the store trimmed the pick. */
+  private currentIteration(task: LoopTask): Iteration | undefined {
+    if (this.iterationFire !== undefined) {
+      const found = task.iterations.find((iteration) => iteration.fire === this.iterationFire);
+      if (found !== undefined) return found;
+    }
+    return task.iterations.at(-1);
+  }
+
   private async readTail(): Promise<void> {
+    // Only a process task has an output file; a loop detail never asks the source for one.
+    if (this.detailRow()?.task.kind !== "process") return;
     const id = this.detailId;
     if (id === undefined) return;
     try {
@@ -364,6 +528,8 @@ export class TasksPanel implements Component {
       ` ${pad("status", 12)}`,
       ` ${padStart("elapsed", 9)}`,
       ` ${padStart("size", 10)}`,
+      ` ${padStart("iters", 6)}`,
+      ` ${padStart("last", 9)}`,
     ].join("");
   }
 
@@ -379,13 +545,23 @@ export class TasksPanel implements Component {
       ` ${theme.fg(STATUS_COLOUR[row.task.status], pad(row.task.status, 12))}`,
       ` ${padStart(formatDuration(row.elapsedMs), 9)}`,
       ` ${padStart(formatSize(row), 10)}`,
+      ` ${padStart(iterationCountText(row.task), 6)}`,
+      ` ${padStart(lastFireText(row.task), 9)}`,
     ].join("");
   }
 
   private renderDetail(width: number): string[] {
-    const theme = this.theme;
     const row = this.detailRow();
     if (row === undefined) return this.renderList(width);
+    return row.task.kind === "loop"
+      ? this.renderLoopDetail(row, width)
+      : this.renderProcessDetail(width);
+  }
+
+  private renderProcessDetail(width: number): string[] {
+    const theme = this.theme;
+    const row = this.detailRow();
+    if (row === undefined || row.task.kind !== "process") return this.renderList(width);
     const task = row.task;
     const colour = STATUS_COLOUR[task.status];
     const lines: string[] = [
@@ -429,6 +605,123 @@ export class TasksPanel implements Component {
     return lines;
   }
 
+  /** A loop detail: schedule facts, then the iterations it produced, newest first. */
+  private renderLoopDetail(row: PanelTaskView, width: number): string[] {
+    const theme = this.theme;
+    const task = row.task;
+    if (task.kind !== "loop") return this.renderList(width);
+    const colour = STATUS_COLOUR[task.status];
+    const lines: string[] = [
+      `${theme.bold(task.name)} ${theme.fg("muted", `(${task.id})`)}`,
+      "",
+      this.field("status", theme.fg(colour, task.status)),
+      this.field("kind", task.kind),
+      this.field("elapsed", formatDuration(row.elapsedMs)),
+      this.field("schedule", task.schedule),
+      this.field("fires", firesText(task)),
+      this.field("next fire", nextFireText(task, row)),
+      this.field(
+        "last fire",
+        task.lastFireAt === undefined ? "—" : formatClockTime(task.lastFireAt),
+      ),
+    ];
+    if (task.expiresAt !== undefined)
+      lines.push(this.field("expires", formatClockTime(task.expiresAt)));
+    if (task.endedAt !== undefined) lines.push(this.field("ended", formatClockTime(task.endedAt)));
+    if (task.error !== undefined) lines.push(this.field("error", theme.fg(colour, task.error)));
+    lines.push(this.field("prompt", singleLine(task.prompt, Math.max(1, width - 10))));
+    lines.push("");
+    lines.push(theme.fg("muted", iterationsText(task)));
+
+    const newestFirst = [...task.iterations].reverse();
+    if (newestFirst.length === 0) {
+      lines.push(theme.fg("dim", "  no iteration recorded yet"));
+    } else {
+      const selected = this.currentIteration(task);
+      const top = Math.min(
+        Math.max(0, this.iterationTop),
+        Math.max(0, newestFirst.length - LIST_VISIBLE_ROWS),
+      );
+      const visible = newestFirst.slice(top, top + LIST_VISIBLE_ROWS);
+      if (top > 0) lines.push(theme.fg("dim", `  … ${String(top)} newer above`));
+      for (const iteration of visible) {
+        const marker = iteration.fire === selected?.fire ? theme.fg("accent", ">") : " ";
+        const text = iterationLine(iteration);
+        lines.push(`${marker} ${truncateToWidth(text, Math.max(1, width - 2), "…", false)}`);
+      }
+      const below = newestFirst.length - top - visible.length;
+      if (below > 0) lines.push(theme.fg("dim", `  … ${String(below)} older below`));
+    }
+
+    if (this.notice !== undefined) lines.push(theme.fg("muted", this.notice));
+    lines.push(theme.fg("dim", "↑/↓ select · Enter iteration · ← list · k stop · x close"));
+    return lines;
+  }
+
+  /** An iteration detail: the tool calls that turn made, oldest first; `←` goes back. */
+  private renderIterationDetail(width: number): string[] {
+    const theme = this.theme;
+    const row = this.detailRow();
+    if (row === undefined || row.task.kind !== "loop") return this.renderList(width);
+    const task = row.task;
+    const iteration = this.currentIteration(task);
+    if (iteration === undefined) return this.renderLoopDetail(row, width);
+
+    const lines: string[] = [
+      `${theme.bold(`fire ${String(iteration.fire)}`)} ${theme.fg(
+        "muted",
+        `(${task.name} · ${task.id})`,
+      )}`,
+      "",
+      this.field("status", theme.fg(ITERATION_COLOUR[iteration.status], iteration.status)),
+      this.field("started", formatClockTime(iteration.startedAt)),
+    ];
+    if (iteration.endedAt !== undefined) {
+      lines.push(this.field("took", formatDuration(iteration.endedAt - iteration.startedAt)));
+    }
+    lines.push(this.field("calls", callsText(iteration)));
+    lines.push("");
+    lines.push(theme.fg("muted", callsHeading(iteration, this.callTop)));
+
+    const top = callTopFor(iteration, this.callTop);
+    const visible = iteration.calls.slice(top, top + DETAIL_OUTPUT_LINES);
+    if (visible.length === 0) {
+      lines.push(theme.fg("dim", "  no tool call in this turn"));
+    }
+    visible.forEach((call, offset) => {
+      lines.push(this.callLine(call, top + offset, width));
+      if (call.error !== undefined) {
+        lines.push(theme.fg(STATUS_COLOUR.failed, `     error: ${call.error}`));
+      }
+    });
+    // The cap drops the oldest calls first; say so where they would have been.
+    if (iteration.droppedCalls > 0) {
+      lines.push(
+        theme.fg(
+          STATUS_COLOUR.interrupted,
+          `  … +${String(iteration.droppedCalls)} earlier calls dropped`,
+        ),
+      );
+    }
+
+    if (this.notice !== undefined) lines.push(theme.fg("muted", this.notice));
+    lines.push(theme.fg("dim", "↑/↓ scroll · ← loop · k stop · x close"));
+    return lines;
+  }
+
+  /** One call row: its subject (a command stands out), then its result or error. */
+  private callLine(call: IterationCall, index: number, width: number): string {
+    const theme = this.theme;
+    const prefix = ` ${String(index + 1).padStart(2)}. ${call.tool}  `;
+    const duration = call.durationMs === undefined ? "" : ` ${formatDuration(call.durationMs)}`;
+    const status = `  ${call.status}${duration}`;
+    const room = Math.max(1, width - prefix.length - status.length);
+    const subject = singleLine(call.subject, room);
+    const body =
+      subject.length === 0 ? "" : isCommandCall(call) ? theme.fg("accent", subject) : subject;
+    return `${prefix}${body}${theme.fg(CALL_COLOUR[call.status], status)}`;
+  }
+
   /** Where the visible window sits: following the newest line, or a frozen range. */
   private position(): string {
     if (this.following || this.detailLines.length === 0) return "following";
@@ -454,7 +747,7 @@ function formatSize(row: PanelTaskView): string {
 }
 
 /** Columns the fixed list fields take, marker and gaps included. */
-const FIXED_COLUMNS = 2 + 9 + 11 + 13 + 10 + 11;
+const FIXED_COLUMNS = 2 + 9 + 11 + 13 + 10 + 11 + 7 + 10;
 
 /** Space a task name may use: whatever the fixed columns leave, with a floor. */
 function nameWidth(width: number): number {
@@ -471,4 +764,110 @@ function padStart(text: string, width: number): string {
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** Tools whose subject is a command line, so the panel can make them stand out. */
+const COMMAND_TOOLS: ReadonlySet<string> = new Set(["bash", "bg_run"]);
+
+/** Iteration states, read from the one task-status palette. */
+const ITERATION_COLOUR: Record<IterationStatus, ThemeColor> = {
+  running: STATUS_COLOUR.running,
+  completed: STATUS_COLOUR.completed,
+  aborted: STATUS_COLOUR.killed,
+  interrupted: STATUS_COLOUR.interrupted,
+};
+
+/** Tool-call states, read from the same palette. */
+const CALL_COLOUR: Record<IterationCallStatus, ThemeColor> = {
+  running: STATUS_COLOUR.running,
+  completed: STATUS_COLOUR.completed,
+  failed: STATUS_COLOUR.failed,
+  aborted: STATUS_COLOUR.killed,
+  interrupted: STATUS_COLOUR.interrupted,
+};
+
+function isCommandCall(call: IterationCall): boolean {
+  return COMMAND_TOOLS.has(call.tool);
+}
+
+/** The iterations column: kept count, plus any the history cap dropped. */
+function iterationCountText(task: Task): string {
+  if (task.kind !== "loop") return "—";
+  const dropped = task.droppedIterations ?? 0;
+  const kept = String(task.iterations.length);
+  return dropped === 0 ? kept : `${kept}+${String(dropped)}`;
+}
+
+/** The last-fire column: wall-clock time, or a dash before the first fire. */
+function lastFireText(task: Task): string {
+  if (task.kind !== "loop" || task.lastFireAt === undefined) return "—";
+  return formatClockTime(task.lastFireAt);
+}
+
+function firesText(task: LoopTask): string {
+  if (task.maxFires === undefined) return String(task.fires);
+  return `${String(task.fires)} / ${String(task.maxFires)}`;
+}
+
+function nextFireText(task: LoopTask, row: PanelTaskView): string {
+  if (task.nextFireAt === undefined) return "—";
+  const at = formatClockTime(task.nextFireAt);
+  return row.untilNextFireMs === undefined
+    ? at
+    : `${at} (in ${formatDuration(row.untilNextFireMs)})`;
+}
+
+/** Iteration list heading: kept and dropped counts are both stated, never hidden. */
+function iterationsText(task: LoopTask): string {
+  const dropped = task.droppedIterations ?? 0;
+  const kept = task.iterations.length;
+  if (kept === 0) {
+    return dropped === 0
+      ? "iterations · none yet"
+      : `iterations · none kept · ${String(dropped)} older dropped`;
+  }
+  const suffix = dropped === 0 ? "" : ` · ${String(dropped)} older dropped`;
+  return `iterations · newest first · ${String(kept)} kept${suffix}`;
+}
+
+/** One iteration row: fire number, result, when it ran, and what it cost. */
+function iterationLine(iteration: Iteration): string {
+  const parts = [
+    `fire ${String(iteration.fire)}`,
+    iteration.status,
+    formatClockTime(iteration.startedAt),
+  ];
+  if (iteration.endedAt !== undefined) {
+    parts.push(formatDuration(iteration.endedAt - iteration.startedAt));
+  }
+  parts.push(iteration.calls.length === 1 ? "1 call" : `${String(iteration.calls.length)} calls`);
+  if (iteration.droppedCalls > 0) {
+    parts.push(`+${String(iteration.droppedCalls)} earlier calls dropped`);
+  }
+  return parts.join(" · ");
+}
+
+/** How many calls the iteration kept; the dropped ones are marked below the list. */
+function callsText(iteration: Iteration): string {
+  return iteration.calls.length === 1 ? "1 call" : `${String(iteration.calls.length)} calls`;
+}
+
+/** Where the visible call window sits, oldest first. */
+function callsHeading(iteration: Iteration, requested: number): string {
+  const total = iteration.calls.length;
+  if (total === 0) return "calls · none in this turn";
+  const top = callTopFor(iteration, requested);
+  const to = Math.min(total, top + DETAIL_OUTPUT_LINES);
+  return `calls ${String(top + 1)}–${String(to)} of ${String(total)} · oldest first`;
+}
+
+function callTopFor(iteration: Iteration, requested: number): number {
+  const oldest = Math.max(0, iteration.calls.length - DETAIL_OUTPUT_LINES);
+  return Math.min(Math.max(0, requested), oldest);
+}
+
+/** A free-form field as one line: the panel draws rows, not paragraphs. */
+function singleLine(text: string, maxLength: number): string {
+  const oneLine = text.replace(/\s*\n\s*/g, " ").trim();
+  return truncateToWidth(oneLine, Math.max(1, maxLength), "…", false);
 }
