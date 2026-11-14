@@ -250,7 +250,9 @@ function runDescription(templates: ReadonlyMap<string, CommandTemplate>): string
   // Three shapes, cheapest that still fits: every name with its command, then names
   // alone, then as many names as the budget holds. The description must not grow
   // with the file, or a large `pretty-task.json` would bloat every request.
-  const entries = names.map((name) => `${name} (${commandHint(templates.get(name)?.command ?? "")})`);
+  const entries = names.map(
+    (name) => `${name} (${commandHint(templates.get(name)?.command ?? "")})`,
+  );
   const list =
     withinBudget(entries, TEMPLATE_BUDGET) ??
     withinBudget(names, TEMPLATE_BUDGET) ??
