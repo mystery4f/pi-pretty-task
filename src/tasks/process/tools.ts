@@ -25,7 +25,7 @@ import {
 } from "../base/search.js";
 import type { ProcessTask } from "../base/task.js";
 
-import { parseTimeoutSeconds, parseWaitSeconds } from "./limits.js";
+import { parseFollowSeconds, parseTimeoutSeconds, parseWaitSeconds } from "./limits.js";
 import type { ProcessTasks, ProcessTaskView, TaskScope } from "./process-tasks.js";
 
 const RunParameters = Type.Object({
@@ -89,6 +89,12 @@ const LogsParameters = Type.Object({
     Type.Boolean({
       description:
         "Return only the output appended since this task's previous follow call in this session, waiting for new bytes instead of repeating what was already shown. `lines` and `full` do not apply. The answer says when the task has finished and nothing more will arrive.",
+    }),
+  ),
+  timeoutSeconds: Type.Optional(
+    Type.Number({
+      description:
+        "With `follow`, how long to wait for new bytes before answering an empty delta. Defaults to 10 seconds; the longest single read is 60.",
     }),
   ),
 });
@@ -326,7 +332,8 @@ export function processTaskTools(tasks: ProcessTasks): ToolDefinition[] {
     parameters: LogsParameters,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       if (params.follow === true) {
-        const followed = await tasks.follow(scopeOf(ctx), params.id.trim());
+        const windowMs = parseFollowSeconds(params.timeoutSeconds);
+        const followed = await tasks.follow(scopeOf(ctx), params.id.trim(), windowMs);
         if (followed === undefined) {
           return text(`No background task with id ${params.id} in this session.`);
         }
@@ -334,7 +341,9 @@ export function processTaskTools(tasks: ProcessTasks): ToolDefinition[] {
         const { view } = followed;
         const note = followed.finished
           ? "the task has finished; nothing more will arrive"
-          : `followed ${formatBytes(followed.deltaBytes)}`;
+          : followed.timedOut
+            ? `no new output in ${formatDuration(windowMs)}; the task is still running`
+            : `followed ${formatBytes(followed.deltaBytes)}`;
         const header = [
           `name: ${view.task.name} · ${view.task.id} · ${view.task.kind} · ${view.task.status}`,
           `elapsed ${formatDuration(view.elapsedMs)} · output ${formatBytes(view.outputBytes)} · follow`,

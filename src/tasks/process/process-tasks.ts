@@ -14,6 +14,7 @@
 
 import { stat } from "node:fs/promises";
 import { resolve } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import { type OutputTail, readOutputFrom, readOutputTail } from "../base/output.js";
 import { processOutputPath, sessionTaskDirectory, type TaskScope } from "../base/runtime-state.js";
 import type { KillReason, ProcessTask, Task } from "../base/task.js";
@@ -169,6 +170,13 @@ const NAME_LIMIT = 48;
  * gone. Past that, the stop settles the record itself.
  */
 const EXIT_WAIT_MS = 2000;
+
+/**
+ * How often a follow read looks at the output file while it waits for new
+ * bytes. Small enough that a line shows up promptly, large enough that a
+ * minute-long follow is a few thousand stats, not a busy loop.
+ */
+const FOLLOW_POLL_MS = 50;
 
 /** Map the supervisor's answer onto the store's, which speaks of tasks. */
 const STOP_OUTCOMES: Record<StopOutcome, StopTaskOutcome> = {
@@ -363,24 +371,52 @@ export class ProcessTasks {
    * belongs to the session: it starts at the beginning of the file, moves only
    * past bytes an answer actually carried, and a plain tail read leaves it
    * alone. `finished` says the record has ended, so no later read will grow.
+   * A read waits up to `timeoutMs` for new bytes and returns as soon as some
+   * arrive; an empty delta with `timedOut` is an answer, not an error.
    */
-  async follow(scope: TaskScope, id: string): Promise<FollowTaskResult | undefined> {
+  async follow(
+    scope: TaskScope,
+    id: string,
+    timeoutMs: number,
+  ): Promise<FollowTaskResult | undefined> {
     const session = await this.session(scope);
     const task = session.tasks.get(id);
     if (task === undefined || task.kind !== "process") return undefined;
 
-    const from = session.followOffsets.get(id) ?? 0;
-    const read = await readOutputFrom(task.outputPath, from, { platform: this.platform });
-    session.followOffsets.set(id, read.to);
-    return {
-      view: this.view(session, task),
-      delta: read.text,
-      from: read.from,
-      offset: read.to,
-      deltaBytes: read.to - read.from,
-      finished: task.endedAt !== undefined,
-      timedOut: false,
-    };
+    const deadline = this.now() + timeoutMs;
+    for (;;) {
+      const from = session.followOffsets.get(id) ?? 0;
+      const read = await readOutputFrom(task.outputPath, from, { platform: this.platform });
+      session.followOffsets.set(id, read.to);
+      const finished = task.endedAt !== undefined;
+      if (read.text.length > 0 || finished) {
+        return {
+          view: this.view(session, task),
+          delta: read.text,
+          from: read.from,
+          offset: read.to,
+          deltaBytes: read.to - read.from,
+          finished,
+          timedOut: false,
+        };
+      }
+
+      // Nothing yet: give the process a moment, then look again. A finished
+      // task never reaches this wait, so an ended task answers at once.
+      const remaining = deadline - this.now();
+      if (remaining <= 0) {
+        return {
+          view: this.view(session, task),
+          delta: "",
+          from: read.from,
+          offset: read.to,
+          deltaBytes: 0,
+          finished: false,
+          timedOut: true,
+        };
+      }
+      await sleep(Math.min(FOLLOW_POLL_MS, remaining));
+    }
   }
 
   /**

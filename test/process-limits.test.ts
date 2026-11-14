@@ -13,10 +13,13 @@ import { stat } from "node:fs/promises";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  DEFAULT_FOLLOW_SECONDS,
   DEFAULT_OUTPUT_CAP_BYTES,
   DEFAULT_WAIT_SECONDS,
+  MAX_FOLLOW_SECONDS,
   MAX_WAIT_SECONDS,
   OUTPUT_CAP_ENV,
+  parseFollowSeconds,
   parseOutputCapBytes,
   parseWaitSeconds,
 } from "../src/tasks/process/limits.js";
@@ -223,6 +226,22 @@ describe("the wait bound", () => {
   it("rejects a wait outside the bound", () => {
     for (const bad of [0, -1, Number.NaN, Number.POSITIVE_INFINITY, MAX_WAIT_SECONDS + 1]) {
       expect(() => parseWaitSeconds(bad)).toThrow(/no larger than 600/);
+    }
+  });
+});
+
+describe("the follow window", () => {
+  it("defaults to ten seconds and caps an explicit window at one minute", () => {
+    expect(DEFAULT_FOLLOW_SECONDS).toBe(10);
+    expect(MAX_FOLLOW_SECONDS).toBe(60);
+    expect(parseFollowSeconds(undefined)).toBe(10_000);
+    expect(parseFollowSeconds(0.4)).toBe(400);
+    expect(parseFollowSeconds(MAX_FOLLOW_SECONDS)).toBe(60_000);
+  });
+
+  it("rejects a follow window outside the bound", () => {
+    for (const bad of [0, -1, Number.NaN, Number.POSITIVE_INFINITY, MAX_FOLLOW_SECONDS + 1]) {
+      expect(() => parseFollowSeconds(bad)).toThrow(/no larger than 60/);
     }
   });
 });

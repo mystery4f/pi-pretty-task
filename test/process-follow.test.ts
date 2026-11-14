@@ -17,13 +17,14 @@ import type { AgentToolResult } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createHarness, type Harness, resultText } from "./support/extension-harness.js";
-import { makeTempDir, waitFor, writeScript } from "./support/processes.js";
+import { killTree, makeTempDir, waitFor, writeScript } from "./support/processes.js";
 
 interface TaskDetails {
   id: string;
   status: string;
   outputPath: string;
   outputBytes: number;
+  pid: number | undefined;
 }
 
 interface FollowDetails {
@@ -38,8 +39,10 @@ interface FollowDetails {
 }
 
 const cleanup: Array<() => Promise<void>> = [];
+const spawned: Array<number | undefined> = [];
 
 afterEach(async () => {
+  while (spawned.length > 0) await killTree(spawned.pop());
   while (cleanup.length > 0) await cleanup.pop()?.();
 });
 
@@ -55,10 +58,17 @@ function followAnswer(result: AgentToolResult<unknown>): {
   return { text: resultText(result), details: result.details as FollowDetails };
 }
 
-/** Start a command and wait until it has ended, so its output file is settled. */
-async function finishedTask(harness: Harness, command: string): Promise<TaskDetails> {
+/** Start a command that may outlive the call; the test kills it afterwards. */
+async function startTask(harness: Harness, command: string): Promise<TaskDetails> {
   const started = await harness.call("bg_run", { command });
   const task = started.details as TaskDetails;
+  if (task.pid !== undefined) spawned.push(task.pid);
+  return task;
+}
+
+/** Start a command and wait until it has ended, so its output file is settled. */
+async function finishedTask(harness: Harness, command: string): Promise<TaskDetails> {
+  const task = await startTask(harness, command);
   await waitFor("the task to finish", async () => {
     const status = await harness.call("bg_status", { id: task.id });
     return (status.details as TaskDetails).status !== "running";
@@ -109,8 +119,7 @@ describe("bg_logs following a task", () => {
       ].join("\n"),
     );
     const harness = createHarness({ cwd: dir.path, sessionId: "session-follow-delta" });
-    const started = await harness.call("bg_run", { command });
-    const task = started.details as TaskDetails;
+    const task = await startTask(harness, command);
 
     await waitFor("the first line", async () => {
       const status = await harness.call("bg_status", { id: task.id });
@@ -130,5 +139,87 @@ describe("bg_logs following a task", () => {
     expect(second.details.from).toBe(4);
     expect(second.details.offset).toBe(8);
     expect(second.text).not.toContain("one");
+  });
+
+  it("returns as soon as new bytes appear instead of waiting for the whole window", async () => {
+    const dir = await makeTempDir();
+    cleanup.push(dir.dispose);
+    const command = await writeScript(
+      dir.path,
+      "late-line.js",
+      'setTimeout(() => process.stdout.write("late\\n"), 400);\n',
+    );
+    const harness = createHarness({ cwd: dir.path, sessionId: "session-follow-waits" });
+    const task = await startTask(harness, command);
+
+    const startedAt = Date.now();
+    const answer = followAnswer(
+      await harness.call("bg_logs", { id: task.id, follow: true, timeoutSeconds: 30 }),
+    );
+    const elapsed = Date.now() - startedAt;
+
+    expect(body(answer.text)).toBe("late\n");
+    expect(elapsed).toBeLessThan(10_000);
+    expect(answer.details.finished).toBe(true);
+    expect(answer.details.timedOut).toBe(false);
+  });
+
+  it("answers an empty delta when nothing new arrives in the window, not an error", async () => {
+    const dir = await makeTempDir();
+    cleanup.push(dir.dispose);
+    const command = await writeScript(dir.path, "sleeper.js", "setTimeout(() => {}, 30_000);\n");
+    const harness = createHarness({ cwd: dir.path, sessionId: "session-follow-timeout" });
+    const task = await startTask(harness, command);
+
+    const startedAt = Date.now();
+    const answer = followAnswer(
+      await harness.call("bg_logs", { id: task.id, follow: true, timeoutSeconds: 0.4 }),
+    );
+    const elapsed = Date.now() - startedAt;
+
+    expect(elapsed).toBeGreaterThanOrEqual(300);
+    expect(elapsed).toBeLessThan(5_000);
+    expect(answer.details).toMatchObject({ deltaBytes: 0, timedOut: true, finished: false });
+    expect(body(answer.text)).toBe("(no new output)");
+    expect(answer.text).toContain("the task is still running");
+  });
+
+  it("says the task has finished instead of waiting when nothing is left", async () => {
+    const dir = await makeTempDir();
+    cleanup.push(dir.dispose);
+    const command = await writeScript(dir.path, "silent.js", "process.exit(0);\n");
+    const harness = createHarness({ cwd: dir.path, sessionId: "session-follow-finished" });
+    const task = await finishedTask(harness, command);
+
+    const startedAt = Date.now();
+    const answer = followAnswer(
+      await harness.call("bg_logs", { id: task.id, follow: true, timeoutSeconds: 30 }),
+    );
+    const elapsed = Date.now() - startedAt;
+
+    expect(elapsed).toBeLessThan(5_000);
+    expect(answer.details).toMatchObject({ deltaBytes: 0, finished: true, timedOut: false });
+    expect(answer.text).toContain("nothing more will arrive");
+  });
+
+  it("returns the whole file on the first follow even after a plain tail read", async () => {
+    const dir = await makeTempDir();
+    cleanup.push(dir.dispose);
+    const command = await writeScript(
+      dir.path,
+      "two-lines-again.js",
+      'process.stdout.write("first\\nsecond\\n");\n',
+    );
+    const harness = createHarness({ cwd: dir.path, sessionId: "session-follow-first-again" });
+    const task = await finishedTask(harness, command);
+
+    const tail = resultText(await harness.call("bg_logs", { id: task.id, lines: 1 }));
+    expect(tail).toContain("second");
+
+    const answer = followAnswer(await harness.call("bg_logs", { id: task.id, follow: true }));
+
+    expect(body(answer.text)).toBe("first\nsecond\n");
+    expect(answer.details.from).toBe(0);
+    expect(answer.details.offset).toBe(13);
   });
 });
