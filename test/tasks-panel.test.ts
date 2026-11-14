@@ -1455,6 +1455,67 @@ describe("recency and search", () => {
     panel.dispose();
   });
 
+  it("says so when the hit came from a command the row never prints", async () => {
+    const source = new FakeSource();
+    source.rows = [view("bg-aaaaa", { name: "build", command: "make deploy" })];
+    const { panel, drawn } = openPanel(source);
+    await panel.settle();
+
+    panel.handleInput("/");
+    for (const character of "deploy") panel.handleInput(character);
+
+    const row = drawn()
+      .split("\n")
+      .find((line) => line.includes("bg-aaaaa"));
+    expect(row).toBeDefined();
+    expect(plain(row ?? "")).toContain("via command");
+    // The note is the row's own admission; there is nothing on the row to light.
+    expect(row).not.toContain("<bold><accent>deploy</accent></bold>");
+
+    panel.dispose();
+  });
+
+  it("says so when the hit came from a loop's prompt", async () => {
+    const source = new FakeSource();
+    source.rows = [loopView("lc00001", { name: "nightly", prompt: "review the diff" })];
+    const { panel, drawn } = await openOn("loops", source);
+    await panel.settle();
+
+    panel.handleInput("/");
+    for (const character of "diff") panel.handleInput(character);
+
+    const row = drawn()
+      .split("\n")
+      .find((line) => line.includes("lc00001"));
+    expect(row).toBeDefined();
+    expect(plain(row ?? "")).toContain("via prompt");
+
+    panel.dispose();
+  });
+
+  it("says so when a chain's own name is the only word the query hit", async () => {
+    const source = new FakeSource();
+    source.rows = [
+      chainView("ch-abcde", { name: "nightly", steps: ["bg-00001"], cursor: 0 }),
+      view("bg-00001", { name: "deploy", parentId: "ch-abcde" }),
+    ];
+    const { panel, drawn } = await openOn("chains", source);
+    await panel.settle();
+
+    panel.handleInput("/");
+    for (const character of "night") panel.handleInput(character);
+
+    const row = drawn()
+      .split("\n")
+      .find((line) => line.includes("ch-abcde"));
+    expect(row).toBeDefined();
+    // The row spends its name column on the queue, so `nightly` is not on it.
+    expect(plain(row ?? "")).toContain("deploy");
+    expect(plain(row ?? "")).toContain("via name");
+
+    panel.dispose();
+  });
+
   it("filters by the kind word the row shows, so an llm loop answers to llm", async () => {
     const source = new FakeSource();
     source.rows = [

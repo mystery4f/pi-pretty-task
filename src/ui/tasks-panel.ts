@@ -1321,6 +1321,10 @@ export class TasksPanel implements Component {
     const kind = this.highlight(kindWord(task.kind), "muted", lit("kind"));
     const status = this.highlight(pad(task.status, 11), STATUS_COLOUR[task.status], lit("status"));
     const exit = exitText(task) === "" ? "" : theme.fg("dim", ` ${exitText(task)}`);
+    // A hit in a word the row does not print still finds the row; the row names
+    // the word instead of leaving the reader to guess why it is here.
+    const notePlain = match?.hidden === true ? ` via ${match.field}` : "";
+    const note = notePlain === "" ? "" : theme.fg("muted", notePlain);
 
     // The name column is as wide as the longest name, not as wide as the terminal:
     // a fixed split leaves a canyon between the name and the id on a wide screen.
@@ -1332,7 +1336,7 @@ export class TasksPanel implements Component {
         ? this.highlight(namePlain, nameColour(task), lit("name"))
         : `${chain.themed}${" ".repeat(Math.max(0, nameRoom - visibleWidth(chain.plain)))}`;
     const growth = this.growthText(row);
-    const headPlain = ` ${pointer} ${dot} ${name} ${id}${tag} ${separator} ${kind} ${status}${exit} `;
+    const headPlain = ` ${pointer} ${dot} ${name} ${id}${tag} ${separator} ${kind} ${status}${exit}${note} `;
     // The numbers get the room the head leaves, minus one space of gap, so they can
     // shed their least important parts instead of pushing the row past the border.
     // The room is measured on the bare cells: a theme adds markup, and only the
@@ -1340,7 +1344,7 @@ export class TasksPanel implements Component {
     const headCells = ` ${selected ? "›" : " "} ● ${namePlain} ${pad(
       task.id,
       ID_COLUMN_WIDTH,
-    )}${tagPlain} · ${kindWord(task.kind)} ${pad(task.status, 11)}${exitText(task) === "" ? "" : ` ${exitText(task)}`} `;
+    )}${tagPlain} · ${kindWord(task.kind)} ${pad(task.status, 11)}${exitText(task) === "" ? "" : ` ${exitText(task)}`}${notePlain} `;
     const right = theme.fg(
       "dim",
       rightText(
