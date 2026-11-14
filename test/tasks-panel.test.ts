@@ -1371,6 +1371,52 @@ describe("recency and search", () => {
     panel.dispose();
   });
 
+  it("ranks a tight match above a scattered one, whatever the recency", async () => {
+    const source = new FakeSource();
+    source.rows = [
+      // The scattered match is the newer row, so recency alone would keep it on top.
+      view("bg-aaaaa", { name: "debug", updatedAt: 9_000 }),
+      view("bg-bbbbb", { name: "deploy-bg", updatedAt: 1_000 }),
+    ];
+    const { panel, drawn } = openPanel(source, () => 13_000, plainTheme());
+    await panel.settle();
+    const rowLine = (id: string): number =>
+      drawn()
+        .split("\n")
+        .findIndex((line) => line.includes(id));
+    expect(rowLine("bg-aaaaa")).toBeLessThan(rowLine("bg-bbbbb"));
+
+    panel.handleInput("/");
+    for (const character of "dbg") panel.handleInput(character);
+
+    // `bg` sits together in `deploy-bg` and `b` starts a word; `debug` has all
+    // three letters, but scattered through the name.
+    expect(rowLine("bg-bbbbb")).toBeLessThan(rowLine("bg-aaaaa"));
+
+    panel.dispose();
+  });
+
+  it("prefers the shorter field when two matches are as tight", async () => {
+    const source = new FakeSource();
+    source.rows = [
+      view("bg-aaaaa", { name: "build-logs-archive", updatedAt: 9_000 }),
+      view("bg-bbbbb", { name: "build", updatedAt: 1_000 }),
+    ];
+    const { panel, drawn } = openPanel(source, () => 13_000, plainTheme());
+    await panel.settle();
+    const rowLine = (id: string): number =>
+      drawn()
+        .split("\n")
+        .findIndex((line) => line.includes(id));
+
+    panel.handleInput("/");
+    for (const character of "build") panel.handleInput(character);
+
+    expect(rowLine("bg-bbbbb")).toBeLessThan(rowLine("bg-aaaaa"));
+
+    panel.dispose();
+  });
+
   it("finds a row by its id", async () => {
     const source = searchFixture();
     const { panel, drawn } = openPanel(source);

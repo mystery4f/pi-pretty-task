@@ -239,6 +239,8 @@ export class TasksPanel implements Component {
   private searching = false;
   /** The query outlives search mode: leaving keeps it, and the header keeps showing it. */
   private query = "";
+  /** How well each shown row answers the query; empty when there is no query. */
+  private readonly matchScores = new Map<PanelTaskView, number>();
 
   private detailId: string | undefined;
   private detailLines: readonly string[] = [];
@@ -332,27 +334,42 @@ export class TasksPanel implements Component {
    * follow either narrowing (ADR-0012).
    */
   private applyFilters(): void {
+    this.matchScores.clear();
     const page = (rows: readonly PanelTaskView[]): PanelTaskView[] =>
       rows
         .filter((row) => inTab(row.task, this.tab))
         .filter((row) => passesFilter(row.task, this.filter))
-        .filter((row) => this.query.length === 0 || this.matchesQuery(row.task));
+        .filter((row) => {
+          if (this.query.length === 0) return true;
+          const score = this.matchScore(row.task);
+          if (score === undefined) return false;
+          this.matchScores.set(row, score);
+          return true;
+        });
     // Another session's rows join the page only behind `o`, and they obey the same
     // page, filter and query as this session's own, so a search never reaches across
     // into another session by accident (ticket #27).
-    this.rows = [...page(this.allRows), ...page(this.otherRows)].sort(mostRecentlyChangedFirst);
+    const shown = [...page(this.allRows), ...page(this.otherRows)];
+    this.rows =
+      this.query.length === 0
+        ? shown.sort(mostRecentlyChangedFirst)
+        : shown.sort((left, right) => {
+            const byScore = (this.matchScores.get(right) ?? 0) - (this.matchScores.get(left) ?? 0);
+            return byScore !== 0 ? byScore : mostRecentlyChangedFirst(left, right);
+          });
     this.keepSelection();
   }
 
   /**
-   * Whether a row matches the query. A chain row displays its step names, so those are
-   * matchable words; nothing a row does not display — a step's command, a fire's id —
-   * can bring a row back (ticket #27).
+   * How well a row answers the query, or undefined when it does not match at all. A
+   * chain row displays its step names, so those are matchable words; nothing a row
+   * does not display — a step's command, a fire's id — can bring a row back
+   * (ticket #27).
    */
-  private matchesQuery(task: Task): boolean {
+  private matchScore(task: Task): number | undefined {
     const shown =
       task.kind === "chain" ? task.steps.map((id) => this.stepRecord(id)?.name ?? "") : [];
-    return matchesQuery(
+    return bestFieldScore(
       task,
       this.query,
       shown.filter((name) => name !== ""),
@@ -2191,35 +2208,138 @@ function pageKey(data: string, current: PanelTab): PanelTab | undefined {
  * True when the query's characters all appear in the field, in order: the match
  * `dbg` makes against `deploy-bg`, where the three letters never sit together.
  */
-function fuzzyContains(field: string, needle: string): boolean {
-  let from = 0;
-  for (const character of needle) {
-    const at = field.indexOf(character, from);
-    if (at === -1) return false;
-    from = at + 1;
-  }
-  return true;
+/** A searchable word and what a hit in it is worth before the match itself is scored. */
+interface SearchField {
+  readonly text: string;
+  readonly bonus: number;
+}
+
+/** How well one field answers the query, and where the matched characters sit. */
+interface FieldMatch {
+  readonly score: number;
+  readonly positions: readonly number[];
+}
+
+/** Points for a matched character, before bonuses and the field-length penalty. */
+const MATCH_BASE = 4;
+const CONSECUTIVE_BONUS = 8;
+const WORD_START_BONUS = 10;
+/** A gap costs a point per skipped character, but a scattered match never scores below zero. */
+const GAP_CAP = 6;
+const LENGTH_DIVISOR = 4;
+
+const NAME_BONUS = 8;
+const STEP_BONUS = 4;
+const ID_BONUS = 3;
+/** A hit in a word the row never prints still finds the row, but below anything on screen. */
+const HIDDEN_BONUS = 2;
+const STATUS_BONUS = 0;
+
+const WORD_CHARACTER = /[\p{L}\p{N}]/u;
+const LOWER_CASE_LETTER = /\p{Ll}/u;
+const UPPER_CASE_LETTER = /\p{Lu}/u;
+
+/** The first character of a word: the field start, after a separator, or a camel hump. */
+function isWordStart(text: string, index: number): boolean {
+  if (index === 0) return true;
+  const before = text[index - 1] ?? "";
+  if (!WORD_CHARACTER.test(before)) return true;
+  return LOWER_CASE_LETTER.test(before) && UPPER_CASE_LETTER.test(text[index] ?? "");
 }
 
 /**
- * True when any searchable field of the task carries the query as an in-order
- * subsequence, ignoring case.
+ * Score a left-to-right match: adjacent characters and word starts are what the
+ * reader means, so they earn the most, and the field's length pays a small
+ * penalty so an exact short name outranks a hit buried in a sentence.
  */
-function matchesQuery(task: Task, query: string, shown: readonly string[] = []): boolean {
+function scorePositions(text: string, positions: readonly number[]): number {
+  let score = -Math.ceil(text.length / LENGTH_DIVISOR);
+  let previous = -1;
+  for (const at of positions) {
+    score += MATCH_BASE;
+    if (previous >= 0 && at === previous + 1) score += CONSECUTIVE_BONUS;
+    else score -= Math.min(GAP_CAP, at - previous - 1);
+    if (isWordStart(text, at)) score += WORD_START_BONUS;
+    previous = at;
+  }
+  return score;
+}
+
+/**
+ * The positions of the query's characters in the field, in order, or undefined.
+ * Greedy left to right: the first home for each character is the tightest one.
+ */
+function matchPositions(text: string, needle: string): number[] | undefined {
+  const positions: number[] = [];
+  let from = 0;
+  for (let index = 0; index < needle.length; index += 1) {
+    const wanted = needle[index] ?? "";
+    let at = from;
+    while (at < text.length && (text[at] ?? "").toLowerCase() !== wanted) at += 1;
+    if (at >= text.length) return undefined;
+    positions.push(at);
+    from = at + 1;
+  }
+  return positions;
+}
+
+function fuzzyMatch(text: string, needle: string): FieldMatch | undefined {
+  const positions = matchPositions(text, needle);
+  if (positions === undefined) return undefined;
+  return { positions, score: scorePositions(text, positions) };
+}
+
+/**
+ * The best-scoring field of the task for this query, or undefined when none
+ * matches. A name heads the row, so it outranks an id, a status or a command hit
+ * at the same tightness; a chain row shows its step names in place of a name, so
+ * those rank next, and a prompt or a command is a word the row never prints, so
+ * it ranks below everything the reader can see.
+ */
+function bestFieldScore(
+  task: Task,
+  query: string,
+  shown: readonly string[] = [],
+): number | undefined {
   const needle = query.toLowerCase();
   // The kind word is the one the row prints, so searching `proc` finds the
   // processes the reader can see and searching `llm` finds the llm loops; the
   // status word is the string the row colours.
   const kind = kindWord(task.kind);
-  const fields =
+  const fields: SearchField[] =
     task.kind === "llm-loop"
-      ? [task.name, task.id, task.prompt, task.status, kind]
+      ? [
+          { text: task.name, bonus: NAME_BONUS },
+          { text: task.id, bonus: ID_BONUS },
+          { text: task.prompt, bonus: HIDDEN_BONUS },
+          { text: task.status, bonus: STATUS_BONUS },
+          { text: kind, bonus: STATUS_BONUS },
+        ]
       : task.kind === "chain"
         ? // A chain has no command of its own: its row shows the step names it queues,
           // so those are words the reader can see and search for (ADR-0012).
-          [task.name, task.id, task.status, kind, ...shown]
-        : [task.name, task.id, task.command, task.status, kind];
-  return fields.some((field) => fuzzyContains(field.toLowerCase(), needle));
+          [
+            { text: task.name, bonus: NAME_BONUS },
+            { text: task.id, bonus: ID_BONUS },
+            { text: task.status, bonus: STATUS_BONUS },
+            { text: kind, bonus: STATUS_BONUS },
+            ...shown.map((text) => ({ text, bonus: STEP_BONUS })),
+          ]
+        : [
+            { text: task.name, bonus: NAME_BONUS },
+            { text: task.id, bonus: ID_BONUS },
+            { text: task.command, bonus: HIDDEN_BONUS },
+            { text: task.status, bonus: STATUS_BONUS },
+            { text: kind, bonus: STATUS_BONUS },
+          ];
+  let best: number | undefined;
+  for (const field of fields) {
+    const match = fuzzyMatch(field.text, needle);
+    if (match === undefined) continue;
+    const score = match.score + field.bonus;
+    if (best === undefined || score > best) best = score;
+  }
+  return best;
 }
 
 /** Bracketed paste, as pi-tui hands it to `handleInput`: ESC [200~ … ESC [201~. */
