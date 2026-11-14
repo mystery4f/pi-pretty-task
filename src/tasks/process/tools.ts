@@ -1,6 +1,6 @@
 /**
- * `bg_run`, `bg_status`, `bg_logs` and `bg_kill`: what the agent can do with
- * process tasks.
+ * `bg_run`, `bg_status`, `bg_logs`, `bg_kill` and `bg_wait`: what the agent can
+ * do with process tasks.
  *
  * The tools are thin. They translate a turn into a scope, call the store, and
  * render the result as text a model can read — all knowledge of shells,
@@ -18,7 +18,7 @@ import { Type } from "typebox";
 import { commandPreview, formatBytes, formatDuration } from "../base/format.js";
 import type { ProcessTask } from "../base/task.js";
 
-import { parseTimeoutSeconds } from "./limits.js";
+import { parseTimeoutSeconds, parseWaitSeconds } from "./limits.js";
 import type { ProcessTasks, ProcessTaskView, TaskScope } from "./process-tasks.js";
 
 const RunParameters = Type.Object({
@@ -82,6 +82,16 @@ const LogsParameters = Type.Object({
 
 const KillParameters = Type.Object({
   id: Type.String({ description: "Task id to stop, with everything its command started." }),
+});
+
+const WaitParameters = Type.Object({
+  id: Type.String({ description: "Task id to wait for." }),
+  timeoutSeconds: Type.Optional(
+    Type.Number({
+      description:
+        "How long to wait before returning the still-running task. Defaults to 60 seconds and is capped at 600. A timeout is not an error.",
+    }),
+  ),
 });
 
 const DEFAULT_LOG_LINES = 50;
@@ -294,6 +304,46 @@ export function processTaskTools(tasks: ProcessTasks): ToolDefinition[] {
     },
   };
 
+  const wait: ToolDefinition<typeof WaitParameters> = {
+    name: "bg_wait",
+    label: "Wait for a background task",
+    description:
+      "Wait for a background task to end, then return its final view. A timeout is not an error: it returns the running view with waited: false.",
+    parameters: WaitParameters,
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const id = params.id.trim();
+      if (id.length === 0) {
+        return text(
+          "Pass the id of the task to wait for; bg_status lists the ids of this session.",
+        );
+      }
+
+      // A wait that cannot be counted would hold the turn forever, so a bad
+      // bound is reported before the store is called.
+      let timeoutMs: number;
+      try {
+        timeoutMs = parseWaitSeconds(params.timeoutSeconds);
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        return text(`${reason} Nothing was waited for.`);
+      }
+
+      const result = await tasks.wait(scopeOf(ctx), id, timeoutMs);
+      if (result === undefined) {
+        return text(`No background task with id ${id} in this session.`);
+      }
+
+      const { view, waited } = result;
+      const headline = waited
+        ? `Background task ${id} (${view.task.name}) ended as ${view.task.status} after ${formatDuration(view.elapsedMs)}.`
+        : `Background task ${id} (${view.task.name}) is still running after ${formatDuration(view.elapsedMs)}; it did not finish within the wait.`;
+      return {
+        content: [{ type: "text", text: [headline, "", describeTask(view)].join("\n") }],
+        details: { ...taskDetails(view), waited },
+      };
+    },
+  };
+
   const kill: ToolDefinition<typeof KillParameters> = {
     name: "bg_kill",
     label: "Stop a background task",
@@ -328,5 +378,5 @@ export function processTaskTools(tasks: ProcessTasks): ToolDefinition[] {
     },
   };
 
-  return [run, status, logs, kill];
+  return [run, status, logs, kill, wait];
 }

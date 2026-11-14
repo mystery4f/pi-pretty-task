@@ -14,8 +14,11 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   DEFAULT_OUTPUT_CAP_BYTES,
+  DEFAULT_WAIT_SECONDS,
+  MAX_WAIT_SECONDS,
   OUTPUT_CAP_ENV,
   parseOutputCapBytes,
+  parseWaitSeconds,
 } from "../src/tasks/process/limits.js";
 import { createHarness, type Harness, resultText } from "./support/extension-harness.js";
 import { isAlive, killTree, makeTempDir, waitFor, writeScript } from "./support/processes.js";
@@ -205,5 +208,21 @@ describe("the runtime cap", () => {
 
     const listed = await harness.call("bg_status", {});
     expect((listed.details as { tasks: TaskDetails[] }).tasks).toHaveLength(0);
+  });
+});
+
+describe("the wait bound", () => {
+  it("defaults to a minute and caps an explicit timeout at ten minutes", () => {
+    expect(DEFAULT_WAIT_SECONDS).toBe(60);
+    expect(MAX_WAIT_SECONDS).toBe(600);
+    expect(parseWaitSeconds(undefined)).toBe(60_000);
+    expect(parseWaitSeconds(0.3)).toBe(300);
+    expect(parseWaitSeconds(MAX_WAIT_SECONDS)).toBe(600_000);
+  });
+
+  it("rejects a wait outside the bound", () => {
+    for (const bad of [0, -1, Number.NaN, Number.POSITIVE_INFINITY, MAX_WAIT_SECONDS + 1]) {
+      expect(() => parseWaitSeconds(bad)).toThrow(/no larger than 600/);
+    }
   });
 });

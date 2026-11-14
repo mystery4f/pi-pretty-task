@@ -511,6 +511,116 @@ describe("bg_run lifetime", () => {
   });
 });
 
+describe("bg_wait", () => {
+  it("returns the final view as soon as the task ends", async () => {
+    const dir = await makeTempDir();
+    cleanup.push(dir.dispose);
+    const command = await writeScript(
+      dir.path,
+      "short-job.js",
+      ["process.stdout.write('done\\n');", "setTimeout(() => { process.exit(0); }, 400);", ""].join(
+        "\n",
+      ),
+    );
+    const harness = createHarness({ cwd: dir.path, sessionId: "session-wait" });
+    const task = await startRunning(harness, command, "short wait job");
+
+    const started = Date.now();
+    const result = await harness.call("bg_wait", { id: task.id, timeoutSeconds: 15 });
+    const elapsed = Date.now() - started;
+    const details = result.details as TaskDetails & { waited: boolean };
+
+    // The answer is the record after the end, not whatever was true at the start.
+    expect(details.status).toBe("completed");
+    expect(details.exitCode).toBe(0);
+    expect(details.waited).toBe(true);
+    expect(elapsed).toBeLessThan(3000);
+    expect(resultText(result)).toContain("completed");
+  });
+
+  it("wakes every wait on the same end", async () => {
+    const dir = await makeTempDir();
+    cleanup.push(dir.dispose);
+    const command = await writeScript(
+      dir.path,
+      "shared-job.js",
+      ["setTimeout(() => { process.exit(0); }, 300);", ""].join("\n"),
+    );
+    const harness = createHarness({ cwd: dir.path, sessionId: "session-wait-shared" });
+    const task = await startRunning(harness, command, "shared wait job");
+
+    const results = await Promise.all([
+      harness.call("bg_wait", { id: task.id, timeoutSeconds: 15 }),
+      harness.call("bg_wait", { id: task.id, timeoutSeconds: 15 }),
+    ]);
+
+    for (const result of results) {
+      const details = result.details as TaskDetails & { waited: boolean };
+      expect(details.status).toBe("completed");
+      expect(details.exitCode).toBe(0);
+      expect(details.waited).toBe(true);
+    }
+  });
+
+  it("returns the running view, not an error, when the timeout passes", async () => {
+    const dir = await makeTempDir();
+    cleanup.push(dir.dispose);
+    const command = await writeScript(dir.path, "sleeper.js", "setTimeout(() => {}, 30000);\n");
+    const harness = createHarness({ cwd: dir.path, sessionId: "session-wait-timeout" });
+    const task = await startRunning(harness, command, "long wait job");
+
+    const started = Date.now();
+    const result = await harness.call("bg_wait", { id: task.id, timeoutSeconds: 0.3 });
+    const elapsed = Date.now() - started;
+    const details = result.details as TaskDetails & { waited: boolean };
+
+    // A deadline is an answer: the same view bg_status gives, plus `waited`.
+    expect(details.status).toBe("running");
+    expect(details.waited).toBe(false);
+    expect(elapsed).toBeGreaterThanOrEqual(250);
+    expect(elapsed).toBeLessThan(10_000);
+    expect(resultText(result)).toContain("did not finish");
+  });
+
+  it("returns at once for a task that already finished", async () => {
+    const dir = await makeTempDir();
+    cleanup.push(dir.dispose);
+    const command = await writeScript(
+      dir.path,
+      "already-done.js",
+      ["process.stdout.write('gone\\n');", "process.exit(4);", ""].join("\n"),
+    );
+    const harness = createHarness({ cwd: dir.path, sessionId: "session-wait-done" });
+    const task = await startRunning(harness, command, "finished job");
+    await waitForEnd(harness, task.id);
+
+    const started = Date.now();
+    const result = await harness.call("bg_wait", { id: task.id, timeoutSeconds: 600 });
+    const elapsed = Date.now() - started;
+    const details = result.details as TaskDetails & { waited: boolean };
+
+    expect(details.status).toBe("failed");
+    expect(details.exitCode).toBe(4);
+    expect(details.waited).toBe(true);
+    expect(elapsed).toBeLessThan(1000);
+  });
+
+  it("reports an unusable timeout and an unknown id as text, not by throwing", async () => {
+    const dir = await makeTempDir();
+    cleanup.push(dir.dispose);
+    const harness = createHarness({ cwd: dir.path, sessionId: "session-wait-bad" });
+
+    const tooLong = resultText(
+      await harness.call("bg_wait", { id: "b-whatever", timeoutSeconds: 601 }),
+    );
+    expect(tooLong).toContain("no larger than 600");
+    expect(tooLong).toContain("Nothing was waited for");
+
+    const unknown = resultText(await harness.call("bg_wait", { id: "b-unknown" }));
+    expect(unknown).toContain("No background task with id b-unknown in this session.");
+  });
+});
+
 describe("bg_kill", () => {
   it("stops the command, records it as killed by the user, and keeps the record readable", async () => {
     const dir = await makeTempDir();

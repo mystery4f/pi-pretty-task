@@ -78,6 +78,17 @@ export interface StopTaskResult {
   detail?: string;
 }
 
+/** How a wait answered: the record, and whether the wait caught the end. */
+export interface WaitTaskResult {
+  /** The record as it stood when the wait returned. */
+  view: ProcessTaskView;
+  /**
+   * True when the task ended before the deadline, false when the deadline
+   * passed first and the view is still running. A deadline is not an error.
+   */
+  waited: boolean;
+}
+
 export interface ProcessTasksOptions {
   platform?: NodeJS.Platform;
   env?: NodeJS.ProcessEnv;
@@ -119,6 +130,11 @@ interface SessionTasks extends TaskSession {
   readonly limitReasons: Map<string, KillReason>;
   /** Pending runtime caps, kept so a natural end can cancel its timer. */
   readonly runtimeCaps: Map<string, ReturnType<typeof setTimeout>>;
+  /**
+   * Pending waits on a task's end, keyed by task id. `finish` resolves them, so
+   * a wait is woken by the end event instead of polling the record.
+   */
+  readonly waiters: Map<string, Set<() => void>>;
 }
 
 const NAME_LIMIT = 48;
@@ -317,6 +333,41 @@ export class ProcessTasks {
   }
 
   /**
+   * Wait for one task to end, or for `timeoutMs` to pass. Undefined means the
+   * session has no such task. The deadline is an answer, not an error: the view
+   * is whatever the record says then, and `waited` says which happened.
+   */
+  async wait(scope: TaskScope, id: string, timeoutMs: number): Promise<WaitTaskResult | undefined> {
+    const session = await this.session(scope);
+    const task = session.tasks.get(id);
+    if (task === undefined || task.kind !== "process") return undefined;
+    // A task nobody supervises has no later end to wait for: history loaded from
+    // disk, and a record another end already settled, answer right away. `waited`
+    // still tells the truth: a record left `running` without a supervisor caught
+    // no end, so it answers false even though the wait returns at once.
+    if (!session.running.has(id)) {
+      return { view: this.view(session, task), waited: task.endedAt !== undefined };
+    }
+
+    // Waiting is a listener on the end event, not a poll: `finish` resolves it on
+    // the same tick the record gets its final status, so the wake-up sees the end.
+    await new Promise<void>((resolve) => {
+      const waiters = session.waiters.get(id) ?? new Set<() => void>();
+      session.waiters.set(id, waiters);
+      const listener = (): void => {
+        clearTimeout(timer);
+        waiters.delete(listener);
+        if (waiters.size === 0) session.waiters.delete(id);
+        resolve();
+      };
+      const timer = setTimeout(listener, timeoutMs);
+      waiters.add(listener);
+    });
+
+    return { view: this.view(session, task), waited: task.endedAt !== undefined };
+  }
+
+  /**
    * Stop one task and everything its command started. Undefined means the
    * session has no such task; every other case is an answer, including a task
    * that had already finished on its own.
@@ -422,11 +473,22 @@ export class ProcessTasks {
           ? "the command was terminated by a signal"
           : `exited with code ${exitCode}`;
     }
+    // A wait is released only after the final status is in the record: the
+    // caller's view has to be the end it was waiting for, exit code and all.
+    this.settleWaiters(session, task.id);
     // The record reaches the disk before the notice leaves: a reader who restarts
     // the session right after the notice has to find the same ending on disk.
     void this.persist(session).then(() => {
       this.onFinish?.(this.view(session, task));
     });
+  }
+
+  /** Release every pending wait on a task whose record just got its end. */
+  private settleWaiters(session: SessionTasks, id: string): void {
+    const waiters = session.waiters.get(id);
+    if (waiters === undefined) return;
+    session.waiters.delete(id);
+    for (const waiter of waiters) waiter();
   }
 
   /**
@@ -490,6 +552,7 @@ export class ProcessTasks {
       killReasons: new Map(),
       limitReasons: new Map(),
       runtimeCaps: new Map(),
+      waiters: new Map(),
     };
   }
 
