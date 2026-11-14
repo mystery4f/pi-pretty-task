@@ -2,8 +2,8 @@
  * The extension's configuration, read once from one explicit environment.
  *
  * Every environment-derived option lives here and nowhere else: the output byte
- * cap, the shell policy, the notification toggle, and the agent settings
- * directory templates come from. `src/index.ts` builds one `Settings` before it
+ * cap, the running-task cap, the shell policy, the notification toggle, and the
+ * agent settings directory templates come from. `src/index.ts` builds one `Settings` before it
  * registers anything and hands the value down, so a module never reads
  * `process.env` for a key on its own and a test builds the whole configuration
  * from a plain object instead of mutating the process environment.
@@ -44,6 +44,12 @@ export const DEFAULT_RETENTION_DAYS = 7;
 /** The retention window in whole days; see `docs/configuration.md`. */
 export const RETENTION_DAYS_ENV = "PI_PRETTY_TASK_RETENTION_DAYS";
 
+/** Process tasks one session may run at once; the promise `docs/scope-v1.md` makes. */
+export const DEFAULT_MAX_RUNNING_TASKS = 20;
+
+/** The running-task cap in whole tasks; see `docs/configuration.md`. */
+export const MAX_RUNNING_TASKS_ENV = "PI_PRETTY_TASK_MAX_RUNNING_TASKS";
+
 /** pi's own settings directory; `pretty-task.json` is read from it. */
 export const AGENT_DIR_ENV = "PI_CODING_AGENT_DIR";
 
@@ -52,6 +58,7 @@ const KNOWN_KEYS: readonly string[] = [
   OUTPUT_CAP_ENV,
   NOTIFY_ENV,
   RETENTION_DAYS_ENV,
+  MAX_RUNNING_TASKS_ENV,
   SHELL_ENV,
   SHELL_PATH_ENV,
   POSIX_SHELL_ENV,
@@ -70,6 +77,12 @@ export interface Settings {
   readonly notify: boolean;
   /** Days a finished session is kept before pruning reclaims it; never zero. */
   readonly retentionDays: number;
+  /**
+   * How many process tasks this session may run at once, children included: a
+   * fire and a chain step are processes too, so they count against the same
+   * ceiling (ADR-0014).
+   */
+  readonly maxRunningTasks: number;
   /** Where the named templates are read from: the project first, then the agent dir. */
   readonly templatePaths: TemplateConfigPaths;
 }
@@ -105,6 +118,7 @@ export function readSettings(options: SettingsOptions = {}): Settings {
     }),
     notify: parseNotify(env),
     retentionDays: parseRetentionDays(env),
+    maxRunningTasks: parseMaxRunningTasks(env),
     templatePaths: templateConfigPaths(options.projectDir ?? process.cwd(), agentDir),
   };
 }
@@ -156,6 +170,29 @@ function parseRetentionDays(env: NodeJS.ProcessEnv): number {
   if (!Number.isSafeInteger(value) || value <= 0) {
     throw new Error(
       `${RETENTION_DAYS_ENV} must be a positive whole number of days; received ${JSON.stringify(raw)}`,
+    );
+  }
+  return value;
+}
+
+/**
+ * The running-task cap, in whole tasks. An absent key means the documented 20.
+ *
+ * `0` is refused rather than read as "no tasks": the scope promises a ceiling,
+ * and a zero would stop every `bg_run`, every fire and every chain step without
+ * saying which key did it. A fraction and a typo are refused for the reason the
+ * other limits are — `Number("many")` is `NaN`, which compares false against
+ * every count, so the cap would never be reached and the 20 would silently be
+ * gone. The thrown error is the user-facing report, so it names the key, what it
+ * accepts and what it received.
+ */
+function parseMaxRunningTasks(env: NodeJS.ProcessEnv): number {
+  const raw = env[MAX_RUNNING_TASKS_ENV];
+  if (raw === undefined) return DEFAULT_MAX_RUNNING_TASKS;
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new Error(
+      `${MAX_RUNNING_TASKS_ENV} must be a positive whole number of tasks; received ${JSON.stringify(raw)}`,
     );
   }
   return value;
