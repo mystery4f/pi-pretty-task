@@ -256,6 +256,30 @@ describe("bg_grep's caps", () => {
     expect(text).toContain(JSON.stringify("not-anywhere"));
   });
 
+  it("keeps the answer inside the byte cap when the pattern itself is huge", async () => {
+    const dir = await makeTempDir();
+    cleanup.push(dir.dispose);
+    const pattern = "needle".repeat(1500);
+    const command = await writeScript(
+      dir.path,
+      "huge-pattern.js",
+      [
+        `process.stdout.write("head ${pattern} tail\\n");`,
+        "process.stdout.write('other');",
+        "",
+      ].join("\n"),
+    );
+    const harness = createHarness({ cwd: dir.path, sessionId: "session-grep-huge-pattern" });
+    const task = await finishedTask(harness, command);
+
+    const { text, details } = await grep(harness, { id: task.id, pattern });
+
+    expect(details.matches).toBe(1);
+    expect(details.total).toBe(1);
+    expect(Buffer.byteLength(text)).toBeLessThanOrEqual(8192);
+    expect(text).toContain("1: head");
+  });
+
   it("answers 'no matches' when the task has not written its output file yet", async () => {
     const dir = await makeTempDir();
     cleanup.push(dir.dispose);

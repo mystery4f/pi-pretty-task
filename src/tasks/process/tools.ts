@@ -127,6 +127,8 @@ const COMMAND_PREVIEW_LENGTH = 80;
  */
 const GREP_RESULT_BYTES = DEFAULT_SEARCH_BYTES;
 const GREP_TRAILER_BYTES = 48;
+/** Characters of the pattern the header and the verdict quote back at most. */
+const PATTERN_PREVIEW_LENGTH = 120;
 
 function scopeOf(ctx: ExtensionToolContext): TaskScope {
   return { cwd: ctx.cwd, sessionId: ctx.sessionManager.getSessionId() };
@@ -139,6 +141,18 @@ function text(content: string): AgentToolResult<Record<string, unknown>> {
 /** `1 line`, `40 lines`: a line count as an answer reads it. */
 function lineCount(lines: number): string {
   return `${String(lines)} ${lines === 1 ? "line" : "lines"}`;
+}
+
+/**
+ * The pattern as an answer echoes it. A long pattern would otherwise be quoted
+ * back in full and spend the byte budget the matching lines need — the caller
+ * already knows what it asked for; `details` still carries it whole.
+ */
+function patternPreview(pattern: string): string {
+  const quoted = JSON.stringify(pattern);
+  return quoted.length <= PATTERN_PREVIEW_LENGTH
+    ? quoted
+    : `${quoted.slice(0, PATTERN_PREVIEW_LENGTH)}…`;
 }
 
 /** One task as a labelled block, the shape both `bg_run` and `bg_status` return. */
@@ -361,7 +375,7 @@ export function processTaskTools(tasks: ProcessTasks): ToolDefinition[] {
         `name: ${view.task.name} · ${view.task.id} · ${view.task.kind} · ${view.task.status}`,
         `elapsed ${formatDuration(view.elapsedMs)} · output ${formatBytes(view.outputBytes)} · ${
           ignoreCase ? "case-insensitive" : "case-sensitive"
-        } search for ${JSON.stringify(params.pattern)}`,
+        } search for ${patternPreview(params.pattern)}`,
       ].join("\n");
       // The cap covers the whole answer, so the header and the trailer are paid
       // for first and only what is left goes to the match list.
@@ -392,13 +406,13 @@ export function processTaskTools(tasks: ProcessTasks): ToolDefinition[] {
       const body = search.matches.map((match) => `${String(match.line)}: ${match.text}`).join("\n");
       if (body.length === 0) {
         // An empty string would read as "nothing to say"; a search owes a verdict.
+        // The two verdicts differ: nothing matched, or the header ate the budget.
+        const verdict =
+          search.total === 0
+            ? `No matches for ${patternPreview(params.pattern)} in ${lineCount(search.scannedLines)} of output.`
+            : `Found ${lineCount(search.total)} matching lines, but none fit in this answer's byte budget.`;
         return {
-          content: [
-            {
-              type: "text",
-              text: `${header}\n\nNo matches for ${JSON.stringify(params.pattern)} in ${lineCount(search.scannedLines)} of output.`,
-            },
-          ],
+          content: [{ type: "text", text: `${header}\n\n${verdict}` }],
           details,
         };
       }
