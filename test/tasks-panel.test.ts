@@ -1229,6 +1229,33 @@ describe("the status filter", () => {
     panel.dispose();
   });
 
+  it("narrows a query by the status filter it is paired with", async () => {
+    const source = new FakeSource();
+    source.rows = [
+      view("bg-aaaaa", { name: "deploy east", status: "running" }),
+      view("bg-bbbbb", { name: "deploy west", status: "failed", exitCode: 1 }),
+    ];
+    const { panel, drawn } = openPanel(source);
+    await panel.settle();
+
+    panel.handleInput("/");
+    for (const character of "dpl") panel.handleInput(character);
+    expect(plain(drawn())).toContain("deploy east");
+    expect(plain(drawn())).toContain("deploy west");
+
+    // Leaving search keeps the query; `f` then narrows what the query found.
+    panel.handleInput("\x1bq");
+    panel.handleInput("f");
+    expect(plain(drawn())).toContain("deploy east");
+    expect(plain(drawn())).not.toContain("deploy west");
+
+    panel.handleInput("f");
+    expect(plain(drawn())).toContain("deploy west");
+    expect(plain(drawn())).not.toContain("deploy east");
+
+    panel.dispose();
+  });
+
   it("counts a paused schedule as running, since it is still owed a turn", async () => {
     const { panel, drawn } = await openOn("loops", byStatus());
     panel.handleInput("f");
@@ -1519,6 +1546,36 @@ describe("recency and search", () => {
     expect(drawn()).toContain("web build");
     expect(drawn()).not.toContain("unit tests");
     expect(drawn()).not.toContain("lint run");
+
+    panel.dispose();
+  });
+
+  it("never turns a fire into a row, however well the query fits it", async () => {
+    const source = new FakeSource();
+    source.rows = [
+      view("bg-aaaaa", {
+        name: "build",
+        status: "completed",
+        exitCode: 0,
+        command: "npm run build",
+      }),
+      // The failing fire of some command loop: a record, not a row (ADR-0014).
+      view("bg-bbbbb", {
+        name: "watch loop #1",
+        parentId: "lc00001",
+        fire: 1,
+        command: "deploy deploy",
+        status: "completed",
+        exitCode: 0,
+      }),
+    ];
+    const { panel, drawn } = openPanel(source);
+    await panel.settle();
+
+    panel.handleInput("/");
+    for (const character of "deploy") panel.handleInput(character);
+
+    expect(drawn()).toContain("Nothing on this page matches the search");
 
     panel.dispose();
   });
@@ -2243,6 +2300,26 @@ describe("the other sessions sharing a checkout", () => {
     panel.handleInput("o");
     await panel.settle();
     expect(drawn()).not.toContain("deploy the edge");
+
+    panel.dispose();
+  });
+
+  it("lets a query reach another session's row only behind o", async () => {
+    const source = twoSessions();
+    const { panel, drawn } = await openOn("processes", source, () => 13_000, plainTheme());
+    await panel.settle();
+
+    panel.handleInput("/");
+    for (const character of "dpl") panel.handleInput(character);
+    await panel.settle();
+    // The row exists, but `o` is what makes it part of this page.
+    expect(drawn()).toContain("Nothing on this page matches the search");
+
+    panel.handleInput("\x1bq");
+    panel.handleInput("o");
+    await panel.settle();
+    expect(drawn()).toContain("deploy the edge");
+    expect(drawn()).not.toContain("web build");
 
     panel.dispose();
   });
