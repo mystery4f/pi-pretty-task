@@ -432,7 +432,9 @@ describe("stopping and closing", () => {
     panel.dispose();
   });
 
-  it("closes on x from the list and from the detail view", async () => {
+  const CLOSE = "\x1bq";
+
+  it("closes on x from the list, and on alt+q from a detail view", async () => {
     const source = new FakeSource();
     source.rows = [view("build1")];
     const { panel, done } = openPanel(source);
@@ -442,6 +444,9 @@ describe("stopping and closing", () => {
     await panel.settle();
     panel.handleInput("x");
 
+    expect(done).not.toHaveBeenCalled();
+
+    panel.handleInput(CLOSE);
     expect(done).toHaveBeenCalledTimes(1);
     panel.dispose();
 
@@ -450,6 +455,22 @@ describe("stopping and closing", () => {
     second.panel.handleInput("x");
     expect(second.done).toHaveBeenCalledTimes(1);
     second.panel.dispose();
+  });
+
+  it("treats x as a query character while a search is being typed", async () => {
+    const source = new FakeSource();
+    source.rows = [view("bg-a1b2c", { name: "xenon build" }), view("bg-b2c3d", { name: "lint" })];
+    const { panel, done, drawn } = openPanel(source);
+    await panel.settle();
+
+    panel.handleInput("/");
+    panel.handleInput("x");
+    await panel.settle();
+
+    expect(done).not.toHaveBeenCalled();
+    expect(drawn()).toContain("xenon build");
+    expect(drawn()).not.toContain("lint ");
+    panel.dispose();
   });
 });
 

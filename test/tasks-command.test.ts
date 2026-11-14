@@ -143,7 +143,7 @@ describe("status line", () => {
     const panel = harness.lastCustom();
     if (!(panel instanceof TasksPanel)) throw new Error("the shortcut opened no panel");
     await panel.settle();
-    panel.handleInput("x");
+    panel.handleInput("\u001bq");
     await opened;
 
     expect(harness.widgets.at(-1)?.key).toBe(SUMMARY_KEY);
@@ -185,7 +185,7 @@ describe("/tasks command", () => {
     expect(panel.render(100).join("\n")).toContain("No tasks yet");
     expect(harness.lastCustomOptions()?.overlay).toBe(true);
 
-    panel.handleInput("x");
+    panel.handleInput("\u001bq");
     await closed;
 
     // ADR 0003: the overlay is gone, and what remains is one line of text.
@@ -200,7 +200,7 @@ describe("/tasks command", () => {
     const { panel, closed } = await openPanel(harness);
     expect(harness.widgetKeys).toEqual([]);
 
-    panel.handleInput("x");
+    panel.handleInput("\u001bq");
     await closed;
 
     // One slot, cleared: an idle session keeps no line above the editor.
@@ -246,7 +246,7 @@ describe("/tasks command", () => {
     const after = (await harness.call("bg_status", { id: started.id })).details as StartedTask;
     expect(after.status).toBe("killed");
 
-    panel.handleInput("x");
+    panel.handleInput("\u001bq");
     await closed;
 
     expect(harness.widgets.at(-1)?.lines.join(" | ")).toContain("1 finished");
@@ -300,7 +300,7 @@ describe("/tasks command", () => {
     expect(older).toContain("<accent>echo fire 4</accent>");
     expect(older).not.toContain("echo fire 5");
 
-    panel.handleInput("x");
+    panel.handleInput("\u001bq");
     await closed;
 
     // The line was repainted as the turn ran; what matters is where it lands.
@@ -336,7 +336,7 @@ describe("/tasks command", () => {
     const after = (await harness.call("loop_list", { id: created.id })).details as LoopStarted;
     expect(after.fires).toBe(1);
 
-    panel.handleInput("x");
+    panel.handleInput("\u001bq");
     await closed;
     expect(harness.widgets.at(-1)?.lines.join(" | ")).toContain("1 finished");
   });

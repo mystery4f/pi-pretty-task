@@ -295,7 +295,9 @@ export class TasksPanel implements Component {
       this.done();
       return;
     }
-    if (data === "x") {
+    // `x` closes from the list only: a detail view is left with alt+q (or ←), and a
+    // character typed into a query is never a command.
+    if (data === "x" && this.mode === "list" && !this.searching) {
       this.done();
       return;
     }
