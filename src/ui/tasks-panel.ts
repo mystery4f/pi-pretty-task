@@ -1258,13 +1258,17 @@ export class TasksPanel implements Component {
       this.field("Runtime", formatDuration(row.elapsedMs)),
       this.field("Updated", this.updatedText(task.updatedAt)),
       this.field("Schedule", task.schedule),
-      this.field("Fires", firesText(task)),
-      this.field("Next fire", nextFireText(task, row)),
+      this.field("Fires", `${firesText(task)}${missedText(task)}`),
+      this.field("Next fire", nextFireText(task, row, failureStreak(task) > 0)),
       this.field(
         "Last fire",
         task.lastFireAt === undefined ? "—" : formatClockTime(task.lastFireAt),
       ),
     ];
+    // A streak explains why the next fire is later than the expression says, so
+    // it sits with the schedule facts and never rewrites them (ADR-0017).
+    const streak = failureStreak(task);
+    if (streak > 0) body.push(this.field("Failures", `${String(streak)} in a row`));
     if (task.expiresAt !== undefined) {
       body.push(this.field("Expires", formatClockTime(task.expiresAt)));
     }
@@ -1449,10 +1453,17 @@ function rightText(row: PanelTaskView, now: number): string {
   const age = ` · ${formatDuration(Math.max(0, now - task.updatedAt))} ago`;
   if (task.kind === "process") return `${elapsed} ${formatSize(row)}${age}`;
   // A loop has no exit code and no bytes: it reports the fires it made and how
-  // long until the next one, which is the whole question while it is running.
+  // long until the next one, which is the whole question while it is running. A
+  // failure streak sits next to the count, and the wait it pushed out is labelled
+  // a backoff so the two read together (ADR-0017).
+  const streak = failureStreak(task);
+  const failed = streak === 0 ? "" : ` · ${String(streak)} failed`;
+  const backingOff = streak > 0 ? " (backoff)" : "";
   const next =
-    row.untilNextFireMs === undefined ? "" : ` · next ${formatDuration(row.untilNextFireMs)}`;
-  return `${elapsed} · ${firesText(task)} fires${next}${age}`;
+    row.untilNextFireMs === undefined
+      ? ""
+      : ` · next ${formatDuration(row.untilNextFireMs)}${backingOff}`;
+  return `${elapsed} · ${firesText(task)} fires${failed}${next}${age}`;
 }
 
 function pad(text: string, width: number): string {
@@ -1510,13 +1521,26 @@ function firesText(task: LoopBase): string {
   if (task.maxFires === undefined) return String(task.fires);
   return `${String(task.fires)} / ${String(task.maxFires)}`;
 }
+/**
+ * Failed fires in a row on a command loop. Only a fire that ran can fail, so an
+ * llm loop never carries a streak and its rows never claim one (ADR-0017).
+ */
+function failureStreak(task: Task): number {
+  return task.kind === "cmd-loop" ? (task.consecutiveFailures ?? 0) : 0;
+}
 
-function nextFireText(task: LoopBase, row: PanelTaskView): string {
+/** Fires that never ran because the previous one still was, appended to the count. */
+function missedText(task: CmdLoopTask): string {
+  const missed = task.missedFires ?? 0;
+  return missed === 0 ? "" : ` · ${String(missed)} skipped`;
+}
+
+function nextFireText(task: LoopBase, row: PanelTaskView, backingOff = false): string {
   if (task.nextFireAt === undefined) return "—";
   const at = formatClockTime(task.nextFireAt);
-  return row.untilNextFireMs === undefined
-    ? at
-    : `${at} (in ${formatDuration(row.untilNextFireMs)})`;
+  if (row.untilNextFireMs === undefined) return at;
+  const wait = `${formatDuration(row.untilNextFireMs)}${backingOff ? ", backoff" : ""}`;
+  return `${at} (in ${wait})`;
 }
 
 /** Iteration list heading: kept and dropped counts are both stated, never hidden. */

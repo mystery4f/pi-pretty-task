@@ -8,7 +8,7 @@
 
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it, vi } from "vitest";
-import { formatClockTime } from "../src/tasks/base/format.js";
+import { formatClockTime, formatDuration } from "../src/tasks/base/format.js";
 import type { OutputTail } from "../src/tasks/base/output.js";
 import type { CmdLoopTask, FireRecord, LlmLoopTask, ProcessTask } from "../src/tasks/base/task.js";
 import type { Iteration, IterationCall } from "../src/tasks/loop/iteration.js";
@@ -1291,6 +1291,71 @@ describe("command loops in the list and in the detail", () => {
     expect(omitted).toContain("45 fires");
 
     panel.dispose();
+  });
+
+  it("shows a command loop's failure streak and its backoff, and keeps the schedule as written", async () => {
+    const source = new FakeSource();
+    source.rows = [
+      cmdLoopView(
+        "lc00001",
+        {
+          name: "watch loop",
+          schedule: "10s",
+          nextFireAt: CLOCK + 40 * 60_000,
+          fires: 5,
+          consecutiveFailures: 3,
+          missedFires: 1,
+          fireHistory: [
+            fireOf(4, { outcome: "failed", exitCode: 1 }),
+            fireOf(5, { outcome: "skipped", exitCode: undefined }),
+          ],
+        },
+        30_000,
+        40 * 60_000,
+      ),
+    ];
+    const { panel, drawn } = openPanel(source, () => 13_000, plainTheme());
+    await panel.settle();
+
+    const row = drawn()
+      .split("\n")
+      .find((line) => line.includes("watch loop"));
+    if (row === undefined) throw new Error("the loop row must render");
+    // The streak is on the row, and the wait to the next fire says it is a backoff.
+    expect(row).toContain("3 failed");
+    expect(row).toContain(`next ${formatDuration(40 * 60_000)} (backoff)`);
+    // The raw expression is not rewritten into the delay: the row never shows it,
+    // and the detail still prints the schedule the user typed.
+    expect(row).not.toContain("10s");
+
+    panel.handleInput(ENTER);
+    await panel.settle();
+    const screen = plain(drawn());
+    expect(screen).toContain("Schedule:");
+    expect(screen).toContain("10s");
+    expect(screen).toContain("Failures:");
+    expect(screen).toContain("3 in a row");
+    // The skipped fire is counted where the fires are counted, not only as a glyph.
+    expect(screen).toContain("1 skipped");
+    expect(screen).toContain("backoff");
+    panel.dispose();
+
+    // A healthy loop says nothing about failures.
+    const healthySource = new FakeSource();
+    healthySource.rows = [
+      cmdLoopView("lc00002", { name: "healthy loop", fires: 2 }, 30_000, 10_000),
+    ];
+    const healthyPanel = openPanel(healthySource, () => 13_000, plainTheme());
+    await healthyPanel.panel.settle();
+    const healthy = healthyPanel
+      .drawn()
+      .split("\n")
+      .find((line) => line.includes("healthy loop"));
+    if (healthy === undefined) throw new Error("the healthy row must render");
+    expect(healthy).toContain(`next ${formatDuration(10_000)}`);
+    expect(healthy).not.toContain("failed");
+    expect(healthy).not.toContain("backoff");
+    healthyPanel.panel.dispose();
   });
 
   it("lists fires newest first with time, outcome, exit code, duration and bytes", async () => {
