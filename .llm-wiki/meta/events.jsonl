@@ -2,3 +2,4 @@
 {"page_type":"synthesis","title":"pi-pretty-task 文档索引","path":"syntheses/pi-pretty-task-文档索引","timestamp":"2026-11-13T14:21:25.858Z","kind":"ensure_page"}
 {"page_type":"synthesis","title":"pi-background-tasks 源码调研","path":"syntheses/pi-background-tasks-源码调研","timestamp":"2026-11-13T14:21:44.875Z","kind":"ensure_page"}
 {"page_type":"synthesis","title":"pi-loop 源码调研","path":"syntheses/pi-loop-源码调研","timestamp":"2026-11-13T14:34:50.266Z","kind":"ensure_page"}
+{"slug":"obs-2026-11-14-kill-path-skipped-persist-and-notice-in-pi-pretty-task","title":"Kill path skipped persist and notice in pi-pretty-task","relevance":"high","timestamp":"2026-11-14T05:03:57.149Z","kind":"observe"}

@@ -1,7 +1,24 @@
 {
   "version": "1.0",
-  "last_updated": "2026-11-13T14:34:50.269Z",
+  "last_updated": "2026-11-14T05:03:57.152Z",
   "pages": {
+    "sources/obs-2026-11-14-kill-path-skipped-persist-and-notice-in-pi-pretty-task": {
+      "type": "source",
+      "title": "Observation: Kill path skipped persist and notice in pi-pretty-task",
+      "tags": [
+        "pi-pretty-task",
+        "review",
+        "bug",
+        "process-lifecycle"
+      ],
+      "status": "observation",
+      "slug": "obs-2026-11-14-kill-path-skipped-persist-and-notice-in-pi-pretty-task",
+      "relevance": "high",
+      "observed_at": "2026-11-14T05:03:57.145Z",
+      "source_context": "pi-pretty-task v0.1 whole-branch review and fixes",
+      "created": "2026-11-14",
+      "updated": "2026-11-14"
+    },
     "syntheses/pi-background-tasks-源码调研": {
       "type": "synthesis",
       "title": "pi-background-tasks 源码调研",
@@ -18,7 +35,7 @@
       "type": "synthesis",
       "title": "pi-pretty-task 文档索引",
       "created": "2026-11-13",
-      "updated": "2026-11-13"
+      "updated": "2026-11-14"
     }
   }
 }

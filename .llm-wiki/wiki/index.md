@@ -6,4 +6,5 @@ okf_version: "0.2"
 
 ## Directories
 
+- [sources/](sources/index.md)
 - [syntheses/](syntheses/index.md)

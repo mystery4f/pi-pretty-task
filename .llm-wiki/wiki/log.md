@@ -1,5 +1,9 @@
 # Wiki Update Log
 
+## 2026-11-14
+
+- **observe**: {"relevance":"high","slug":"obs-2026-11-14-kill-path-skipped-persist-and-notice-in-pi-pretty-task","title":"Kill path skipped persist and notice in pi-pretty-task"}
+
 ## 2026-11-13
 
 - **ensure\_page**: {"page_type":"synthesis","path":"syntheses/pi-loop-源码调研","title":"pi-loop 源码调研"}
