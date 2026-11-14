@@ -124,6 +124,11 @@ describe("bg_run with a template", () => {
     expect(description).toContain("test (");
     expect(description.indexOf("lint (")).toBeLessThan(description.indexOf("test ("));
     expect(description).not.toContain("No command templates are configured");
+    // The description is part of the prompt prefix a provider caches: the same
+    // configuration must produce a byte-identical string on every load, or a
+    // restart or `/reload` would re-pay for the whole prefix.
+    const again = createHarness({ cwd: dir.path, sessionId: "session-template-described-again" });
+    expect(again.toolDescription("bg_run")).toBe(description);
   });
 
   it("says so when no template is configured at all", () => {

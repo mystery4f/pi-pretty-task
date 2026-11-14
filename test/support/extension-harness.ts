@@ -69,6 +69,8 @@ export interface HarnessOptions {
 export interface Harness {
   /** Names of every tool the extension registered. */
   readonly toolNames: readonly string[];
+  /** The description the model reads for one registered tool. */
+  toolDescription(toolName: string): string;
   /** Configuration problems reported while the extension loaded, oldest first. */
   readonly problems: readonly string[];
   /** Every message sent with `sendMessage`, oldest first. */
