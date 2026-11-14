@@ -71,6 +71,10 @@ export interface Harness {
   render(customType: string, details: unknown, options?: Partial<MessageRenderOptions>): string;
   /** Names of every command the extension registered. */
   readonly commandNames: readonly string[];
+  /** Keys of every shortcut the extension registered, in registration order. */
+  readonly shortcutKeys: readonly string[];
+  /** Run a registered shortcut the way a keypress would, and wait for it to return. */
+  runShortcut(key: string, turn?: Turn): Promise<void>;
   /** Run a registered command the way the user would, and wait for it to return. */
   runCommand(name: string, args?: string, turn?: Turn): Promise<void>;
   /** The component the most recent `ctx.ui.custom` handed to pi, if any. */
@@ -116,6 +120,9 @@ let callCounter = 0;
 
 /** What pi accepts for a command: everything but the name and source info it fills in. */
 type CommandDefinition = Parameters<ExtensionAPI["registerCommand"]>[1];
+
+/** What pi accepts for a shortcut: the key is stored beside it in the harness map. */
+type ShortcutDefinition = Parameters<ExtensionAPI["registerShortcut"]>[1];
 
 function createToolContext(turn: Turn, ui?: unknown): ExtensionToolContext {
   // Event handlers in pi receive the same UI surface as a command, which is how
@@ -164,6 +171,7 @@ export function createHarness(defaultTurn: Turn, options: HarnessOptions = {}): 
   const messages: SentMessage[] = [];
   const handlers = new Map<string, Array<(event: unknown, ctx: unknown) => unknown>>();
   const commands = new Map<string, CommandDefinition>();
+  const shortcuts = new Map<string, ShortcutDefinition>();
   const statuses: StatusUpdate[] = [];
   const widgetKeys: string[] = [];
   let opened: { component: Component; options: CustomOptions } | undefined;
@@ -216,6 +224,9 @@ export function createHarness(defaultTurn: Turn, options: HarnessOptions = {}): 
   const api = {
     registerCommand(name: string, definition: CommandDefinition): void {
       commands.set(name, definition);
+    },
+    registerShortcut(key: string, definition: ShortcutDefinition): void {
+      shortcuts.set(key, definition);
     },
     registerTool(tool: ToolDefinition): void {
       tools.push(tool);
@@ -295,6 +306,16 @@ export function createHarness(defaultTurn: Turn, options: HarnessOptions = {}): 
       return component === undefined ? "" : component.render(80).join("\n");
     },
     commandNames: [...commands.keys()],
+    shortcutKeys: [...shortcuts.keys()],
+    async runShortcut(key, turn = defaultTurn) {
+      const shortcut = shortcuts.get(key);
+      if (shortcut === undefined) {
+        throw new Error(
+          `shortcut ${key} is not registered; registered: ${[...shortcuts.keys()].join(", ")}`,
+        );
+      }
+      await shortcut.handler(commandContext(turn));
+    },
     async runCommand(name, args = "", turn = defaultTurn) {
       const command = commands.get(name);
       if (command === undefined) {

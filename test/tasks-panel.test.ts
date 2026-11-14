@@ -191,7 +191,7 @@ describe("task list", () => {
     expect(newer).toBeGreaterThan(-1);
     expect(older).toBeGreaterThan(newer);
     expect(drawn()).toContain("newer1");
-    expect(lines[newer]).toContain("<dim>·</dim> <accent>running");
+    expect(lines[newer]).toContain("<dim>·</dim> <muted>proc</muted> <accent>running");
     expect(drawn()).toContain("running");
     expect(drawn()).toContain("3.5s");
     expect(drawn()).toContain("1.5 KiB");

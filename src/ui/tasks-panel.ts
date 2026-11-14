@@ -805,7 +805,7 @@ export class TasksPanel implements Component {
       (most, row) => Math.max(most, visibleWidth(row.task.name)),
       12,
     );
-    const nameRoom = Math.min(longest, Math.max(12, inner - 62));
+    const nameRoom = Math.min(longest, Math.max(12, inner - 67));
 
     const visible = this.rows.slice(this.listTop, this.listTop + LIST_VISIBLE_ROWS);
     visible.forEach((row, offset) => {
@@ -841,6 +841,9 @@ export class TasksPanel implements Component {
     const dot = theme.fg(dotColour(task), "●");
     const id = theme.fg("dim", task.id);
     const separator = theme.fg("dim", "·");
+    // Both kinds share one table, so the row has to say which it is: a loop runs
+    // nothing and a process wakes nobody, and their numbers mean different things.
+    const kind = theme.fg("muted", task.kind === "loop" ? "loop" : "proc");
     const status = theme.fg(STATUS_COLOUR[task.status], pad(task.status, 11));
     const exit = exitText(task) === "" ? "" : theme.fg("dim", ` ${exitText(task)}`);
 
@@ -850,7 +853,7 @@ export class TasksPanel implements Component {
     const right = theme.fg("dim", rightText(row));
     const growth = this.growthText(row);
 
-    const head = ` ${pointer} ${dot} ${name} ${id} ${separator} ${status}${exit} `;
+    const head = ` ${pointer} ${dot} ${name} ${id} ${separator} ${kind} ${status}${exit} `;
     // The numbers sit against the right edge so a column of sizes can be compared
     // by eye, which is what a reader does with them.
     const tail = `${right}${growth}`;

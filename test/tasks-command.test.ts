@@ -8,7 +8,12 @@
  */
 
 import { afterEach, describe, expect, it } from "vitest";
-import { STATUS_LINE_KEY, statusLineText, TASKS_COMMAND } from "../src/ui/tasks-command.js";
+import {
+  STATUS_LINE_KEY,
+  statusLineText,
+  TASKS_COMMAND,
+  TASKS_SHORTCUT,
+} from "../src/ui/tasks-command.js";
 import { TasksPanel } from "../src/ui/tasks-panel.js";
 import { createHarness, type Harness, resultText } from "./support/extension-harness.js";
 import { isAlive, killTree, makeTempDir, waitFor, writeScript } from "./support/processes.js";
@@ -113,6 +118,25 @@ describe("status line", () => {
   it("says so when the session has no tasks at all", () => {
     expect(statusLineText([])).toContain("no tasks");
     expect(statusLineText([])).toContain("/tasks");
+  });
+
+  it("names the shortcut, which is registered and opens the same panel", async () => {
+    expect(statusLineText([])).toContain("Shift↓");
+
+    const dir = await makeTempDir();
+    cleanup.push(dir.dispose);
+    const harness = createHarness({ cwd: dir.path, sessionId: "session-shortcut" });
+    expect(harness.shortcutKeys).toContain(TASKS_SHORTCUT);
+
+    const opened = harness.runShortcut(TASKS_SHORTCUT);
+    const panel = harness.lastCustom();
+    if (!(panel instanceof TasksPanel)) throw new Error("the shortcut opened no panel");
+    await panel.settle();
+    panel.handleInput("x");
+    await opened;
+
+    expect(harness.statuses.at(-1)?.text).toContain("Shift↓");
+    expect(harness.widgetKeys).toEqual([]);
   });
 
   it("is published at session start, before /tasks was ever opened", async () => {

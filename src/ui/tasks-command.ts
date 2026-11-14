@@ -27,6 +27,15 @@ import {
 /** Command name the user types, without the leading slash. */
 export const TASKS_COMMAND = "tasks";
 
+/** The one shortcut that opens the panel without typing, shown in the status line. */
+export const TASKS_SHORTCUT = "shift+down";
+
+/**
+ * How the status line names the way back in. A terminal that never delivers the
+ * shortcut still prints the command, so the hint is never the only door.
+ */
+export const TASKS_HINT = "/tasks or Shift↓";
+
 /** Status-line slot this package owns; one line, replaced in place. */
 export const STATUS_LINE_KEY = "pi-pretty-task";
 
@@ -41,7 +50,7 @@ export function statusLineText(tasks: readonly Task[]): string {
   if (running > 0) parts.push(`${String(running)} running`);
   if (finished > 0) parts.push(`${String(finished)} finished`);
   if (parts.length === 0) parts.push("no tasks");
-  return `${parts.join(" · ")} · /${TASKS_COMMAND}`;
+  return `${parts.join(" · ")} · ${TASKS_HINT}`;
 }
 
 /**
@@ -110,10 +119,24 @@ export function registerTasksCommand(
       await openPanel(ctx, processes, loops);
     },
   });
+  // The status line advertises this key, so it has to work: the panel is the only
+  // way to a running task's output without a tool call.
+  pi.registerShortcut(TASKS_SHORTCUT, {
+    description: "Open the task panel",
+    handler: async (ctx) => {
+      await openPanel(ctx, processes, loops);
+    },
+  });
 }
 
+/** What the panel needs from a command or shortcut context; both provide it. */
+type PanelContext = Pick<
+  ExtensionCommandContext,
+  "cwd" | "hasUI" | "mode" | "sessionManager" | "ui"
+>;
+
 async function openPanel(
-  ctx: ExtensionCommandContext,
+  ctx: PanelContext,
   processes: ProcessTasks,
   loops: LoopTasks,
 ): Promise<void> {

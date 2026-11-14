@@ -24,7 +24,7 @@ import type { ProcessTasks, ProcessTaskView, TaskScope } from "./process-tasks.j
 const RunParameters = Type.Object({
   command: Type.String({
     description:
-      "Shell command to run in the background. The shell depends on the platform and on the extension's configuration; `shell` picks another one for this call. Output is stored as raw bytes.",
+      "Shell command to run in the background. The shell depends on the platform and on the extension's configuration; `shell` picks another one for this call. Write the command in the dialect of that shell: cmd joins with `&`, while sh and bash treat `&` as background and need `;` or `&&`. Output is stored as raw bytes.",
   }),
   name: Type.Optional(
     Type.String({ description: "Short label for the task; defaults to the command itself." }),
@@ -40,7 +40,7 @@ const RunParameters = Type.Object({
       [Type.Literal("default"), Type.Literal("cmd"), Type.Literal("bash"), Type.Literal("sh")],
       {
         description:
-          "Shell for this call: `default` follows the configured shell, the others name one. Windows has `cmd` and `bash`, POSIX has `bash` and `sh`; anything else is rejected.",
+          "Shell for this call: `default` follows the configured shell, the others name one. Windows has `cmd` and `bash`, POSIX has `bash` and `sh`; anything else is rejected. Syntax is not translated: in cmd `&` runs the next command in turn, in bash it backgrounds the left side, so use `;` or `&&` there.",
       },
     ),
   ),
