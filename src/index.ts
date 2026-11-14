@@ -11,6 +11,7 @@
 
 import type { ExtensionAPI, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import { publishLoopFired, publishTaskFinished } from "./tasks/base/events.js";
+import { pruneSessions } from "./tasks/base/retention.js";
 import type { TaskScope } from "./tasks/base/runtime-state.js";
 import { readSettings } from "./tasks/base/settings.js";
 import { TaskSessions } from "./tasks/base/task-sessions.js";
@@ -120,6 +121,22 @@ export function createExtension(
     });
   for (const problem of templates.problems) reportProblem(problem);
   const now = options.now ?? Date.now;
+  // Retention is housekeeping, not a task: a sweep that cannot judge or remove
+  // one session keeps it, says why, and leaves the session start to finish.
+  const pruneOldSessions = async (scope: TaskScope): Promise<void> => {
+    try {
+      await pruneSessions({
+        scope,
+        retentionDays: settings.retentionDays,
+        now,
+        report: reportProblem,
+      });
+    } catch (error) {
+      reportProblem(
+        `retention sweep failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  };
   const sessions = new TaskSessions({ now });
   const iterations = new Iterations({
     sessions,
@@ -354,6 +371,10 @@ export function createExtension(
     // The line exists before the panel is ever opened; `/tasks` only refreshes it,
     // so the first paint is awaited rather than left to race the session start.
     await publishStatus(ctx.ui, processTasks, loops, scope);
+    // Old sessions are reclaimed here, once per session start and never on a
+    // timer: a sweep only runs where its cost can be waited out, and a process
+    // that stays up for days never deletes history a user is still reading.
+    await pruneOldSessions(scope);
     startTimer();
     // A fresh session has no run in flight, so a wake left queued by the last one
     // may go out now.

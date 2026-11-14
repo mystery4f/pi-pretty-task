@@ -290,8 +290,12 @@ function parseIterationCall(value: unknown): IterationCall | undefined {
   return value as unknown as IterationCall;
 }
 
-/** The records of one generation, or `undefined` when the document is unusable. */
-function parseTaskFile(text: string): Task[] | undefined {
+/**
+ * The records of one generation, or `undefined` when the document is unusable.
+ * Exported for the retention sweep, which must tell an empty session from an
+ * unreadable one but must not repair what it reads.
+ */
+export function parseTaskFile(text: string): Task[] | undefined {
   let document: unknown;
   try {
     document = JSON.parse(text);

@@ -128,6 +128,43 @@ ESC ] 9 ; <任务名> <结束状态> BEL
 只在有 UI 的会话里写：`ctx.hasUI` 为真的会话才可能写，headless 与 `print`、`json` 模式一条也不写。默认写入点还要求 `process.stdout.isTTY === true`，所以 `pi | tee` 这类把 stdout 接进管道的运行不会往管道里混进转义字节。
 
 没有外部进程，也没有新依赖：字节就是全部机制。会话里的完成通知照旧发送，终端转义只是额外的一层——终端不响应时信息也不会丢。
+## 旧会话清理
+
+| 项 | 值 |
+|---|---|
+| 环境变量 | `PI_PRETTY_TASK_RETENTION_DAYS` |
+| 默认值 | `7` |
+| 合法值 | 大于 0 的安全整数（天数） |
+
+一个会话的记录文件与它的全部输出文件住在同一个目录里：`<项目根>/.pi/tasks/<会话 id>/`，其中 `tasks.json` 是记录、`<任务 id>.output` 是每个 process task 的输出。所以“旧”是目录的属性——目录的修改时间在这些文件每次落盘时都会前移——清理一个旧会话就是删掉这一个目录：记录和输出一起消失，不留半份。
+
+目录住着的任何一个 task 还没结束（`running`、`paused`、`interrupted`），或者它是一条还会继续触发的 loop，整个目录都留下；当前会话自己的目录无论多旧都留下。记录文件读不出来（坏 JSON、本版本不认识的形状）时同样留下并报告，不猜——保留一个目录只花磁盘，删掉一个活着的目录花的是用户的历史。清理之后那个任务 id 就空出来了，后来的任务可以再用它。
+
+**输出文件先一步不在了也不要紧。** 统计字节时文件在就计入、不在就贡献 0，一条记录不会因为输出文件已丢失而被永久保留：目录照常删除，字节数按实际剩下的算。
+
+一次清理删掉了东西，就在 stderr 上说一次，不逐个文件列举：
+
+```
+pi-pretty-task: pruned 3 sessions, 1.4 MiB
+```
+
+读不了或删不掉的目录各占一行（`kept <目录名>: …`），清理继续进行，扩展不会被它挡住：
+
+```
+pi-pretty-task: kept 7f3c1a9e: its records could not be read
+```
+
+清理**只在会话开始时跑一次**，没有定时器。代价与目录数量成正比而不是与文件数量成正比：只对超过窗口的目录才去读记录、统计字节，其余每个目录只花一次 `stat`，所以 `.pi/tasks` 里堆了很多会话也不会拖慢第一次工具调用。
+
+### 非法值
+
+与输出上限一样，启动时解析一次，解析失败就让扩展加载失败：
+
+```
+PI_PRETTY_TASK_RETENTION_DAYS must be a positive whole number of days; received "1.5"
+```
+
+`0`、负数、小数、`week` 这类拼写都拒绝：`0` 会在每次会话开始时把除当前会话外的历史全部删掉，小数和拼写错误则更可能是笔误。**不做静默纠正**——一个悄悄变成 `NaN` 的窗口会让每次比较都是 `false`，看起来像“永远不清理”，用户却以为自己设了。
 
 ## 每次调用的目录与环境变量
 
@@ -175,12 +212,12 @@ Unknown template "tset". Known templates: "lint", "test". The task was not start
 
 ## 为什么配置只从一个地方读
 
-所有由环境变量决定的东西——输出上限、shell 策略、通知开关、agent 设置目录——都在 `src/tasks/base/settings.ts` 里读一次，合成一个 `Settings` 值交给需要它的模块；`src/tasks/process/limits.ts` 只剩与时间有关的数值校验，`src/tasks/process/shell.ts` 从传入的环境里解析，扩展只经 `Settings` 调用它。一个键一种形状——见 `docs/scope-v1.md`。这样测试可以把一份显式环境（或一个普通对象）交给扩展入口，宿主也可以用同样的方式传入，而“读哪里、什么时候校验”只有一个答案：某个模块自己再读一次 `process.env` 是缺陷，不是优化。
+所有由环境变量决定的东西——输出上限、shell 策略、通知开关、旧会话保留天数、agent 设置目录——都在 `src/tasks/base/settings.ts` 里读一次，合成一个 `Settings` 值交给需要它的模块；`src/tasks/process/limits.ts` 只剩与时间有关的数值校验，`src/tasks/process/shell.ts` 从传入的环境里解析，扩展只经 `Settings` 调用它。一个键一种形状——见 `docs/scope-v1.md`。这样测试可以把一份显式环境（或一个普通对象）交给扩展入口，宿主也可以用同样的方式传入，而“读哪里、什么时候校验”只有一个答案：某个模块自己再读一次 `process.env` 是缺陷，不是优化。
 
 `PI_PRETTY_TASK_*` 里这个版本不认识的键同样是错误：
 
 ```
-PI_PRETTY_TASK_NOTIFY_TIMEOUT is not a key this version reads; known keys: PI_PRETTY_TASK_OUTPUT_CAP_BYTES, PI_PRETTY_TASK_NOTIFY, PI_PRETTY_TASK_SHELL, PI_PRETTY_TASK_SHELL_PATH, PI_PRETTY_TASK_POSIX_SHELL, PI_PRETTY_TASK_POSIX_SHELL_PATH
+PI_PRETTY_TASK_NOTIFY_TIMEOUT is not a key this version reads; known keys: PI_PRETTY_TASK_OUTPUT_CAP_BYTES, PI_PRETTY_TASK_NOTIFY, PI_PRETTY_TASK_RETENTION_DAYS, PI_PRETTY_TASK_SHELL, PI_PRETTY_TASK_SHELL_PATH, PI_PRETTY_TASK_POSIX_SHELL, PI_PRETTY_TASK_POSIX_SHELL_PATH
 ```
 
 拼错的名字不该变成一个用户以为生效、扩展却默默忽略的设置。唯一例外是命名模板：模板要跨会话复用，所以放在项目与 agent 的 `pretty-task.json`；它也按 `Settings` 给出的路径在扩展入口读一次、校验一次，坏文件只报告，不阻断加载。
