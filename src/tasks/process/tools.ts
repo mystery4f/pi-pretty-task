@@ -1,6 +1,6 @@
 /**
- * `bg_run`, `bg_status`, `bg_logs`, `bg_kill` and `bg_wait`: what the agent can do with
- * process tasks.
+ * `bg_run`, `bg_status`, `bg_logs`, `bg_kill` and `bg_wait`: what the agent can
+ * do with process tasks.
  *
  * The tools are thin. They translate a turn into a scope, call the store, and
  * render the result as text a model can read — all knowledge of shells,
@@ -93,6 +93,7 @@ const WaitParameters = Type.Object({
     }),
   ),
 });
+
 const DEFAULT_LOG_LINES = 50;
 const MAX_LOG_LINES = 2000;
 /**
