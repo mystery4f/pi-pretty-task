@@ -182,7 +182,7 @@ describe("/tasks command", () => {
     expect(harness.commandNames).toContain(TASKS_COMMAND);
 
     const { panel, closed } = await openPanel(harness);
-    expect(panel.render(100).join("\n")).toContain("No tasks yet");
+    expect(panel.render(100).join("\n")).toContain("No processes here");
     expect(harness.lastCustomOptions()?.overlay).toBe(true);
 
     panel.handleInput("\u001bq");
@@ -271,6 +271,8 @@ describe("/tasks command", () => {
     // A 10s loop run five times: five iterations, one command each.
     for (let fire = 1; fire <= 5; fire += 1) await fireLoop(harness, clock, fire);
     const { panel, closed } = await openPanel(harness);
+    // A loop gets its own page (ADR-0012); the panel opens on Processes.
+    panel.handleInput("2");
     const list = panel.render(100).join("\n");
     expect(list).toContain("review loop");
     expect(list).toContain(created.id);
@@ -323,6 +325,7 @@ describe("/tasks command", () => {
     await fireLoop(harness, clock, 1);
 
     const { panel, closed } = await openPanel(harness);
+    panel.handleInput("2");
     expect(panel.render(100).join("\n")).toContain("stop me");
 
     // One key for both kinds: on a loop row `k` ends the schedule, not a process.

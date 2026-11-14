@@ -117,6 +117,50 @@ export interface TasksPanelOptions {
 type PanelMode = "list" | "detail" | "iteration";
 
 /**
+ * The panel's three pages (ADR-0012). Every record belongs to one page, and a child
+ * record — a fire or a chain's step — belongs to none: it is read through its parent.
+ */
+export type PanelTab = "processes" | "loops" | "chains";
+
+/** The status filter `f` cycles, applied inside whichever page is open (ADR-0012). */
+export type PanelFilter = "all" | "running" | "failed" | "done";
+
+/** The pages in the order `1`, `2`, `3` and the `tab` key walk them. */
+export const PANEL_TABS: readonly PanelTab[] = ["processes", "loops", "chains"];
+
+/** The filters in the order `f` walks them, opening on the widest one. */
+export const PANEL_FILTERS: readonly PanelFilter[] = ["all", "running", "failed", "done"];
+
+/** The word each page is titled with; the glossary's own names (GLOSSARY.md). */
+const TAB_TITLE: Record<PanelTab, string> = {
+  processes: "Processes",
+  loops: "Loops",
+  chains: "Chains",
+};
+
+/** What a page says when the session holds nothing of its kind at all. */
+const TAB_EMPTY: Record<PanelTab, string> = {
+  processes: "No processes here — run a command with bg_run and it appears.",
+  loops: "No loops here — a schedule created with loop_create gathers its fires here.",
+  chains: "No chains here — queue a step with bg_run's after and the pipeline appears.",
+};
+
+/**
+ * The page a reopened panel lands on: the last one a reader used (ADR-0012). It
+ * lives outside the component because pi builds a fresh panel every time.
+ */
+let rememberedTab: PanelTab = "processes";
+
+/** The page a new panel opens on. */
+export function lastPanelTab(): PanelTab {
+  return rememberedTab;
+}
+
+/** Put the remembered page back; a test resets it, and only a tab key changes it. */
+export function rememberPanelTab(tab: PanelTab): void {
+  rememberedTab = tab;
+}
+/**
  * Most recently changed first, not most recently created: a task that just ended
  * or just fired is what the reader wants, while a long job that only grew would
  * otherwise sink under every fresh row (ADR-0010).
@@ -146,12 +190,21 @@ export class TasksPanel implements Component {
   private rows: readonly PanelTaskView[] = [];
   /** Every row of the session, so the counts never depend on the filters. */
   private allRows: readonly PanelTaskView[] = [];
-  /** `h` shows the finished rows; until then only live work is listed. */
-  private showHistory = false;
+  /** The page being read; a reopened panel starts on the remembered one (ADR-0012). */
+  private tab: PanelTab = rememberedTab;
+  /** The status filter `f` cycles, applied inside the open page. */
+  private filter: PanelFilter = "all";
+  /**
+   * What each page had selected when the reader left it, keyed by page. Reopening a
+   * page lands where it was left rather than at the top (ADR-0012 keeps selection by id).
+   */
+  private readonly selectedByTab: Record<PanelTab, string | undefined> = {
+    processes: undefined,
+    loops: undefined,
+    chains: undefined,
+  };
   private selectedId: string | undefined;
   private listTop = 0;
-  /** `l` narrows the list to loop tasks; a second press brings the process rows back. */
-  private onlyLoops = false;
   /** `/` turns keys into a query instead of navigation; `alt+q` leaves it. */
   private searching = false;
   /** The query outlives search mode: leaving keeps it, and the header keeps showing it. */
@@ -237,28 +290,16 @@ export class TasksPanel implements Component {
   }
 
   /**
-   * Recompute what the reader may open: the loop filter, then the query, then the
-   * history gate — in that order, so a search never reveals a row `h` is hiding
-   * and never changes the counts, which stay over every task.
+   * Recompute what the reader may open: the page's roots, then the status filter,
+   * then the query. A child record is never a row, so a fire or a step can never
+   * pull its parent in (ADR-0014); the counts stay over every record and never
+   * follow either narrowing (ADR-0012).
    */
   private applyFilters(): void {
-    // The loop filter narrows what the reader sees, never what the store holds.
-    // A fire is a child record, not a row: the owning loop's detail lists it, and
-    // `bg_status` still answers for it directly (ADR-0014). The loop filter keeps
-    // both schedules, prompt and command alike (ADR-0015).
-    const roots = this.allRows.filter(
-      (row) => row.task.kind !== "process" || row.task.parentId === undefined,
-    );
-    const kindRows = this.onlyLoops ? roots.filter((row) => row.task.kind !== "process") : roots;
-    const matched =
-      this.query.length === 0
-        ? kindRows
-        : kindRows.filter((row) => matchesQuery(row.task, this.query));
-    // Finished work is history, and history is asked for: the panel opens on what
-    // is live and never reveals the past on its own, so `h` means the same thing
-    // whether or not something is still running.
-    const live = matched.filter((row) => row.task.status === "running");
-    this.rows = this.showHistory ? matched : live;
+    const roots = this.allRows.filter((row) => inTab(row.task, this.tab));
+    const kept = roots.filter((row) => passesFilter(row.task, this.filter));
+    this.rows =
+      this.query.length === 0 ? kept : kept.filter((row) => matchesQuery(row.task, this.query));
     this.keepSelection();
   }
 
@@ -310,6 +351,16 @@ export class TasksPanel implements Component {
       this.done();
       return;
     }
+    // `1`, `2`, `3` and `tab` pick a page from any view, search mode included:
+    // a page key is never a character a query wanted. All three pages share this
+    // one keyboard model (ADR-0012), so the keys sit above the mode dispatch.
+    if (!this.searching) {
+      const page = pageKey(data, this.tab);
+      if (page !== undefined) {
+        this.selectTab(page);
+        return;
+      }
+    }
     // `x` closes from the list only: a detail view is left with alt+q (or ←), and a
     // character typed into a query is never a command.
     if (data === "x" && this.mode === "list" && !this.searching) {
@@ -360,8 +411,7 @@ export class TasksPanel implements Component {
     }
     if (data === "k") this.stopSelected();
     if (data === "a") this.stopAll();
-    if (data === "l") this.toggleLoopFilter();
-    if (data === "h") this.toggleHistory();
+    if (data === "f") this.cycleFilter();
     if (data === "R") this.rerunSelected();
     if (data === "c") this.showOutputPath();
   }
@@ -746,24 +796,38 @@ export class TasksPanel implements Component {
     });
   }
 
-  /** `l` shows only loop tasks, or everything again. */
-  private toggleLoopFilter(): void {
-    this.onlyLoops = !this.onlyLoops;
-    this.notice = this.onlyLoops ? "showing loops only" : undefined;
-    this.enqueue(async () => {
-      await this.refresh();
-      this.paint();
-    });
+  /**
+   * Open a page, from any view: the keyboard model is shared by all three, so a tab
+   * key leaves a detail or an iteration and lands on that page's list (ADR-0012).
+   * The query and the status filter stay as they were — they narrow, they do not travel.
+   */
+  private selectTab(next: PanelTab): void {
+    if (next === this.tab && this.mode === "list" && !this.searching) return;
+    this.selectedByTab[this.tab] = this.selectedId;
+    this.tab = next;
+    rememberPanelTab(next);
+    this.mode = "list";
+    this.searching = false;
+    this.detailId = undefined;
+    this.detailLines = [];
+    this.detailError = undefined;
+    this.following = true;
+    this.scrollBack = 0;
+    this.selectedId = this.selectedByTab[next];
+    this.listTop = 0;
+    this.notice = undefined;
+    this.applyFilters();
+    this.paint();
   }
 
-  /** `h` shows the finished rows, or hides them again; the counts never follow it. */
-  private toggleHistory(): void {
-    this.showHistory = !this.showHistory;
-    this.notice = this.showHistory ? "showing history" : "history hidden";
-    this.enqueue(async () => {
-      await this.refresh();
-      this.paint();
-    });
+  /** `f` walks all → running → failed → done inside the open page, and round again. */
+  private cycleFilter(): void {
+    const index = PANEL_FILTERS.indexOf(this.filter);
+    this.filter = PANEL_FILTERS[(index + 1) % PANEL_FILTERS.length] ?? "all";
+    this.notice = this.filter === "all" ? "showing every status" : `showing ${this.filter}`;
+    // Every record is already in hand, so the filter narrows the view without a read.
+    this.applyFilters();
+    this.paint();
   }
 
   /** `R` runs the selected command again; the old row stays as its own record. */
@@ -911,19 +975,42 @@ export class TasksPanel implements Component {
   /**
    * The list's header, in the shape of the two-row banner the other task plugin
    * draws above its editor: a ruled title, then one tally per ending. The counts
-   * come from every row, so a filter can never hide a failure.
+   * come from every record in the session, so no page and no filter can hide a
+   * failure (ADR-0012). Below them, the page band names where the reader is and
+   * which status filter is on; the query line stays under it.
    */
   private listHeader(width: number): string[] {
     const theme = this.theme;
     const heading = theme.fg("borderMuted", "──") + theme.fg("text", " Background Tasks ");
     const rule = Math.max(0, width - visibleWidth("── Background Tasks "));
-    const lines = [heading + theme.fg("borderMuted", "─".repeat(rule)), ` ${this.countsLine()} `];
+    const lines = [
+      heading + theme.fg("borderMuted", "─".repeat(rule)),
+      ` ${this.countsLine()} `,
+      ` ${this.tabBand()} `,
+    ];
     // The query stays visible after search mode is left, so the reader can see why
     // rows are missing; the counts above still cover every task.
     if (this.query.length > 0) {
-      lines.push(` ${theme.fg("muted", "filter:")} ${theme.fg("accent", this.query)} `);
+      lines.push(` ${theme.fg("muted", "search:")} ${theme.fg("accent", this.query)} `);
     }
     return lines;
+  }
+
+  /**
+   * `Processes │ Loops │ Chains · status: running`: the page being read is the one
+   * washed with the selection colour, so the band doubles as where-am-I and as the
+   * list of keys that gets you elsewhere (ADR-0012, `1`/`2`/`3`).
+   */
+  private tabBand(): string {
+    const theme = this.theme;
+    const pages = PANEL_TABS.map((tab, index) => {
+      const title = `${String(index + 1)} ${TAB_TITLE[tab]}`;
+      return tab === this.tab
+        ? theme.bg("selectedBg", theme.fg("text", ` ${title} `))
+        : theme.fg("muted", ` ${title} `);
+    });
+    const divider = theme.fg("borderMuted", "│");
+    return `${pages.join(divider)}${theme.fg("muted", `· status: ${this.filter}`)}`;
   }
 
   /** One `dot label number` per ending, in the order the reader cares about. */
@@ -967,9 +1054,9 @@ export class TasksPanel implements Component {
       .join("  ");
   }
 
-  /** The list's keys: the replaced panel's set, plus the loop filter this plugin adds. */
+  /** The list's keys, the same on every page (ADR-0012): one model, three lists. */
   private listFooter(): string {
-    return "↑/↓ · Enter logs · / search · k stop · a stop all · h history · R rerun · l loops · alt+q close";
+    return "↑/↓ · Enter logs · k stop · f filter · 1/2/3 tabs · / search · R rerun · a stop all · alt+q close";
   }
 
   /** The box around the rows: the header sits above it, the keys inside the bottom. */
@@ -1001,12 +1088,15 @@ export class TasksPanel implements Component {
     const body: string[] = [];
 
     if (this.rows.length === 0) {
-      // An idle session hides its own history, so say how to get it back instead
-      // of claiming there is nothing at all.
+      // An empty page says which of the three reasons emptied it: nothing of that
+      // kind, a status filter that keeps nothing, or a query that matches no row.
+      // It never blames the other pages, which are only a keypress away.
       const message =
-        !this.showHistory && this.allRows.length > 0
-          ? "  History is hidden — press h to show it."
-          : "  No tasks yet — run a command with bg_run and it appears here.";
+        this.allRows.every((row) => !inTab(row.task, this.tab)) || this.allRows.length === 0
+          ? TAB_EMPTY[this.tab]
+          : this.query.length > 0
+            ? "  Nothing on this page matches the search — / , then backspace, widens it."
+            : "  Nothing here matches this status — f moves to the next filter.";
       body.push("", theme.fg("dim", message));
       return this.listFrame(body, width);
     }
@@ -1681,6 +1771,65 @@ function kindWord(kind: TaskKind): "proc" | "llm" | "cmd" | "chn" {
       // The word a reader types to find a chain once the panel gives it a tab (#27).
       return "chn";
   }
+}
+
+/**
+ * True when the task is a root row of the given page (ADR-0012). A chain's step and
+ * a loop's fire are records with a `parentId`, and they belong to no page's list:
+ * the parent's expansion is where they are read (ADR-0014). Processes are the only
+ * kind that has children, so the other two kinds are roots by construction.
+ */
+function inTab(task: Task, tab: PanelTab): boolean {
+  switch (tab) {
+    case "processes":
+      return task.kind === "process" && task.parentId === undefined;
+    case "loops":
+      return task.kind === "llm-loop" || task.kind === "cmd-loop";
+    case "chains":
+      return task.kind === "chain";
+  }
+}
+
+/**
+ * True when the task answers the status filter. `running` is the word a reader
+ * types for live work, and a paused schedule is still live; `done` is every ending
+ * that is not a failure, so the four filters partition the endings a reader cares
+ * about. A chain counts as running while any step runs, which its own status says
+ * (ADR-0014) — the chain is `running` for as long as it has a step left.
+ */
+function passesFilter(task: Task, filter: PanelFilter): boolean {
+  switch (filter) {
+    case "all":
+      return true;
+    case "running":
+      return task.status === "running" || task.status === "paused";
+    case "failed":
+      return task.status === "failed";
+    case "done":
+      return (
+        task.status === "completed" ||
+        task.status === "killed" ||
+        task.status === "interrupted" ||
+        task.status === "stopped" ||
+        task.status === "skipped"
+      );
+  }
+}
+
+/**
+ * The page a keypress asks for: `1`, `2`, `3` name one directly and `tab` walks from
+ * the open page to the next, wrapping after the last (ADR-0012). Everything else
+ * returns `undefined` and stays a row key.
+ */
+function pageKey(data: string, current: PanelTab): PanelTab | undefined {
+  const named =
+    data === "1" ? "processes" : data === "2" ? "loops" : data === "3" ? "chains" : undefined;
+  if (named !== undefined) return named;
+  if (matchesKey(data, "tab")) {
+    const index = PANEL_TABS.indexOf(current);
+    return PANEL_TABS[(index + 1) % PANEL_TABS.length] ?? "processes";
+  }
+  return undefined;
 }
 
 /** True when any searchable field of the task contains the query, ignoring case. */
