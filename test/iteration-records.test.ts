@@ -10,6 +10,8 @@
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { sessionTaskDirectory } from "../src/tasks/base/runtime-state.js";
+import { TaskStore } from "../src/tasks/base/task-store.js";
 import { createHarness, type Harness, resultText } from "./support/extension-harness.js";
 import { makeTempDir } from "./support/processes.js";
 
@@ -260,5 +262,51 @@ describe("iteration recording", () => {
     // The loop's own listing says the history is cut, wherever it is read from.
     const all = resultText(await task.harness.call("loop_list", {}));
     expect(all).toContain("iterations: 1 (1 older dropped)");
+  });
+
+  it("binds the iteration to the wake's own turn, not to the turn running when it fired", async () => {
+    const task = await setup();
+    const created = await createLoop(task.harness);
+
+    // The loop comes due while the agent is busy with a turn the user started.
+    await task.harness.emit({ type: "agent_start" });
+    task.advance(10_000);
+    await task.harness.pump(task.now);
+    await startCall(task.harness, "call-user", "bash", { command: "ls" });
+    await endCall(task.harness, "call-user", "bash");
+
+    // That turn is not the wake's turn: the pending iteration stays empty.
+    const before = await iterationsOf(task.harness, created.id);
+    expect(before).toHaveLength(1);
+    expect(before[0]).toMatchObject({ fire: 1, calls: [] });
+
+    // Settling closes the user's turn and sends the wake; its own turn records.
+    task.advance(1_000);
+    await task.harness.emit({ type: "agent_settled", aborted: false });
+    await startCall(task.harness, "call-wake", "read", { path: "src/index.ts" });
+    await endCall(task.harness, "call-wake", "read", { durationMs: 7 });
+    await task.harness.emit({ type: "agent_settled", aborted: false });
+
+    const [iteration] = await iterationsOf(task.harness, created.id);
+    if (iteration === undefined) throw new Error("no iteration was recorded");
+    expect(iteration).toMatchObject({ fire: 1, status: "completed" });
+    expect(iteration.calls.map((call) => call.id)).toEqual(["call-wake"]);
+  });
+
+  it("does not leave a pending iteration running after a restart", async () => {
+    const task = await setup();
+    const created = await createLoop(task.harness);
+
+    await task.harness.emit({ type: "agent_start" });
+    task.advance(10_000);
+    await task.harness.pump(task.now);
+
+    // No settle: the process dies with the wake still queued. The next load
+    // repairs a stored `running` iteration to `interrupted`, as everywhere else.
+    const store = new TaskStore(sessionTaskDirectory(task.turn.cwd, task.turn.sessionId));
+    const records = await store.load();
+    const loop = records.find((record) => record.id === created.id);
+    if (loop?.kind !== "loop") throw new Error("the loop was not persisted");
+    expect(loop.iterations?.[0]).toMatchObject({ fire: 1, status: "interrupted" });
   });
 });

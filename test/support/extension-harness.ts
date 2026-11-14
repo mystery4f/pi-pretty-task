@@ -81,8 +81,15 @@ export interface Harness {
   readonly statuses: readonly StatusUpdate[];
   /** Keys passed to `setWidget`; stays empty because the panel is not a widget. */
   readonly widgetKeys: readonly string[];
-  /** Pump loops due at a fake instant, as the extension timer would. */
+  /**
+   * Pump loops due at a fake instant, as the extension timer would. While the
+   * agent is idle this also delivers the wakes the pump recorded.
+   */
   pump(at: number): Promise<LoopFire[]>;
+  /** Hand queued wakes to pi if the agent is idle, as `agent_settled` does. */
+  flushWakes(): Promise<void>;
+  /** Wakes recorded but not yet handed to pi: non-zero while the agent is busy. */
+  readonly pendingWakes: number;
   /**
    * Fire one extension event, as pi would, awaited in registration order. Events
    * such as `tool_execution_start` reach pi from outside a tool call, so this is
@@ -303,6 +310,12 @@ export function createHarness(defaultTurn: Turn, options: HarnessOptions = {}): 
     widgetKeys,
     pump(at) {
       return controller.pump(at);
+    },
+    flushWakes() {
+      return controller.flushWakes();
+    },
+    get pendingWakes() {
+      return controller.wakes.size;
     },
     async emit(event, turn = defaultTurn) {
       for (const handler of handlers.get(event.type) ?? []) {

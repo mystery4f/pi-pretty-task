@@ -6,9 +6,12 @@
  * still open, in which session. Three rules follow from the event order and are
  * the whole point of the class:
  *
- * - a fire opens the iteration, and `agent_settled` closes it;
- * - a call is recorded into the newest open iteration of its session, because the
- *   events carry no loop id;
+ * - a fire opens a pending iteration; only once its wake is handed to pi does it
+ *   bind, and only then does it capture tool calls (ADR-0009);
+ * - `agent_settled` closes the bound iterations, never a pending one;
+ * - a call is recorded into the newest bound iteration of its session, because
+ *   the events carry no loop id, so an unbound iteration — a wake still waiting
+ *   for an idle agent — must not take the calls of a turn it did not wake;
  * - `tool_execution_end` pairs by tool call id across every iteration, so a late
  *   result still lands on the call that produced it.
  *
@@ -61,6 +64,8 @@ interface OpenFire {
   readonly directory: string;
   readonly taskId: string;
   readonly fire: number;
+  /** False until the wake was handed to pi: a pending fire captures no calls. */
+  bound: boolean;
 }
 
 /** Both caps are positive counts: a zero would record nothing and say nothing. */
@@ -92,8 +97,10 @@ export class Iterations {
   }
 
   /**
-   * Open the iteration for one fire and persist it before the wake message is
-   * sent, so a turn that ends before its first tool call still leaves a record.
+   * Open the iteration for one fire and persist it, so a wake that is still
+   * waiting for an idle agent — or a turn that ends before its first tool call —
+   * still leaves a record. The iteration stays pending: it takes no calls until
+   * `bind` marks the wake as sent.
    */
   async open(fire: LoopFire): Promise<void> {
     const task = fire.task;
@@ -105,12 +112,42 @@ export class Iterations {
       droppedCalls: 0,
     };
     task.iterations.push(iteration);
-    for (const dropped of this.dropOverflow(task)) this.forget(task.id, dropped);
+    for (const dropped of this.dropOverflow(task))
+      this.forget(fire.session.directory, task.id, dropped);
     this.openFires.push({
       directory: fire.session.directory,
       taskId: task.id,
       fire: iteration.fire,
+      bound: false,
     });
+    await this.sessions.persist(fire.session);
+  }
+
+  /**
+   * Bind the iteration to the turn its wake produced: called right after the
+   * wake is handed to pi. From here on the turn's tool calls are its own.
+   */
+  bind(fire: LoopFire): void {
+    const entry = this.findOpenFire(fire);
+    if (entry !== undefined) entry.bound = true;
+  }
+
+  /**
+   * Forget a fire that never woke the model — its loop was paused, completed or
+   * deleted while the wake waited. The iteration goes with it: a pending record
+   * that stays `running` forever would claim a turn that never happened. A bound
+   * iteration is left alone: its wake already left for pi, so the turn is real
+   * and `settle` owns the record from here on.
+   */
+  async drop(fire: LoopFire): Promise<void> {
+    const entry = this.findOpenFire(fire);
+    if (entry === undefined || entry.bound) return;
+    this.forget(fire.session.directory, fire.task.id, fire.fire);
+    const task = fire.session.tasks.get(fire.task.id);
+    if (task?.kind !== "loop") return;
+    const index = task.iterations.findIndex((iteration) => iteration.fire === fire.fire);
+    if (index < 0) return;
+    task.iterations.splice(index, 1);
     await this.sessions.persist(fire.session);
   }
 
@@ -162,9 +199,11 @@ export class Iterations {
   }
 
   /**
-   * Close every iteration still open in the session, because one run settles at a
-   * time and a fire's turn is that run. Calls still running at that point cannot
-   * end any more: `aborted` when the run was aborted, `interrupted` otherwise.
+   * Close every bound iteration still open in the session, because one run
+   * settles at a time and a bound fire's turn is that run. Calls still running
+   * at that point cannot end any more: `aborted` when the run was aborted,
+   * `interrupted` otherwise. Pending iterations stay pending: their wake has not
+   * produced a turn yet, so this settle is not theirs.
    */
   async settle(scope: TaskScope, aborted: boolean): Promise<void> {
     const session = await this.sessions.session(scope);
@@ -173,6 +212,7 @@ export class Iterations {
     for (let index = this.openFires.length - 1; index >= 0; index -= 1) {
       const entry = this.openFires[index];
       if (entry === undefined || entry.directory !== session.directory) continue;
+      if (!entry.bound) continue;
       this.openFires.splice(index, 1);
       const iteration = this.resolve(session, entry.taskId, entry.fire);
       if (iteration === undefined || iteration.status !== "running") continue;
@@ -195,17 +235,22 @@ export class Iterations {
   }
 
   /**
-   * The iteration a start belongs to. Resolved through the session's current
-   * record every time: a loop update replaces the record object, and a deleted
-   * loop must stop capturing calls.
+   * The iteration a start belongs to: the newest open iteration that its wake
+   * already produced. Resolved through the session's current record every time,
+   * because a loop update replaces the record object and a deleted loop must
+   * stop capturing calls. A pending iteration is skipped, not pruned: its turn
+   * has not begun, and the current turn belongs to whoever started it.
    */
   private newestOpenIteration(session: TaskSession): Iteration | undefined {
     for (let index = this.openFires.length - 1; index >= 0; index -= 1) {
       const entry = this.openFires[index];
       if (entry === undefined || entry.directory !== session.directory) continue;
       const iteration = this.resolve(session, entry.taskId, entry.fire);
-      if (iteration !== undefined && iteration.status === "running") return iteration;
-      this.openFires.splice(index, 1);
+      if (iteration === undefined || iteration.status !== "running") {
+        this.openFires.splice(index, 1);
+        continue;
+      }
+      if (entry.bound) return iteration;
     }
     return undefined;
   }
@@ -216,11 +261,21 @@ export class Iterations {
     return task.iterations.find((iteration) => iteration.fire === fire);
   }
 
-  private forget(taskId: string, fire: number): void {
+  private forget(directory: string, taskId: string, fire: number): void {
     const index = this.openFires.findIndex(
-      (entry) => entry.taskId === taskId && entry.fire === fire,
+      (entry) => entry.directory === directory && entry.taskId === taskId && entry.fire === fire,
     );
     if (index >= 0) this.openFires.splice(index, 1);
+  }
+
+  /** The bookkeeping entry for one fire, if it is still open in memory. */
+  private findOpenFire(fire: LoopFire): OpenFire | undefined {
+    return this.openFires.find(
+      (candidate) =>
+        candidate.directory === fire.session.directory &&
+        candidate.taskId === fire.task.id &&
+        candidate.fire === fire.fire,
+    );
   }
 }
 

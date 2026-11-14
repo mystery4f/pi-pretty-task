@@ -15,6 +15,7 @@ import { TaskSessions } from "./tasks/base/task-sessions.js";
 import { Iterations } from "./tasks/loop/iterations.js";
 import { type LoopFire, LoopTasks } from "./tasks/loop/loop-tasks.js";
 import { loopTaskTools } from "./tasks/loop/tools.js";
+import { LoopWakes } from "./tasks/loop/wake-queue.js";
 import { parseOutputCapBytes } from "./tasks/process/limits.js";
 import { ProcessTasks } from "./tasks/process/process-tasks.js";
 import { resolveShellPolicy } from "./tasks/process/shell.js";
@@ -47,8 +48,16 @@ export interface ExtensionOptions {
 export interface ExtensionController {
   readonly loops: LoopTasks;
   readonly processTasks: ProcessTasks;
+  /** The wakes a fire produced that pi has not been given yet (ADR-0009). */
+  readonly wakes: LoopWakes;
   /** Handle every loop due at `at` in this extension's loaded sessions. */
   pump(at: number): Promise<LoopFire[]>;
+  /**
+   * Hand the queued wakes to pi if the agent is idle. The pump enqueues, and
+   * `agent_settled`, `session_start` and this call flush; a busy agent keeps
+   * its wakes queued until it settles (ADR-0009).
+   */
+  flushWakes(): Promise<void>;
 }
 
 const DEFAULT_PUMP_INTERVAL_MS = 1_000;
@@ -91,15 +100,27 @@ export function createExtension(
     callLimit: options.iterationCallLimit,
     historyLimit: options.iterationHistoryLimit,
   });
+  // Wakes wait here until the agent is idle: pi's own follow-up queue cannot be
+  // recalled, so sending one mid-turn would survive a `loop_update` (ADR-0009).
+  const wakes = new LoopWakes();
+  let agentIdle = true;
   const loops = new LoopTasks({
     sessions,
     now,
-    onFire: (fire) => {
-      // The iteration is opened before the wake goes out, and persisted on its
-      // own, so a turn that ends before its first tool call still leaves a record.
-      void recordSafely(iterations.open(fire));
-      sendLoopWake(pi, fire);
+    onFire: async (fire) => {
+      // The iteration opens pending, before the wake can be delivered, so even a
+      // turn that ends before its first tool call leaves a record; it binds to
+      // the wake's own turn in `flushWakes`. Awaited: the fire is on disk before
+      // the wake can be sent or the loop cancelled.
+      await recordSafely(iterations.open(fire));
+      wakes.record(fire);
       // A fire changes a loop's countdown, and its status line entry.
+      publishStatusLine();
+    },
+    onCancel: async (taskId) => {
+      // The loop stopped while its wake waited: the wake must never reach pi, and
+      // the pending iteration must not claim a turn that will not happen.
+      for (const fire of wakes.cancel(taskId)) await recordSafely(iterations.drop(fire));
       publishStatusLine();
     },
   });
@@ -135,10 +156,40 @@ export function createExtension(
   const interval = options.pumpIntervalMs ?? DEFAULT_PUMP_INTERVAL_MS;
   let timer: ReturnType<typeof setInterval> | undefined;
 
+  /**
+   * A queued wake still belongs to the model while its loop runs; a fire that
+   * used the last of `maxFires` completed the loop and must still be delivered,
+   * because that turn is the reason the count reached the limit. Every other
+   * stopped loop drops its wake: pause, complete, expiry, delete.
+   */
+  const isDeliverable = (fire: LoopFire): boolean => {
+    const task = fire.session.tasks.get(fire.task.id);
+    if (task?.kind !== "loop") return false;
+    return task.status === "running" || fire.final;
+  };
+
+  /**
+   * Deliver what an idle agent may receive, drop what may not. A wake goes out
+   * only after its iteration binds, so the turn it wakes records its own calls;
+   * a dropped wake takes its pending iteration with it (ADR-0009).
+   */
+  const flushWakes = async (): Promise<void> => {
+    if (!agentIdle) return;
+    const { deliver, drop } = wakes.drain(isDeliverable);
+    for (const fire of drop) await recordSafely(iterations.drop(fire));
+    for (const fire of deliver) {
+      iterations.bind(fire);
+      sendLoopWake(pi, fire);
+    }
+    if (deliver.length > 0 || drop.length > 0) publishStatusLine();
+  };
+
   // A timer failure must not become an unhandled rejection that kills pi.
   const pumpSafely = async (): Promise<void> => {
     try {
       await loops.pump(now());
+      await flushWakes();
+      // The countdown is part of the line, so every tick repaints it.
       publishStatusLine();
     } catch (error) {
       process.stderr.write(`pi-pretty-task: loop pump failed: ${String(error)}\n`);
@@ -168,6 +219,15 @@ export function createExtension(
     // so the first paint is awaited rather than left to race the session start.
     await publishStatus(ctx.ui, processTasks, loops, scope);
     startTimer();
+    // A fresh session has no run in flight, so a wake left queued by the last one
+    // may go out now.
+    agentIdle = true;
+    await flushWakes();
+  });
+  // A turn is running: a fire recorded now waits for `agent_settled`, because pi
+  // queues a `followUp` and cannot take it back (ADR-0009).
+  pi.on("agent_start", () => {
+    agentIdle = false;
   });
   // One pump on a turn boundary covers the case where the timer was delayed by
   // a long turn; a loop that became due during the turn wakes right after it.
@@ -183,9 +243,13 @@ export function createExtension(
     await recordSafely(iterations.recordEnd(scopeOf(ctx), event));
   });
   // `agent_settled` is the end of the turn: no retry, compaction or queued
-  // continuation will run after it, so the iteration can close.
+  // continuation will run after it, so the iteration can close. The settle runs
+  // first, then the wakes this turn was blocking go out — a wake never shares a
+  // settle with the turn before it, and its own events open the next run.
   pi.on("agent_settled", async (event, ctx) => {
     await recordSafely(iterations.settle(scopeOf(ctx), event.aborted));
+    agentIdle = true;
+    await flushWakes();
   });
   pi.on("session_shutdown", () => {
     stopTimer();
@@ -196,7 +260,15 @@ export function createExtension(
   return {
     loops,
     processTasks,
-    pump: (at) => loops.pump(at),
+    wakes,
+    // A pump that lands while the agent is idle delivers in the same call, so a
+    // test or an idle timer sees the wake; while busy it only queues.
+    pump: async (at) => {
+      const fires = await loops.pump(at);
+      await flushWakes();
+      return fires;
+    },
+    flushWakes,
   };
 }
 
