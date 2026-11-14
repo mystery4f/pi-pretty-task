@@ -647,8 +647,8 @@ describe("stopping and closing", () => {
     await panel.settle();
 
     expect(done).not.toHaveBeenCalled();
-    expect(drawn()).toContain("xenon build");
-    expect(drawn()).not.toContain("lint ");
+    expect(plain(drawn())).toContain("xenon build");
+    expect(plain(drawn())).not.toContain("lint ");
     panel.dispose();
   });
 });
@@ -775,12 +775,12 @@ describe("the three pages", () => {
     // No process row answers to `deploy`, and the chain on another page is not
     // allowed to answer for it either (ADR-0012).
     expect(drawn()).toContain("Nothing on this page matches the search");
-    expect(drawn()).not.toContain("deploy queue");
+    expect(plain(drawn())).not.toContain("deploy queue");
 
     // Leaving search keeps the query; the page it names is reached by a page key.
     panel.handleInput("\x1bq");
     panel.handleInput("3");
-    expect(drawn()).toContain("deploy queue");
+    expect(plain(drawn())).toContain("deploy queue");
 
     // While the query is being typed, a digit is a character of it, not a page key.
     panel.handleInput("/");
@@ -830,6 +830,74 @@ describe("the three pages", () => {
         .filter((line) => line.includes("build"))
         .map((line) => line.split(/\s+/).find((word) => word.startsWith("bg-")) ?? "");
     expect(order(70)).toEqual(order(100));
+
+    panel.dispose();
+  });
+
+  it("keeps the selected row on screen when a query lifts it above the scroll", async () => {
+    const source = new FakeSource();
+    source.rows = Array.from({ length: 13 }, (_, index) =>
+      view(`bg-000${String(index).padStart(2, "0")}`, {
+        name: `task ${index}`,
+        updatedAt: 1_000 + index,
+      }),
+    );
+    source.rows.push(view("bg-00013", { name: "zebra", updatedAt: 1_000 }));
+    const { panel, drawn } = openPanel(source, () => 13_000, plainTheme());
+    await panel.settle();
+
+    // Walk to the oldest row, which scrolls the list down.
+    for (let step = 0; step < 13; step += 1) panel.handleInput(DOWN);
+    await panel.settle();
+
+    panel.handleInput("/");
+    for (const character of "zeb") panel.handleInput(character);
+    await panel.settle();
+
+    const row = drawn()
+      .split("\n")
+      .find((line) => line.includes("zebra"));
+    expect(row).toBeDefined();
+    expect(row).toContain("›");
+    expect(row).toContain("bg-00013");
+
+    panel.dispose();
+  });
+
+  it("hands the recency order back when the query empties, selection unchanged", async () => {
+    const source = new FakeSource();
+    source.rows = [
+      view("bg-aaaaa", { name: "deploy-bg", updatedAt: 1_000 }),
+      view("bg-bbbbb", { name: "debug", updatedAt: 9_000 }),
+    ];
+    const { panel } = openPanel(source, () => 13_000, plainTheme());
+    await panel.settle();
+
+    const order = (): string[] =>
+      panel
+        .render(WIDTH)
+        .filter((line) => line.includes("bg-"))
+        .map((line) => line.split(/\s+/).find((word) => word.startsWith("bg-")) ?? "");
+    expect(order()).toEqual(["bg-bbbbb", "bg-aaaaa"]);
+
+    // Hold the older row, then let a query that prefers it rewrite the order.
+    panel.handleInput(DOWN);
+    await panel.settle();
+    panel.handleInput("/");
+    for (const character of "dbg") panel.handleInput(character);
+    await panel.settle();
+
+    // Deleting the query must not reshuffle the list around the held selection.
+    for (let step = 0; step < 3; step += 1) panel.handleInput("\u007f");
+    await panel.settle();
+
+    expect(order()).toEqual(["bg-bbbbb", "bg-aaaaa"]);
+    const selected = panel
+      .render(WIDTH)
+      .find((line) => line.includes("›"))
+      ?.split(/\s+/)
+      .find((word) => word.startsWith("bg-"));
+    expect(selected).toBe("bg-aaaaa");
 
     panel.dispose();
   });
@@ -1161,6 +1229,33 @@ describe("the status filter", () => {
     panel.dispose();
   });
 
+  it("narrows a query by the status filter it is paired with", async () => {
+    const source = new FakeSource();
+    source.rows = [
+      view("bg-aaaaa", { name: "deploy east", status: "running" }),
+      view("bg-bbbbb", { name: "deploy west", status: "failed", exitCode: 1 }),
+    ];
+    const { panel, drawn } = openPanel(source);
+    await panel.settle();
+
+    panel.handleInput("/");
+    for (const character of "dpl") panel.handleInput(character);
+    expect(plain(drawn())).toContain("deploy east");
+    expect(plain(drawn())).toContain("deploy west");
+
+    // Leaving search keeps the query; `f` then narrows what the query found.
+    panel.handleInput("\x1bq");
+    panel.handleInput("f");
+    expect(plain(drawn())).toContain("deploy east");
+    expect(plain(drawn())).not.toContain("deploy west");
+
+    panel.handleInput("f");
+    expect(plain(drawn())).toContain("deploy west");
+    expect(plain(drawn())).not.toContain("deploy east");
+
+    panel.dispose();
+  });
+
   it("counts a paused schedule as running, since it is still owed a turn", async () => {
     const { panel, drawn } = await openOn("loops", byStatus());
     panel.handleInput("f");
@@ -1342,17 +1437,206 @@ describe("recency and search", () => {
     panel.dispose();
   });
 
-  it("filters by an id prefix", async () => {
+  it("matches a query as an in-order subsequence, not as a substring", async () => {
+    const source = new FakeSource();
+    source.rows = [
+      view("bg-aaaaa", { name: "deploy-bg", createdAt: 1_000 }),
+      view("bg-bbbbb", { name: "build-test", createdAt: 2_000 }),
+      view("bg-ccccc", { name: "unit tests", createdAt: 3_000 }),
+    ];
+    const { panel, drawn } = openPanel(source, () => 13_000, plainTheme());
+    await panel.settle();
+
+    panel.handleInput("/");
+    for (const character of "dbg") panel.handleInput(character);
+
+    // `dbg` sits inside `deploy-bg` one letter at a time; no field of the other
+    // two rows carries the three letters in order.
+    expect(drawn()).toContain("deploy-bg");
+    expect(drawn()).not.toContain("build-test");
+    expect(drawn()).not.toContain("unit tests");
+
+    for (let index = 0; index < 3; index += 1) panel.handleInput(BACKSPACE);
+    for (const character of "bldt") panel.handleInput(character);
+
+    // Neither `bldt` nor `bt` is a substring of `build-test`.
+    expect(drawn()).toContain("build-test");
+    expect(drawn()).not.toContain("deploy-bg");
+
+    panel.dispose();
+  });
+
+  it("ranks a tight match above a scattered one, whatever the recency", async () => {
+    const source = new FakeSource();
+    source.rows = [
+      // The scattered match is the newer row, so recency alone would keep it on top.
+      view("bg-aaaaa", { name: "debug", updatedAt: 9_000 }),
+      view("bg-bbbbb", { name: "deploy-bg", updatedAt: 1_000 }),
+    ];
+    const { panel, drawn } = openPanel(source, () => 13_000, plainTheme());
+    await panel.settle();
+    const rowLine = (id: string): number =>
+      drawn()
+        .split("\n")
+        .findIndex((line) => line.includes(id));
+    expect(rowLine("bg-aaaaa")).toBeLessThan(rowLine("bg-bbbbb"));
+
+    panel.handleInput("/");
+    for (const character of "dbg") panel.handleInput(character);
+
+    // `bg` sits together in `deploy-bg` and `b` starts a word; `debug` has all
+    // three letters, but scattered through the name.
+    expect(rowLine("bg-bbbbb")).toBeLessThan(rowLine("bg-aaaaa"));
+
+    panel.dispose();
+  });
+
+  it("prefers the shorter field when two matches are as tight", async () => {
+    const source = new FakeSource();
+    source.rows = [
+      view("bg-aaaaa", { name: "build-logs-archive", updatedAt: 9_000 }),
+      view("bg-bbbbb", { name: "build", updatedAt: 1_000 }),
+    ];
+    const { panel, drawn } = openPanel(source, () => 13_000, plainTheme());
+    await panel.settle();
+    const rowLine = (id: string): number =>
+      drawn()
+        .split("\n")
+        .findIndex((line) => line.includes(id));
+
+    panel.handleInput("/");
+    for (const character of "build") panel.handleInput(character);
+
+    expect(rowLine("bg-bbbbb")).toBeLessThan(rowLine("bg-aaaaa"));
+
+    panel.dispose();
+  });
+
+  it("lights the characters it matched, and only those, inside the row", async () => {
+    const source = new FakeSource();
+    source.rows = [view("bg-aaaaa", { name: "deploy-bg" })];
+    const { panel, drawn } = openPanel(source);
+    await panel.settle();
+
+    panel.handleInput("/");
+    for (const character of "dbg") panel.handleInput(character);
+
+    const row = drawn()
+      .split("\n")
+      .find((line) => line.includes("bg-aaaaa"));
+    expect(row).toBeDefined();
+    expect(row).toContain("<bold><accent>d</accent></bold>");
+    expect(row).toContain("<bold><accent>bg</accent></bold>");
+    // The characters between matches keep the name's own colour.
+    expect(row).toContain("<text>eploy-</text>");
+    expect(plain(row ?? "")).toContain("deploy-bg");
+
+    panel.dispose();
+  });
+
+  it("finds a row by its id", async () => {
     const source = searchFixture();
     const { panel, drawn } = openPanel(source);
     await panel.settle();
 
     panel.handleInput("/");
-    for (const character of "bg-b") panel.handleInput(character);
+    for (const character of "a1b") panel.handleInput(character);
 
-    expect(drawn()).toContain("unit tests");
-    expect(drawn()).not.toContain("web build");
+    // Every id starts `bg-`, so a fuzzy query has to name the part that differs.
+    expect(drawn()).toContain("web build");
+    expect(drawn()).not.toContain("unit tests");
     expect(drawn()).not.toContain("lint run");
+
+    panel.dispose();
+  });
+
+  it("never turns a fire into a row, however well the query fits it", async () => {
+    const source = new FakeSource();
+    source.rows = [
+      view("bg-aaaaa", {
+        name: "build",
+        status: "completed",
+        exitCode: 0,
+        command: "npm run build",
+      }),
+      // The failing fire of some command loop: a record, not a row (ADR-0014).
+      view("bg-bbbbb", {
+        name: "watch loop #1",
+        parentId: "lc00001",
+        fire: 1,
+        command: "deploy deploy",
+        status: "completed",
+        exitCode: 0,
+      }),
+    ];
+    const { panel, drawn } = openPanel(source);
+    await panel.settle();
+
+    panel.handleInput("/");
+    for (const character of "deploy") panel.handleInput(character);
+
+    expect(drawn()).toContain("Nothing on this page matches the search");
+
+    panel.dispose();
+  });
+
+  it("says so when the hit came from a command the row never prints", async () => {
+    const source = new FakeSource();
+    source.rows = [view("bg-aaaaa", { name: "build", command: "make deploy" })];
+    const { panel, drawn } = openPanel(source);
+    await panel.settle();
+
+    panel.handleInput("/");
+    for (const character of "deploy") panel.handleInput(character);
+
+    const row = drawn()
+      .split("\n")
+      .find((line) => line.includes("bg-aaaaa"));
+    expect(row).toBeDefined();
+    expect(plain(row ?? "")).toContain("via command");
+    // The note is the row's own admission; there is nothing on the row to light.
+    expect(row).not.toContain("<bold><accent>deploy</accent></bold>");
+
+    panel.dispose();
+  });
+
+  it("says so when the hit came from a loop's prompt", async () => {
+    const source = new FakeSource();
+    source.rows = [loopView("lc00001", { name: "nightly", prompt: "review the diff" })];
+    const { panel, drawn } = await openOn("loops", source);
+    await panel.settle();
+
+    panel.handleInput("/");
+    for (const character of "diff") panel.handleInput(character);
+
+    const row = drawn()
+      .split("\n")
+      .find((line) => line.includes("lc00001"));
+    expect(row).toBeDefined();
+    expect(plain(row ?? "")).toContain("via prompt");
+
+    panel.dispose();
+  });
+
+  it("says so when a chain's own name is the only word the query hit", async () => {
+    const source = new FakeSource();
+    source.rows = [
+      chainView("ch-abcde", { name: "nightly", steps: ["bg-00001"], cursor: 0 }),
+      view("bg-00001", { name: "deploy", parentId: "ch-abcde" }),
+    ];
+    const { panel, drawn } = await openOn("chains", source);
+    await panel.settle();
+
+    panel.handleInput("/");
+    for (const character of "night") panel.handleInput(character);
+
+    const row = drawn()
+      .split("\n")
+      .find((line) => line.includes("ch-abcde"));
+    expect(row).toBeDefined();
+    // The row spends its name column on the queue, so `nightly` is not on it.
+    expect(plain(row ?? "")).toContain("deploy");
+    expect(plain(row ?? "")).toContain("via name");
 
     panel.dispose();
   });
@@ -1936,6 +2220,27 @@ describe("chains in the list and in the detail", () => {
     panel.dispose();
   });
 
+  it("lights the matched step inside a chain's column", async () => {
+    const source = new FakeSource();
+    source.rows = chainOf();
+    const { panel, drawn } = await openOn("chains", source);
+    await panel.settle();
+
+    panel.handleInput("/");
+    for (const character of "smo") panel.handleInput(character);
+
+    const row = drawn()
+      .split("\n")
+      .find((line) => line.includes("ch-abcde"));
+    expect(row).toBeDefined();
+    // `smoke` is a waiting step, so its own colour is muted; only the query's
+    // characters take the accent.
+    expect(row).toContain("<bold><accent>smo</accent></bold><muted>ke</muted>");
+    expect(plain(row ?? "")).toContain("build → deploy → smoke");
+
+    panel.dispose();
+  });
+
   it("counts a fire the pages never give a row, as ADR 0014 asks", async () => {
     const source = new FakeSource();
     source.rows = [
@@ -1995,6 +2300,26 @@ describe("the other sessions sharing a checkout", () => {
     panel.handleInput("o");
     await panel.settle();
     expect(drawn()).not.toContain("deploy the edge");
+
+    panel.dispose();
+  });
+
+  it("lets a query reach another session's row only behind o", async () => {
+    const source = twoSessions();
+    const { panel, drawn } = await openOn("processes", source, () => 13_000, plainTheme());
+    await panel.settle();
+
+    panel.handleInput("/");
+    for (const character of "dpl") panel.handleInput(character);
+    await panel.settle();
+    // The row exists, but `o` is what makes it part of this page.
+    expect(drawn()).toContain("Nothing on this page matches the search");
+
+    panel.handleInput("\x1bq");
+    panel.handleInput("o");
+    await panel.settle();
+    expect(drawn()).toContain("deploy the edge");
+    expect(drawn()).not.toContain("web build");
 
     panel.dispose();
   });

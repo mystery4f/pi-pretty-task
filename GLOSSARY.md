@@ -53,5 +53,5 @@ _Avoid_: dock, dashboard, overlay, task manager
 _Avoid_: status line, header, footer, ticker
 
 **Search mode**:
-面板里按 `/` 进入的过滤状态：输入即按子串匹配 Name、id、命令或 prompt、状态词与 kind 词；`alt+q` 第一次退出搜索并保留过滤条件，再按一次关闭面板。
+面板里按 `/` 进入的过滤状态：输入即按「子序列」匹配 Name、id、命令或 prompt、状态词与 kind 词（`dbg` 能命中 `deploy-bg`）。命中的字符在行内高亮；排序先看命中质量——连续命中和词首优先、字段越短越靠前——再按 `updatedAt` 降序，空查询只按时间不重排。命中的词不在行上（`command`、`prompt`，或链自己的 name 已被步骤取代）时，行尾注明 `via command` / `via prompt` / `via name`。`alt+q` 第一次退出搜索并保留过滤条件，再按一次关闭面板。
 _Avoid_: filter box, query mode, find
