@@ -534,7 +534,7 @@ describe("bg_wait", () => {
     expect(details.status).toBe("completed");
     expect(details.exitCode).toBe(0);
     expect(details.waited).toBe(true);
-    expect(elapsed).toBeLessThan(10_000);
+    expect(elapsed).toBeLessThan(3000);
     expect(resultText(result)).toContain("completed");
   });
 
