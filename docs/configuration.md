@@ -13,6 +13,8 @@
 
 语法要跟着 shell 走。cmd 写 `for /L %i in (1,1,5) do @echo tick %i`，bash 写 `for i in 1 2 3 4 5; do echo "tick $i"; sleep 2; done`。拿 POSIX 语法喂 Windows 的默认 shell 会得到 `此时不应有 i` 这类 cmd 报错，状态 `failed`、退出码 1——这不是任务失败，是命令写错了方言。
 
+连接符尤其容易骗人：cmd 里 `&` 是顺序执行，bash 里 `&` 是丢到后台，同一条 `echo A & ping -n 11 127.0.0.1 >nul & echo B` 在 cmd 下约 10 秒后才打印 B，在 bash 下 A、B 立刻都打印、ping 还在后台跑。换 shell 时把 `&` 改成 `;` 或 `&&`，别指望它跨方言同义。
+
 ### 四个键
 
 | 键 | 平台 | 取值 | 默认 |

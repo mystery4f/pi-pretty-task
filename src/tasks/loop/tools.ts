@@ -28,7 +28,7 @@ import {
 const CreateParameters = Type.Object({
   schedule: Type.String({
     description:
-      "When to fire: interval shorthand such as 30s, 10m or 2h (seconds allowed), or a five-field cron expression in local time such as 0 9 * * 1-5 (minute hour day-of-month month day-of-week; * every, 1-5 ranges, 9,17 lists, */15 steps). Six fields are refused: use the shorthand for second-level timing.",
+      "When to fire: interval shorthand such as 30s, 10m or 2h (seconds allowed), or a five-field cron expression in local time such as 0 9 * * 1-5 (minute hour day-of-month month day-of-week; * every, 1-5 ranges, 9,17 lists, */15 steps). Weekdays: 0-6 start on Sunday and 7 is Sunday too. A day-of-month and a day-of-week both given fire on either match; when only one is given it must match. Six fields are refused: use the shorthand for second-level timing.",
   }),
   prompt: Type.String({
     description:

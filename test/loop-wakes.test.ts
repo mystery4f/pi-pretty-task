@@ -35,6 +35,7 @@ async function setup() {
   const harness = createHarness(turn, { now: () => now });
   return {
     harness,
+    turn,
     advance(ms: number) {
       now += ms;
     },
@@ -53,6 +54,25 @@ async function createLoop(harness: Harness, params: Record<string, unknown> = {}
     await harness.call("loop_create", { schedule: "10s", prompt: "review the diff", ...params }),
   );
 }
+
+describe("reload", () => {
+  it("keeps a running loop armed when the module reloads before its first fire", async () => {
+    const task = await setup();
+    const created = await createLoop(task.harness, { schedule: "30s", maxFires: 1 });
+
+    // A reload is a second extension instance over the same session directory.
+    const reloaded = createHarness(task.turn, { now: () => task.now });
+    await reloaded.pump(task.now + 1_000);
+    const afterLoad = detailsOf<LoopDetails>(await reloaded.call("loop_list", { id: created.id }));
+    expect(afterLoad.status).toBe("running");
+    expect(afterLoad.fires).toBe(0);
+
+    await reloaded.pump(task.now + 31_000);
+    const fired = detailsOf<LoopDetails>(await reloaded.call("loop_list", { id: created.id }));
+    expect(fired.fires).toBe(1);
+    expect(fired.status).toBe("completed");
+  });
+});
 
 describe("wake delivery", () => {
   it("holds a wake while the agent is busy and delivers it when the agent settles", async () => {

@@ -124,6 +124,8 @@ export class TasksPanel implements Component {
   private allRows: readonly PanelTaskView[] = [];
   /** `h` shows the finished rows; until then only live work is listed. */
   private showHistory = false;
+  /** Set when the panel opened history on its own, so `h` can still close it. */
+  private historyShown = false;
   private selectedId: string | undefined;
   private listTop = 0;
   /** `l` narrows the list to loop tasks; a second press brings the process rows back. */
@@ -187,9 +189,16 @@ export class TasksPanel implements Component {
       // The loop filter narrows what the reader sees, never what the store holds.
       const kindRows = this.onlyLoops ? all.filter((row) => row.task.kind === "loop") : all;
       // Finished work is history, and history is asked for: the panel opens on what
-      // is live, and shows the past on `h` — or when nothing is left running.
+      // is live, and shows the past on `h` — or once, when nothing is left running,
+      // so an idle session is not a blank panel. That one time has to be a latch the
+      // reader can undo: forcing it on every refresh left `h` with nothing to do.
       const live = kindRows.filter((row) => row.task.status === "running");
-      this.rows = this.showHistory || live.length === 0 ? kindRows : live;
+      if (live.length > 0) this.historyShown = false;
+      else if (!this.showHistory && !this.historyShown && kindRows.length > 0) {
+        this.showHistory = true;
+        this.historyShown = true;
+      }
+      this.rows = this.showHistory ? kindRows : live;
     } catch {
       // A store that cannot list is a store with nothing to show, not a crash.
       this.rows = [];
@@ -781,10 +790,13 @@ export class TasksPanel implements Component {
     const body: string[] = [];
 
     if (this.rows.length === 0) {
-      body.push(
-        "",
-        theme.fg("dim", "  No tasks yet — run a command with bg_run and it appears here."),
-      );
+      // Hiding history on an idle session empties the list: say why instead of
+      // claiming there is nothing at all.
+      const message =
+        !this.showHistory && this.allRows.length > 0
+          ? "  History is hidden — press h to show it."
+          : "  No tasks yet — run a command with bg_run and it appears here.";
+      body.push("", theme.fg("dim", message));
       return this.listFrame(body, width);
     }
 

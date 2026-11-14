@@ -9,7 +9,7 @@ Background processes and scheduled agent wake-ups for [pi](https://github.com/ea
 Two jobs, one package:
 
 - **Task** — run a long-lived shell command in the background, watch it from a panel, kill its whole process tree.
-- **Loop / Iteration** — wake the LLM on a schedule with a preset prompt, and record every tool call of the turn that follows, so "what did that loop actually run?" has an answer.
+- **Loop / Iteration** — wake the LLM on a schedule with a preset prompt (`30s`/`10m`/`2h`, or five-field cron such as `0 9 * * 1-5`), and record every tool call of the turn that follows, so "what did that loop actually run?" has an answer. Wakes wait for an idle agent instead of interrupting a turn.
 
 The panel is a `/tasks` overlay plus a one-line status summary — no persistent widget. Keys: `↑/↓` select, `Enter` logs, `k` stop, `a` stop all, `h` history, `R` rerun, `c` path, `l` loops, `x` close.
 

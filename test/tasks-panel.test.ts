@@ -771,6 +771,31 @@ describe("history, rerun and the output path", () => {
     panel.dispose();
   });
 
+  it("lets h hide the history an idle panel opened on its own", async () => {
+    const source = new FakeSource();
+    source.rows = [
+      view("done001", { name: "build", status: "completed", exitCode: 0 }),
+      view("done002", { name: "lint", status: "completed", exitCode: 0 }),
+    ];
+    const { panel, drawn } = openPanel(source);
+    await panel.settle();
+
+    // Nothing runs, so the panel shows the past without being asked.
+    expect(drawn()).toContain("build");
+
+    panel.handleInput("h");
+    await panel.settle();
+    expect(drawn()).not.toContain("build");
+    expect(drawn()).toContain("History is hidden — press h to show it.");
+
+    // A refresh must not undo the reader's choice.
+    panel.handleInput("h");
+    await panel.settle();
+    expect(drawn()).toContain("build");
+
+    panel.dispose();
+  });
+
   it("reruns the selected task with R and selects the new row", async () => {
     const source = new FakeSource();
     source.rows = [view("run0001", { name: "server" })];
