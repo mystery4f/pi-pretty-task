@@ -8,6 +8,10 @@
  */
 
 import { afterEach, describe, expect, it } from "vitest";
+import { sessionTaskDirectory } from "../src/tasks/base/runtime-state.js";
+import { TaskSessions } from "../src/tasks/base/task-sessions.js";
+import { TaskStore } from "../src/tasks/base/task-store.js";
+import { LoopTasks } from "../src/tasks/loop/loop-tasks.js";
 import {
   SUMMARY_KEY,
   statusLineText,
@@ -398,5 +402,103 @@ describe("/tasks command", () => {
     // This session owns no task, and the other session's running one is not its
     // count: the line above the editor stays empty rather than borrowing a run.
     expect(harness.widgets.at(-1)?.lines).toEqual([]);
+  });
+
+  /**
+   * The other session's schedules are its own: this extension may look at them, but
+   * the pump drives only the scopes this session attached to. A view is a view.
+   */
+  describe("another session's loops", () => {
+    /** One checkout, two sessions: the other one's records are already on disk. */
+    async function setup() {
+      const dir = await makeTempDir();
+      cleanup.push(dir.dispose);
+      const clock = { now: Date.UTC(2026, 0, 3, 9, 0, 0) };
+      const mine: Turn = { cwd: dir.path, sessionId: "session-mine" };
+      const theirs: Turn = { cwd: dir.path, sessionId: "session-theirs" };
+      const harness = createHarness(mine, { now: () => clock.now });
+      // Written by that session's own store, as a second pi process would: nothing
+      // this session does later can be confused with the records having been made here.
+      const foreign = new LoopTasks({
+        sessions: new TaskSessions({ now: () => clock.now }),
+        now: () => clock.now,
+      });
+      const wake = await foreign.create({
+        ...theirs,
+        name: "their wake",
+        schedule: "10s",
+        prompt: "their prompt",
+      });
+      const command = await foreign.create({
+        ...theirs,
+        name: "their fire",
+        schedule: "10s",
+        command: "echo their fire",
+      });
+      return { dir, clock, harness, theirs, wake, command };
+    }
+
+    /** The other session's records as its own next reader would load them. */
+    async function theirsOnDisk(dir: string, theirs: Turn) {
+      return new TaskStore(sessionTaskDirectory(dir, theirs.sessionId)).load();
+    }
+
+    it("shows them, fires none of them, and writes nothing of theirs", async () => {
+      const { dir, clock, harness, theirs } = await setup();
+      await harness.startSession();
+
+      const { panel, closed } = await openPanel(harness);
+      panel.handleInput("2");
+      panel.handleInput("o");
+      await panel.settle();
+      const shown = panel.render(100).join("\n");
+      expect(shown).toContain("their wake");
+      expect(shown).toContain("their fire");
+
+      // Both foreign loops are due now: showing them must not arm a pump for them.
+      clock.now += 10_000;
+      expect(await harness.pump(clock.now)).toEqual([]);
+      // No wake entered this session, and no command started in that session's cwd.
+      expect(harness.messages).toEqual([]);
+
+      const [wake, command] = await theirsOnDisk(dir.path, theirs);
+      expect(wake).toMatchObject({ kind: "prompt-loop", status: "running", fires: 0 });
+      expect(command).toMatchObject({ kind: "cmd-loop", status: "running", fires: 0 });
+      expect(await theirsOnDisk(dir.path, theirs)).toHaveLength(2);
+
+      panel.handleInput("\u001bq");
+      await closed;
+    });
+
+    it("still fires this session's own loop after theirs was shown", async () => {
+      const { dir, clock, harness, theirs } = await setup();
+      await harness.startSession();
+      const mine = (
+        await harness.call("loop_create", {
+          name: "my wake",
+          schedule: "10s",
+          prompt: "keep going",
+        })
+      ).details as LoopStarted;
+
+      const { panel, closed } = await openPanel(harness);
+      panel.handleInput("2");
+      panel.handleInput("o");
+      await panel.settle();
+      expect(panel.render(100).join("\n")).toContain("their wake");
+
+      clock.now += 10_000;
+      const fired = await harness.pump(clock.now);
+      expect(fired.map((fire) => fire.task.id)).toEqual([mine.id]);
+      expect(harness.messages).toHaveLength(1);
+
+      // The foreign schedule is still untouched by this session's turn.
+      const [wake, command] = await theirsOnDisk(dir.path, theirs);
+      expect(wake).toMatchObject({ fires: 0 });
+      expect(command).toMatchObject({ fires: 0 });
+
+      panel.handleInput("\u001bq");
+      await closed;
+    });
   });
 });
