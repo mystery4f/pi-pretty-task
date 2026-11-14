@@ -86,6 +86,8 @@ describe("bg_run after", () => {
       command,
       env: { STEP_LOG: log, STEP_NAME: "build", STEP_DELAY: "400" },
     });
+    // A task of no chain stays a process task: it is never a chain of one.
+    expect((await status(harness, ahead.id)).kind).toBe("process");
     const result = await harness.call("bg_run", {
       name: "deploy",
       command,
