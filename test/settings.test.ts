@@ -11,8 +11,10 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   AGENT_DIR_ENV,
+  DEFAULT_MAX_RUNNING_TASKS,
   DEFAULT_OUTPUT_CAP_BYTES,
   DEFAULT_RETENTION_DAYS,
+  MAX_RUNNING_TASKS_ENV,
   NOTIFY_ENV,
   OUTPUT_CAP_ENV,
   RETENTION_DAYS_ENV,
@@ -37,6 +39,7 @@ describe("settings", () => {
         [OUTPUT_CAP_ENV]: "65536",
         [NOTIFY_ENV]: "off",
         [RETENTION_DAYS_ENV]: "30",
+        [MAX_RUNNING_TASKS_ENV]: "4",
         [AGENT_DIR_ENV]: "/work/agent",
         [SHELL_ENV]: "bash",
         [SHELL_PATH_ENV]: "C:\\Program Files\\Git\\bin\\bash.exe",
@@ -48,6 +51,7 @@ describe("settings", () => {
     expect(settings.outputCapBytes).toBe(65_536);
     expect(settings.notify).toBe(false);
     expect(settings.retentionDays).toBe(30);
+    expect(settings.maxRunningTasks).toBe(4);
     expect(settings.shellPolicy).toEqual({
       name: "bash",
       executable: "C:\\Program Files\\Git\\bin\\bash.exe",
@@ -63,6 +67,7 @@ describe("settings", () => {
     expect(settings.outputCapBytes).toBe(DEFAULT_OUTPUT_CAP_BYTES);
     expect(settings.notify).toBe(true);
     expect(settings.retentionDays).toBe(DEFAULT_RETENTION_DAYS);
+    expect(settings.maxRunningTasks).toBe(DEFAULT_MAX_RUNNING_TASKS);
     expect(settings.shellPolicy).toEqual({ name: "inherit", executable: "/bin/sh" });
     expect(settings.templatePaths.agentFile).toBe(
       join(homedir(), ".pi", "agent", "pretty-task.json"),
@@ -140,6 +145,32 @@ describe("settings", () => {
     ).toThrow(
       /PI_PRETTY_TASK_OUTPUT_CAP_BYTES must be a positive whole number of bytes; received "lots"/,
     );
+  });
+
+  it("caps running process tasks at twenty unless the environment says otherwise", () => {
+    // `docs/scope-v1.md` promises at most 20 running tasks; the number lives in
+    // one place and the key can move it, the way the other limits do.
+    expect(DEFAULT_MAX_RUNNING_TASKS).toBe(20);
+    expect(readSettings({ env: {}, platform: "linux" }).maxRunningTasks).toBe(20);
+    expect(
+      readSettings({ env: { [MAX_RUNNING_TASKS_ENV]: "3" }, platform: "linux" }).maxRunningTasks,
+    ).toBe(3);
+  });
+
+  it("refuses a running-task cap that is not a positive whole number of tasks", () => {
+    // `0` would refuse every start, `1.5` would round into a cap nobody asked
+    // for, and `lots` is `NaN`, which compares false against every count: the
+    // limit would never be reached and the promised 20 would silently be gone.
+    for (const raw of ["0", "-2", "1.5", "lots", ""]) {
+      expect(() =>
+        readSettings({ env: { [MAX_RUNNING_TASKS_ENV]: raw }, platform: "linux" }),
+      ).toThrow(
+        /PI_PRETTY_TASK_MAX_RUNNING_TASKS must be a positive whole number of tasks; received/,
+      );
+    }
+    expect(() =>
+      readSettings({ env: { [MAX_RUNNING_TASKS_ENV]: "lots" }, platform: "linux" }),
+    ).toThrow(/received "lots"/);
   });
 
   it("keeps the retention window at seven days for an environment that says nothing", () => {

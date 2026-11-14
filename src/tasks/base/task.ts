@@ -59,10 +59,11 @@ export interface TaskBase {
   /**
    * Epoch milliseconds of the last change a reader cares about, and the panel's
    * sort key (ADR-0010). Starts equal to `createdAt` and moves only on a real
-   * transition: start, finish, kill and interrupt of a task, a loop fire, one of
-   * that loop's iterations settling, and pause/resume/complete/retune. Output growth
-   * never moves it — a running command writes bytes every tick, which would pin
-   * the order to whichever task wrote last instead of which one changed.
+   * transition: start, finish, kill and interrupt of a task, a stop whose tree
+   * survived, a loop fire, one of that loop's iterations settling, and
+   * pause/resume/complete/retune. Output growth never moves it — a running command
+   * writes bytes every tick, which would pin the order to whichever task wrote last
+   * instead of which one changed.
    */
   updatedAt: number;
   /** Epoch milliseconds; absent while the task is still running. */
@@ -85,7 +86,11 @@ export interface ProcessTask extends TaskBase {
   exitCode?: number | null;
   /** Bytes written to the output file so far. */
   outputBytes: number;
-  /** Why the task ended abnormally, when that is known. */
+  /**
+   * Why the task ended abnormally, when that is known — or, while it is still
+   * running, why a stop could not end it: a kill that lost to a surviving tree
+   * says so here instead of leaving the record silently `running`.
+   */
   error?: string;
   /** Present exactly when the task was killed, naming who asked for the kill. */
   killReason?: KillReason;
