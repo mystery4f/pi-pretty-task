@@ -236,6 +236,12 @@ export interface ChainTask extends TaskBase {
   cursor: number;
   /** Why the chain failed, when a step of it did. */
   error?: string;
+  /**
+   * Present exactly when the chain was killed, naming who asked. A chain the user
+   * stops is ended the way a killed process is — its own steps say where it stopped
+   * (`stopped`) and what it had already got through.
+   */
+  killReason?: KillReason;
 }
 
 /** How many fires a cmd loop keeps; older ones are counted but no longer listed. */
