@@ -27,12 +27,21 @@ import type { ProcessTask } from "../base/task.js";
 
 import { parseFollowSeconds, parseTimeoutSeconds, parseWaitSeconds } from "./limits.js";
 import type { ProcessTasks, ProcessTaskView, TaskScope } from "./process-tasks.js";
+import type { CommandTemplate } from "./templates.js";
 
 const RunParameters = Type.Object({
-  command: Type.String({
-    description:
-      "Shell command to run in the background. The shell depends on the platform and on the extension's configuration; `shell` picks another one for this call. Write the command in the dialect of that shell: cmd joins with `&`, while sh and bash treat `&` as background and need `;` or `&&`. Output is stored as raw bytes.",
-  }),
+  command: Type.Optional(
+    Type.String({
+      description:
+        "Shell command to run in the background. Omit it to use the command from `template`; when both are given, this command wins. The shell depends on the platform and on the extension's configuration; `shell` picks another one for this call. Write the command in the dialect of that shell: cmd joins with `&`, while sh and bash treat `&` as background and need `;` or `&&`. Output is stored as raw bytes.",
+    }),
+  ),
+  template: Type.Optional(
+    Type.String({
+      description:
+        "Name of a command template from the project's `.pi/pretty-task.json` or the agent's `pretty-task.json`. The template fills in `command`, `cwd` and `timeoutSeconds`; an explicit field on this call wins. An unknown name is rejected with the names that do exist.",
+    }),
+  ),
   name: Type.Optional(
     Type.String({
       description:
@@ -217,8 +226,11 @@ function taskDetails(view: ProcessTaskView) {
   };
 }
 
-/** The process-task tools, bound to one store. */
-export function processTaskTools(tasks: ProcessTasks): ToolDefinition[] {
+/** The process-task tools, bound to one store and this session's templates. */
+export function processTaskTools(
+  tasks: ProcessTasks,
+  templates: ReadonlyMap<string, CommandTemplate> = new Map(),
+): ToolDefinition[] {
   const run: ToolDefinition<typeof RunParameters> = {
     name: "bg_run",
     label: "Run in background",
@@ -226,12 +238,32 @@ export function processTaskTools(tasks: ProcessTasks): ToolDefinition[] {
       "Run a shell command in the background and return a task id at once, without waiting for the command to finish. stdout and stderr are captured together in one output file.",
     parameters: RunParameters,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      // Resolve the template before any store call: an unknown name must not
+      // leave a task behind, and an explicit field on the call wins over the
+      // template's value. `env` is deliberately never templated.
+      const template = params.template === undefined ? undefined : templates.get(params.template);
+      if (params.template !== undefined && template === undefined) {
+        const known = [...templates.keys()].sort();
+        const list =
+          known.length === 0 ? "(none)" : known.map((name) => JSON.stringify(name)).join(", ");
+        return text(
+          `Unknown template ${JSON.stringify(params.template)}. Known templates: ${list}. The task was not started.`,
+        );
+      }
+
+      const command = params.command ?? template?.command;
+      if (command === undefined) {
+        return text("Either command or template is required. The task was not started.");
+      }
+      const workingDirectory = params.cwd ?? template?.cwd;
+      const timeoutSeconds = params.timeoutSeconds ?? template?.timeoutSeconds;
+
       // A bad runtime is reported before anything is spawned: a task that can
       // never be capped is worse than a rejected request.
       let timeoutMs: number | undefined;
-      if (params.timeoutSeconds !== undefined) {
+      if (timeoutSeconds !== undefined) {
         try {
-          timeoutMs = parseTimeoutSeconds(params.timeoutSeconds);
+          timeoutMs = parseTimeoutSeconds(timeoutSeconds);
         } catch (error) {
           const reason = error instanceof Error ? error.message : String(error);
           return text(`${reason} The task was not started.`);
@@ -241,11 +273,11 @@ export function processTaskTools(tasks: ProcessTasks): ToolDefinition[] {
       try {
         task = await tasks.start({
           ...scopeOf(ctx),
-          command: params.command,
+          command,
           ...(params.name === undefined ? {} : { name: params.name }),
           ...(timeoutMs === undefined ? {} : { timeoutMs }),
           ...(params.shell === undefined ? {} : { shell: params.shell }),
-          ...(params.cwd === undefined ? {} : { workingDirectory: params.cwd }),
+          ...(workingDirectory === undefined ? {} : { workingDirectory }),
           ...(params.env === undefined ? {} : { env: params.env }),
         });
       } catch (error) {

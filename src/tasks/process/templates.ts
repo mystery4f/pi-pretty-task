@@ -121,7 +121,10 @@ function parseTemplate(name: string, value: unknown, file: string): CommandTempl
 
   if (value.timeoutSeconds !== undefined) {
     if (typeof value.timeoutSeconds !== "number") {
-      fail(file, `${label}.timeoutSeconds must be a number; received ${received(value.timeoutSeconds)}`);
+      fail(
+        file,
+        `${label}.timeoutSeconds must be a number; received ${received(value.timeoutSeconds)}`,
+      );
     }
     try {
       parseTimeoutSeconds(value.timeoutSeconds);

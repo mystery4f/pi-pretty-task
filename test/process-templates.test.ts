@@ -110,9 +110,9 @@ describe("template configuration files", () => {
 
   it("rejects an entry without a command, with the file and the template", () => {
     const path = "/work/.pi/pretty-task.json";
-    expect(() => parseTemplateConfig('{ "templates": { "test": { "cwd": "app" } } }', path)).toThrow(
-      /\/work\/\.pi\/pretty-task\.json.*template "test"\.command/,
-    );
+    expect(() =>
+      parseTemplateConfig('{ "templates": { "test": { "cwd": "app" } } }', path),
+    ).toThrow(/\/work\/\.pi\/pretty-task\.json.*template "test"\.command/);
   });
 
   it("rejects a field a template does not carry, such as env", () => {
