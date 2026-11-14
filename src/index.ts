@@ -9,7 +9,11 @@
  * @author mystery4f <40482524+mystery4f@users.noreply.github.com>
  */
 
-import type { ExtensionAPI, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
+import {
+  type ExtensionAPI,
+  type ExtensionUIContext,
+  getAgentDir,
+} from "@earendil-works/pi-coding-agent";
 import type { TaskScope } from "./tasks/base/runtime-state.js";
 import { TaskSessions } from "./tasks/base/task-sessions.js";
 import { Iterations } from "./tasks/loop/iterations.js";
@@ -19,6 +23,7 @@ import { LoopWakes } from "./tasks/loop/wake-queue.js";
 import { parseOutputCapBytes } from "./tasks/process/limits.js";
 import { ProcessTasks } from "./tasks/process/process-tasks.js";
 import { resolveShellPolicy } from "./tasks/process/shell.js";
+import { loadTemplates, templateConfigPaths } from "./tasks/process/templates.js";
 import { processTaskTools } from "./tasks/process/tools.js";
 import { LOOP_WAKE_CUSTOM_TYPE, renderLoopWake, sendLoopWake } from "./ui/loop-wake.js";
 import {
@@ -42,6 +47,16 @@ export interface ExtensionOptions {
   readonly iterationCallLimit?: number;
   /** Iterations one Loop keeps; defaults to ITERATION_HISTORY_LIMIT. */
   readonly iterationHistoryLimit?: number;
+  /** Project root holding `.pi/pretty-task.json`; defaults to `process.cwd()`. */
+  readonly projectDir?: string;
+  /** Agent settings directory; defaults to pi's agent directory. */
+  readonly agentDir?: string;
+  /**
+   * Receives a configuration problem as one line, without the `pi-pretty-task:`
+   * prefix. Defaults to stderr: a bad template file must be loud at load and
+   * still leave the extension running.
+   */
+  readonly reportProblem?: (message: string) => void;
 }
 
 /** The wired extension, returned so tests can drive its clock explicitly. */
@@ -92,6 +107,18 @@ export function createExtension(
   // The shell is settled here for the same reason: a selector that names a shell
   // this platform does not have must fail the load, not the first `bg_run`.
   const shellPolicy = resolveShellPolicy({ env });
+  // Templates are configuration too, but a bad file only costs that file's
+  // names: say what is wrong, keep the extension loaded, and let the other file
+  // still supply templates.
+  const templates = loadTemplates(
+    templateConfigPaths(options.projectDir ?? process.cwd(), options.agentDir ?? getAgentDir()),
+  );
+  const reportProblem =
+    options.reportProblem ??
+    ((message: string) => {
+      process.stderr.write(`pi-pretty-task: ${message}\n`);
+    });
+  for (const problem of templates.problems) reportProblem(problem);
   const now = options.now ?? Date.now;
   const sessions = new TaskSessions({ now });
   const iterations = new Iterations({
@@ -137,7 +164,7 @@ export function createExtension(
     },
   });
 
-  for (const tool of processTaskTools(processTasks)) pi.registerTool(tool);
+  for (const tool of processTaskTools(processTasks, templates.templates)) pi.registerTool(tool);
   for (const tool of loopTaskTools(loops)) pi.registerTool(tool);
   pi.registerMessageRenderer(TASK_FINISHED_CUSTOM_TYPE, renderTaskFinished);
   pi.registerMessageRenderer(LOOP_WAKE_CUSTOM_TYPE, renderLoopWake);

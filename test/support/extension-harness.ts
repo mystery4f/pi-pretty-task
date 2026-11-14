@@ -8,6 +8,7 @@
  * @author mystery4f <40482524+mystery4f@users.noreply.github.com>
  */
 
+import { join } from "node:path";
 import type {
   AgentToolResult,
   ExtensionAPI,
@@ -18,7 +19,6 @@ import type {
   Theme,
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
-
 import type { Component, KeybindingsManager, TUI } from "@earendil-works/pi-tui";
 
 import { createExtension } from "../../src/index.js";
@@ -52,11 +52,25 @@ export interface HarnessOptions {
   readonly iterationCallLimit?: number;
   /** Iterations one loop keeps; omitted means the extension's default. */
   readonly iterationHistoryLimit?: number;
+  /**
+   * Project root holding `.pi/pretty-task.json`; defaults to the harness turn's
+   * cwd so a test never reads the repository's own configuration.
+   */
+  readonly projectDir?: string;
+  /** Agent settings directory; defaults to a missing directory beside the turn's cwd. */
+  readonly agentDir?: string;
+  /**
+   * Receives configuration problems the extension reports at load. The harness
+   * collects them into `problems`; production writes them to stderr.
+   */
+  readonly reportProblem?: (message: string) => void;
 }
 
 export interface Harness {
   /** Names of every tool the extension registered. */
   readonly toolNames: readonly string[];
+  /** Configuration problems reported while the extension loaded, oldest first. */
+  readonly problems: readonly string[];
   /** Every message sent with `sendMessage`, oldest first. */
   readonly messages: readonly SentMessage[];
   /** Custom types the extension registered a message renderer for. */
@@ -174,6 +188,7 @@ export function fakeTheme(): Theme {
  * The clock and the pump are explicit too, so no real timer drives a loop.
  */
 export function createHarness(defaultTurn: Turn, options: HarnessOptions = {}): Harness {
+  const problems: string[] = [];
   const tools: ToolDefinition[] = [];
   const renderers = new Map<string, MessageRenderer>();
   const messages: SentMessage[] = [];
@@ -279,10 +294,17 @@ export function createHarness(defaultTurn: Turn, options: HarnessOptions = {}): 
     ...(options.iterationHistoryLimit === undefined
       ? {}
       : { iterationHistoryLimit: options.iterationHistoryLimit }),
+    projectDir: options.projectDir ?? defaultTurn.cwd,
+    agentDir: options.agentDir ?? join(defaultTurn.cwd, "agent-settings"),
+    reportProblem: (message) => {
+      problems.push(message);
+      options.reportProblem?.(message);
+    },
   });
 
   return {
     toolNames: tools.map((tool) => tool.name),
+    problems,
     messages,
     rendererTypes: [...renderers.keys()],
     async call(toolName, params, turn = defaultTurn) {
