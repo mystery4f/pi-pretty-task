@@ -39,7 +39,7 @@ const RunParameters = Type.Object({
   template: Type.Optional(
     Type.String({
       description:
-        "Name of a command template from the project's `.pi/pretty-task.json` or the agent's `pretty-task.json`. The template fills in `command`, `cwd` and `timeoutSeconds`; an explicit field on this call wins. An unknown name is rejected with the names that do exist.",
+        "Name of a command template. The project's `.pi/pretty-task.json` wins over the agent's `pretty-task.json`, which sits in `$PI_CODING_AGENT_DIR` (default `~/.pi/agent`). The template fills in `command`, `cwd` and `timeoutSeconds`; an explicit field on this call wins. An unknown name is rejected with the names that do exist.",
     }),
   ),
   name: Type.Optional(
