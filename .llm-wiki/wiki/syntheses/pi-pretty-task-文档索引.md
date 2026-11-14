@@ -35,6 +35,7 @@ updated: 2026-11-14
 | [0011 id 自带你是什么](../../docs/adr/0011-ids-carry-their-kind.md) | `bg-`/`lp-`/`lc-`/`ch-` 前缀，模型与人看 id 就知道种类 |
 | [0012 面板三页、只列根、一条链一行](../../docs/adr/0012-panel-tabs-and-roots.md) | `1/2/3` 切页、只列根、链整条一行、触发与步骤不单独占行 |
 | [0013 链是第四种 kind，持有一条队列](../../docs/adr/0013-chain-is-a-task-kind-holding-a-queue.md) | `kind: "chain"`、`steps` 存 id + 游标、一次一步、只排 process |
+| [0014 子记录是记录，不是行](../../docs/adr/0014-children-are-records-not-rows.md) | 触发与步骤是普通 Task、不占列表行、可被 `bg_*` 直接查；计数含子记录；`k` 级联 |
 
 ## 工具链与代码风格
 
