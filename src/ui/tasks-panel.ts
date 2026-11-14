@@ -77,6 +77,11 @@ export interface PanelSource {
   tail(id: string): Promise<OutputTail | undefined>;
   /** Stop one task; the store ends a process tree or a loop schedule, the panel never acts. */
   stop(id: string): Promise<PanelStopResult | undefined>;
+  /**
+   * Run one task's command again as a new task; absent when the panel cannot start
+   * anything (a read-only view), in which case `R` says so instead of failing.
+   */
+  rerun?(id: string): Promise<PanelTaskView | undefined>;
 }
 
 export interface TasksPanelOptions {
@@ -113,7 +118,12 @@ export class TasksPanel implements Component {
   private mode: PanelMode = "list";
   /** Width of the frame being drawn; field values are cut against it. */
   private renderWidth = 80;
+  /** What the reader may open: the filter has already been applied. */
   private rows: readonly PanelTaskView[] = [];
+  /** Every row of the session, so the counts never depend on the filters. */
+  private allRows: readonly PanelTaskView[] = [];
+  /** `h` shows the finished rows; until then only live work is listed. */
+  private showHistory = false;
   private selectedId: string | undefined;
   private listTop = 0;
   /** `l` narrows the list to loop tasks; a second press brings the process rows back. */
@@ -173,8 +183,13 @@ export class TasksPanel implements Component {
   async refresh(): Promise<void> {
     try {
       const all = [...(await this.source.list())].sort(newestFirst);
+      this.allRows = all;
       // The loop filter narrows what the reader sees, never what the store holds.
-      this.rows = this.onlyLoops ? all.filter((row) => row.task.kind === "loop") : all;
+      const kindRows = this.onlyLoops ? all.filter((row) => row.task.kind === "loop") : all;
+      // Finished work is history, and history is asked for: the panel opens on what
+      // is live, and shows the past on `h` — or when nothing is left running.
+      const live = kindRows.filter((row) => row.task.status === "running");
+      this.rows = this.showHistory || live.length === 0 ? kindRows : live;
     } catch {
       // A store that cannot list is a store with nothing to show, not a crash.
       this.rows = [];
@@ -274,6 +289,9 @@ export class TasksPanel implements Component {
     if (data === "k") this.stopSelected();
     if (data === "a") this.stopAll();
     if (data === "l") this.toggleLoopFilter();
+    if (data === "h") this.toggleHistory();
+    if (data === "R") this.rerunSelected();
+    if (data === "c") this.showOutputPath();
   }
 
   private handleDetailInput(data: string): void {
@@ -313,6 +331,8 @@ export class TasksPanel implements Component {
       return;
     }
     if (data === "k") this.stopSelected();
+    if (data === "R") this.rerunSelected();
+    if (data === "c") this.showOutputPath();
   }
 
   private handleLoopDetailInput(data: string, task: LoopTask): void {
@@ -539,6 +559,65 @@ export class TasksPanel implements Component {
     });
   }
 
+  /** `h` shows the finished rows, or hides them again; the counts never follow it. */
+  private toggleHistory(): void {
+    this.showHistory = !this.showHistory;
+    this.notice = this.showHistory ? "showing history" : "history hidden";
+    this.enqueue(async () => {
+      await this.refresh();
+      this.paint();
+    });
+  }
+
+  /** `R` runs the selected command again; the old row stays as its own record. */
+  private rerunSelected(): void {
+    const row = this.rows[this.selectedIndex()];
+    if (row === undefined) {
+      this.notice = "No task selected.";
+      this.paint();
+      return;
+    }
+    if (row.task.kind !== "process") {
+      this.notice = "A loop is scheduled, not run; create a new one instead.";
+      this.paint();
+      return;
+    }
+    if (this.source.rerun === undefined) {
+      this.notice = "This view cannot start tasks.";
+      this.paint();
+      return;
+    }
+    const id = row.task.id;
+    this.enqueue(async () => {
+      try {
+        // Called through the source: the store, not the panel, starts the process.
+        const again = await this.source.rerun?.(id);
+        this.notice =
+          again === undefined ? `no such task: ${id}` : `ran ${id} again as ${again.task.id}`;
+        if (again !== undefined) this.selectedId = again.task.id;
+      } catch (error) {
+        this.notice = `rerun failed: ${messageOf(error)}`;
+      }
+      await this.refresh();
+      this.paint();
+    });
+  }
+
+  /** `c` puts the output path where it can be read, since the panel cannot copy it. */
+  private showOutputPath(): void {
+    const row = this.rows[this.selectedIndex()];
+    if (row === undefined) {
+      this.notice = "No task selected.";
+      this.paint();
+      return;
+    }
+    this.notice =
+      row.task.kind === "process"
+        ? `output: ${row.task.outputPath}`
+        : "a loop writes no output file";
+    this.paint();
+  }
+
   // ---- data ----------------------------------------------------------------
   private detailRow(): PanelTaskView | undefined {
     return this.rows.find((row) => row.task.id === this.detailId);
@@ -615,19 +694,85 @@ export class TasksPanel implements Component {
     return lines;
   }
 
-  /** Counts for the title band: what is running, how many loops, how many finished. */
-  private listSubtitle(): string {
-    const running = this.rows.filter((row) => row.task.status === "running").length;
-    const paused = this.rows.filter((row) => row.task.status === "paused").length;
-    const loops = this.rows.filter((row) => row.task.kind === "loop").length;
-    const finished = this.rows.length - running - paused;
-    const parts = [`${String(running)} running`];
-    if (loops > 0) parts.push(`${String(loops)} loop${loops === 1 ? "" : "s"}`);
-    if (finished > 0) parts.push(`${String(finished)} finished`);
-    if (paused > 0) parts.push(`${String(paused)} paused`);
-    if (this.onlyLoops) parts.push("loops only");
-    parts.push("newest first");
-    return parts.join(" · ");
+  /**
+   * The list's header, in the shape of the two-row banner the other task plugin
+   * draws above its editor: a ruled title, then one tally per ending. The counts
+   * come from every row, so a filter can never hide a failure.
+   */
+  private listHeader(width: number): string[] {
+    const theme = this.theme;
+    const heading = theme.fg("borderMuted", "──") + theme.fg("text", " Background Tasks ");
+    const rule = Math.max(0, width - visibleWidth("── Background Tasks "));
+    return [heading + theme.fg("borderMuted", "─".repeat(rule)), ` ${this.countsLine()} `];
+  }
+
+  /** One `dot label number` per ending, in the order the reader cares about. */
+  private countsLine(): string {
+    const theme = this.theme;
+    const counts = { running: 0, succeeded: 0, failed: 0, timeout: 0, killed: 0 };
+    for (const row of this.allRows) {
+      const task = row.task;
+      switch (task.status) {
+        case "running":
+        case "paused":
+          // A paused loop is still owed a turn, so it stands with the live work.
+          counts.running += 1;
+          break;
+        case "completed":
+          counts.succeeded += 1;
+          break;
+        case "failed":
+          counts.failed += 1;
+          break;
+        case "killed":
+        case "interrupted":
+          // Only a process carries a kill reason; a loop is never killed by a limit.
+          if (task.kind === "process" && task.killReason === "timeout") counts.timeout += 1;
+          else counts.killed += 1;
+          break;
+      }
+    }
+    const parts: readonly (readonly [ThemeColor, string, number])[] = [
+      ["accent", "Running", counts.running],
+      ["success", "Succeeded", counts.succeeded],
+      ["error", "Failed", counts.failed],
+      ["warning", "Timeout", counts.timeout],
+      ["muted", "Killed", counts.killed],
+    ];
+    return parts
+      .map(
+        ([colour, label, count]) =>
+          `${theme.fg(colour, "●")} ${theme.fg("muted", label)} ${theme.fg("text", String(count))}`,
+      )
+      .join("  ");
+  }
+
+  /** The list's keys: the replaced panel's set, plus the loop filter this plugin adds. */
+  private listFooter(): string {
+    return "↑/↓ · Enter logs · k stop · a stop all · h history · R rerun · c path · l loops · x close";
+  }
+
+  /** The box around the rows: the header sits above it, the keys inside the bottom. */
+  private listFrame(body: string[], width: number): string[] {
+    const theme = this.theme;
+    const inner = Math.max(1, width - 2);
+    const edge = (glyph: string): string => theme.fg("borderAccent", glyph);
+    const padded = (text: string, room: number): string =>
+      text + " ".repeat(Math.max(0, room - visibleWidth(text)));
+    const row = (content = ""): string => `${edge("│")}${padded(content, inner)}${edge("│")}`;
+
+    const lines = [
+      ...this.listHeader(width).map((line) => padded(line, width)),
+      edge(`╭${"─".repeat(inner)}╮`),
+    ];
+    for (const line of body) lines.push(row(line));
+    // The keys are cut while still plain text: cutting a coloured string can slice an
+    // escape in half and leave the border one column off.
+    const keys = this.listFooter();
+    const footer = keys.length <= inner - 1 ? keys : `${keys.slice(0, inner - 2)}…`;
+    lines.push(row(), row(theme.fg("dim", ` ${footer}`)));
+    lines.push(edge(`╰${"─".repeat(inner)}╯`));
+    return lines;
   }
 
   private renderList(width: number): string[] {
@@ -640,7 +785,7 @@ export class TasksPanel implements Component {
         "",
         theme.fg("dim", "  No tasks yet — run a command with bg_run and it appears here."),
       );
-      return this.frame("tasks", this.listSubtitle(), body, "x close", width);
+      return this.listFrame(body, width);
     }
 
     const visible = this.rows.slice(this.listTop, this.listTop + LIST_VISIBLE_ROWS);
@@ -658,13 +803,7 @@ export class TasksPanel implements Component {
       );
     }
     if (this.notice !== undefined) body.push(theme.fg("warning", `  ${this.notice}`));
-    return this.frame(
-      "tasks",
-      this.listSubtitle(),
-      body,
-      "↑/↓ select · Enter details · k stop · a stop all · l loops · x close",
-      width,
-    );
+    return this.listFrame(body, width);
   }
 
   private selectedIndex(): number {
@@ -747,7 +886,7 @@ export class TasksPanel implements Component {
       `task: ${task.name}`,
       `${task.id} · ${task.status} · ${live}`,
       body,
-      "↑/↓ scroll · r follow · ← list · k stop · x close",
+      "↑/↓ scroll · r follow · ← list · k stop · R rerun · c path · x close",
       width,
     );
   }

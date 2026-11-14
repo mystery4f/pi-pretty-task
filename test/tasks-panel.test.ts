@@ -126,6 +126,15 @@ class FakeSource implements PanelSource {
     if (row === undefined) return undefined;
     return { outcome: "killed", view: row };
   }
+  readonly reran: string[] = [];
+
+  /** Rerunning answers with a new row; the old one stays, as the store's would. */
+  async rerun(id: string): Promise<PanelTaskView | undefined> {
+    this.reran.push(id);
+    const row = this.rows.find((candidate) => candidate.task.id === id);
+    if (row === undefined || row.task.kind !== "process") return undefined;
+    return { ...row, task: { ...row.task, id: `${id}2`, name: `${row.task.name} again` } };
+  }
 }
 
 interface Opened {
@@ -366,7 +375,7 @@ describe("detail view", () => {
     await panel.settle();
 
     expect(drawn()).toContain("nightly build");
-    expect(drawn()).toContain("Enter details");
+    expect(drawn()).toContain("Enter logs");
 
     panel.dispose();
   });
@@ -648,7 +657,7 @@ describe("the loop detail view", () => {
     panel.handleInput(LEFT);
     panel.handleInput(LEFT);
     await panel.settle();
-    expect(drawn()).toContain("Enter details");
+    expect(drawn()).toContain("Enter logs");
 
     panel.dispose();
   });
@@ -707,6 +716,101 @@ describe("the loop detail view", () => {
 
     expect(source.stopped).toEqual(["loop01"]);
     expect(drawn()).toContain("stopped loop01 · completed");
+
+    panel.dispose();
+  });
+});
+
+describe("the list header", () => {
+  it("tallies every ending above the rows, whatever the filters hide", async () => {
+    const source = new FakeSource();
+    source.rows = [
+      view("run0001", { name: "server", status: "running" }),
+      view("done001", { name: "build", status: "completed", exitCode: 0 }),
+      view("bad0001", { name: "lint", status: "failed" }),
+      view("slow001", { name: "deploy", status: "killed", killReason: "timeout" }),
+      view("kill001", { name: "watch", status: "killed", killReason: "user" }),
+    ];
+    const { panel, drawn } = openPanel(source);
+    await panel.settle();
+
+    const header = drawn().split("\n").slice(0, 2).join("\n");
+    expect(header).toContain("Background Tasks");
+    for (const label of ["Running", "Succeeded", "Failed", "Timeout", "Killed"]) {
+      expect(header).toContain(`<muted>${label}</muted>`);
+    }
+
+    // Only the running row is live, so history stays out of the list until `h`.
+    expect(drawn()).toContain("server");
+    expect(drawn()).not.toContain("lint");
+
+    panel.dispose();
+  });
+});
+
+describe("history, rerun and the output path", () => {
+  it("shows finished rows on h and hides them again", async () => {
+    const source = new FakeSource();
+    source.rows = [
+      view("run0001", { name: "server", status: "running" }),
+      view("done001", { name: "build", status: "completed", exitCode: 0 }),
+    ];
+    const { panel, drawn } = openPanel(source);
+    await panel.settle();
+    expect(drawn()).not.toContain("build");
+
+    panel.handleInput("h");
+    await panel.settle();
+    expect(drawn()).toContain("build");
+    expect(drawn()).toContain("showing history");
+
+    panel.handleInput("h");
+    await panel.settle();
+    expect(drawn()).not.toContain("build");
+
+    panel.dispose();
+  });
+
+  it("reruns the selected task with R and selects the new row", async () => {
+    const source = new FakeSource();
+    source.rows = [view("run0001", { name: "server" })];
+    const { panel, drawn } = openPanel(source);
+    await panel.settle();
+
+    panel.handleInput("R");
+    await panel.settle();
+
+    expect(source.reran).toEqual(["run0001"]);
+    expect(drawn()).toContain("ran run0001 again as run00012");
+
+    panel.dispose();
+  });
+
+  it("refuses to rerun a loop row", async () => {
+    const source = new FakeSource();
+    source.rows = [loopView("loop01", { name: "review loop" })];
+    const { panel, drawn } = openPanel(source);
+    await panel.settle();
+
+    panel.handleInput("R");
+    await panel.settle();
+
+    expect(source.reran).toEqual([]);
+    expect(drawn()).toContain("A loop is scheduled, not run");
+
+    panel.dispose();
+  });
+
+  it("shows the output path with c", async () => {
+    const source = new FakeSource();
+    source.rows = [view("run0001", { name: "server" })];
+    const { panel, drawn } = openPanel(source);
+    await panel.settle();
+
+    panel.handleInput("c");
+    await panel.settle();
+
+    expect(drawn()).toContain("output: /work/.pi/tasks/session/run0001.output");
 
     panel.dispose();
   });

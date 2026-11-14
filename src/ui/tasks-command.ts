@@ -81,6 +81,17 @@ export function panelSourceFor(
       }
       return processes.stop(scope, id);
     },
+    async rerun(id) {
+      // Rerunning adds a row; it never rewrites the record the reader is looking at.
+      const again = await processes.rerun(scope, id);
+      return again === undefined
+        ? undefined
+        : {
+            task: again.task,
+            elapsedMs: Math.max(0, (again.task.endedAt ?? now()) - again.task.createdAt),
+            outputBytes: again.outputBytes,
+          };
+    },
   };
 }
 

@@ -269,7 +269,22 @@ export class ProcessTasks {
 
     return task;
   }
-
+  /**
+   * Start one task's command again as a new record. The old row stays: rerunning
+   * adds history rather than rewriting it, so the reader keeps both outcomes.
+   */
+  async rerun(scope: TaskScope, id: string): Promise<ProcessTaskView | undefined> {
+    const previous = await this.get(scope, id);
+    if (previous === undefined || previous.task.kind !== "process") return undefined;
+    const task = await this.start({
+      cwd: scope.cwd,
+      sessionId: scope.sessionId,
+      command: previous.task.command,
+      name: previous.task.name,
+      workingDirectory: previous.task.cwd,
+    });
+    return this.view(await this.session(scope), task);
+  }
   /** Every process task of the session, oldest first, including loaded history. */
   async list(scope: TaskScope): Promise<ProcessTaskView[]> {
     const session = await this.session(scope);
