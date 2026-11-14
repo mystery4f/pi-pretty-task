@@ -226,6 +226,73 @@ function taskDetails(view: ProcessTaskView) {
   };
 }
 
+/**
+ * Read by the model, so it has to say plainly why a freshly written template is
+ * not in the list yet: the file is read once at load, not per call.
+ */
+const RELOAD_NOTE =
+  "Templates are read when the extension loads, so a file edited during this session applies only after /reload or a new session.";
+/**
+ * The tool description carries the template names, because an agent cannot read
+ * `.pi/pretty-task.json` on its own: without this line the names are only
+ * discovered by failing a call. The budget keeps the description short enough
+ * to stay in a model's attention even with a large template file.
+ *
+ * @author mystery4f <40482524+mystery4f@users.noreply.github.com>
+ */
+function runDescription(templates: ReadonlyMap<string, CommandTemplate>): string {
+  const base =
+    "Run a shell command in the background and return a task id at once, without waiting for the command to finish. stdout and stderr are captured together in one output file.";
+  const names = [...templates.keys()].sort();
+  if (names.length === 0) {
+    return `${base} No command templates are configured, so \`template\` is rejected. ${RELOAD_NOTE}`;
+  }
+  // Three shapes, cheapest that still fits: every name with its command, then names
+  // alone, then as many names as the budget holds. The description must not grow
+  // with the file, or a large `pretty-task.json` would bloat every request.
+  const entries = names.map(
+    (name) => `${name} (${commandHint(templates.get(name)?.command ?? "")})`,
+  );
+  const list =
+    withinBudget(entries, TEMPLATE_BUDGET) ??
+    withinBudget(names, TEMPLATE_BUDGET) ??
+    clipped(names, TEMPLATE_BUDGET);
+  return `${base} Command templates available here: ${list}. ${RELOAD_NOTE}`;
+}
+
+/** Characters the template list may take in the description, commands included. */
+const TEMPLATE_BUDGET = 300;
+
+/** The whole list, or nothing when it does not fit. */
+function withinBudget(parts: readonly string[], budget: number): string | undefined {
+  const shown: string[] = [];
+  let room = budget;
+  for (const part of parts) {
+    if (part.length > room) return undefined;
+    shown.push(part);
+    room -= part.length + 2;
+  }
+  return shown.join(", ");
+}
+
+/** As many parts as fit, with an ellipsis standing for the rest. */
+function clipped(parts: readonly string[], budget: number): string {
+  const shown: string[] = [];
+  let room = budget;
+  for (const part of parts) {
+    if (part.length + 1 > room) break;
+    shown.push(part);
+    room -= part.length + 2;
+  }
+  return `${shown.join(", ")}…`;
+}
+/** One template's command on a single line, short enough to sit in a sentence. */
+function commandHint(command: string): string {
+  const flat = command.replace(/\s+/g, " ").trim();
+  const room = 60;
+  return flat.length <= room ? flat : `${flat.slice(0, room - 1)}…`;
+}
+
 /** The process-task tools, bound to one store and this session's templates. */
 export function processTaskTools(
   tasks: ProcessTasks,
@@ -234,8 +301,7 @@ export function processTaskTools(
   const run: ToolDefinition<typeof RunParameters> = {
     name: "bg_run",
     label: "Run in background",
-    description:
-      "Run a shell command in the background and return a task id at once, without waiting for the command to finish. stdout and stderr are captured together in one output file.",
+    description: runDescription(templates),
     parameters: RunParameters,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       // Resolve the template before any store call: an unknown name must not
@@ -244,10 +310,17 @@ export function processTaskTools(
       const template = params.template === undefined ? undefined : templates.get(params.template);
       if (params.template !== undefined && template === undefined) {
         const known = [...templates.keys()].sort();
+        // The error is read in context too, so it lists the first names and says
+        // how many there are instead of dumping a large file.
+        const shownNames = known.slice(0, 20).map((name) => JSON.stringify(name));
         const list =
-          known.length === 0 ? "(none)" : known.map((name) => JSON.stringify(name)).join(", ");
+          known.length === 0
+            ? "(none)"
+            : known.length <= 20
+              ? shownNames.join(", ")
+              : `${shownNames.join(", ")}, … (${String(known.length)} in total)`;
         return text(
-          `Unknown template ${JSON.stringify(params.template)}. Known templates: ${list}. The task was not started.`,
+          `Unknown template ${JSON.stringify(params.template)}. Known templates: ${list}. The task was not started. ${RELOAD_NOTE}`,
         );
       }
 

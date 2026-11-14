@@ -168,8 +168,9 @@ bg_run({ "template": "test" })
 模板字段与 `bg_run` 的同名参数含义相同：`cwd` 仍按会话目录解析，`timeoutSeconds` 仍受上面的上限约束。调用里显式给出的 `command`、`cwd`、`timeoutSeconds` 优先于模板，模板不会悄悄盖掉它们。模板不携带 `env`，需要环境变量的调用自己传。
 名字不存在时任务不会创建，错误信息列出当前已知的名字：
 ```
-Unknown template "tset". Known templates: "lint", "test". The task was not started.
+Unknown template "tset". Known templates: "lint", "test". The task was not started. Templates are read when the extension loads, so a file edited during this session applies only after /reload or a new session.
 ```
+模板文件**只在扩展加载时读一次**。会话进行中改文件，当前会话里名字、命令、`bg_run` 的描述都不会变，新模板要等 `/reload` 或新会话才可用——工具描述与报错都写着这句，避免模型以为写了没生效。描述本身就是提示词前缀的一部分：文件内容一变，下次加载的描述文字就变，那一段缓存要重付一次；内容没变则逐字节相同，重载不花钱。增删流程与校验步骤见插件自带的 `skills/pretty-task-templates/SKILL.md`。
 任一文件解析失败只影响该文件：错误写到 stderr，带上文件路径和具体位置（例如 `invalid JSON (...)`、`template "test".command must be a non-empty string`），扩展继续加载，另一个文件里的模板照常可用。
 
 ## 为什么配置只从一个地方读

@@ -22,7 +22,15 @@ import {
 } from "@earendil-works/pi-tui";
 import { formatBytes, formatClockTime, formatDuration } from "../tasks/base/format.js";
 import type { OutputTail } from "../tasks/base/output.js";
-import type { LlmLoopTask, Task, TaskKind } from "../tasks/base/task.js";
+import type {
+  CmdLoopTask,
+  FireOutcome,
+  FireRecord,
+  LlmLoopTask,
+  LoopBase,
+  Task,
+  TaskKind,
+} from "../tasks/base/task.js";
 import type {
   Iteration,
   IterationCall,
@@ -54,6 +62,9 @@ const REFRESH_MS = 1000;
 
 /** Longest query a reader can paste or type; more than this is a command, not a filter. */
 const QUERY_MAX_LENGTH = 120;
+
+/** Fires the list row's strip shows: the newest three, oldest at the left (ADR-0015). */
+const STRIP_CELLS = 3;
 
 /** One task as the panel reads it: the record plus the numbers the list shows. */
 export interface PanelTaskView {
@@ -232,9 +243,13 @@ export class TasksPanel implements Component {
    */
   private applyFilters(): void {
     // The loop filter narrows what the reader sees, never what the store holds.
-    const kindRows = this.onlyLoops
-      ? this.allRows.filter((row) => row.task.kind === "llm-loop")
-      : this.allRows;
+    // A fire is a child record, not a row: the owning loop's detail lists it, and
+    // `bg_status` still answers for it directly (ADR-0014). The loop filter keeps
+    // both schedules, prompt and command alike (ADR-0015).
+    const roots = this.allRows.filter(
+      (row) => row.task.kind !== "process" || row.task.parentId === undefined,
+    );
+    const kindRows = this.onlyLoops ? roots.filter((row) => row.task.kind !== "process") : roots;
     const matched =
       this.query.length === 0
         ? kindRows
@@ -382,14 +397,25 @@ export class TasksPanel implements Component {
       this.handleLoopDetailInput(data, row.task);
       return;
     }
+    if (row?.task.kind === "cmd-loop") {
+      this.handleCmdLoopDetailInput(data, row.task);
+      return;
+    }
     this.handleProcessDetailInput(data);
   }
 
   /** A process detail scrolls its output; a loop detail walks its iterations instead. */
   private handleProcessDetailInput(data: string): void {
     if (matchesKey(data, "left")) {
+      const task = this.detailRow()?.task;
+      if (task?.kind === "process" && task.parentId !== undefined) {
+        // A fire opened from its loop: the left arrow goes back to that loop, so
+        // the reader never loses the schedule behind the run (ADR-0014).
+        this.detailId = task.parentId;
+        this.paint();
+        return;
+      }
       this.mode = "list";
-      this.paint();
       return;
     }
     if (matchesKey(data, "up")) {
@@ -446,6 +472,88 @@ export class TasksPanel implements Component {
       return;
     }
     if (data === "k") this.stopSelected();
+  }
+
+  /**
+   * A command loop detail walks its fires newest first; Enter opens the selected
+   * fire's own process record, an ordinary task detail (ADR-0014).
+   */
+  private handleCmdLoopDetailInput(data: string, task: CmdLoopTask): void {
+    if (matchesKey(data, "left")) {
+      this.mode = "list";
+      this.iterationTop = 0;
+      this.paint();
+      return;
+    }
+    if (matchesKey(data, "up")) {
+      this.moveFire(-1, task);
+      return;
+    }
+    if (matchesKey(data, "down")) {
+      this.moveFire(1, task);
+      return;
+    }
+    if (matchesKey(data, "pageUp")) {
+      this.moveFire(-LIST_VISIBLE_ROWS, task);
+      return;
+    }
+    if (matchesKey(data, "pageDown")) {
+      this.moveFire(LIST_VISIBLE_ROWS, task);
+      return;
+    }
+    if (matchesKey(data, "enter") || matchesKey(data, "right")) {
+      this.openFire();
+      return;
+    }
+    // On the loop row `k` stops the schedule and cascades to its running fire.
+    if (data === "k") this.stopSelected();
+  }
+
+  /** Walk the newest-first fire list, keeping the selected row on screen. */
+  private moveFire(delta: number, task: CmdLoopTask): void {
+    const newestFirst = [...task.fireHistory].reverse();
+    if (newestFirst.length === 0) return;
+    const selected = this.currentFire(task);
+    const current = newestFirst.findIndex((fire) => fire.fire === selected?.fire);
+    const base = current === -1 ? 0 : current;
+    const next = Math.min(newestFirst.length - 1, Math.max(0, base + delta));
+    const chosen = newestFirst[next];
+    if (chosen === undefined) return;
+    this.iterationFire = chosen.fire;
+    if (next < this.iterationTop) this.iterationTop = next;
+    if (next >= this.iterationTop + LIST_VISIBLE_ROWS) {
+      this.iterationTop = next - LIST_VISIBLE_ROWS + 1;
+    }
+    this.paint();
+  }
+
+  /** Enter on a fire: its process record, or a notice when it never ran. */
+  private openFire(): void {
+    const row = this.detailRow();
+    if (row === undefined || row.task.kind !== "cmd-loop") return;
+    const fire = this.currentFire(row.task);
+    if (fire === undefined) {
+      this.notice = "No fire to open yet — this loop has not fired.";
+      this.paint();
+      return;
+    }
+    if (fire.taskId === undefined) {
+      this.notice =
+        fire.outcome === "skipped"
+          ? `fire #${String(fire.fire)} was skipped: the previous fire was still running.`
+          : `fire #${String(fire.fire)} left no process record (${fire.outcome}).`;
+      this.paint();
+      return;
+    }
+    this.iterationFire = fire.fire;
+    this.detailId = fire.taskId;
+    this.mode = "detail";
+    this.following = true;
+    this.scrollBack = 0;
+    this.enqueue(async () => {
+      await this.readTail();
+      this.paint();
+    });
   }
 
   /** The iteration view scrolls the turn's calls; the left arrow goes back to the loop. */
@@ -543,9 +651,13 @@ export class TasksPanel implements Component {
     this.scrollBack = 0;
     this.callTop = 0;
     const row = this.detailRow();
-    // A loop opens on its newest iteration; a process opens on the tail of its output.
+    // A loop opens on its newest history row; a process opens on its output tail.
     this.iterationFire =
-      row?.task.kind === "llm-loop" ? row.task.iterations.at(-1)?.fire : undefined;
+      row?.task.kind === "llm-loop"
+        ? row.task.iterations.at(-1)?.fire
+        : row?.task.kind === "cmd-loop"
+          ? row.task.fireHistory.at(-1)?.fire
+          : undefined;
     this.iterationTop = 0;
     this.enqueue(async () => {
       await this.readTail();
@@ -579,7 +691,9 @@ export class TasksPanel implements Component {
   }
 
   private stopSelected(): void {
-    const id = this.selectedId;
+    // In a task detail `k` stops what is open: an expanded fire is its own record,
+    // so stopping it must not end the schedule behind it (ADR-0015).
+    const id = this.mode === "detail" ? this.detailId : this.selectedId;
     if (id === undefined) return;
     this.enqueue(async () => {
       let result: PanelStopResult | undefined;
@@ -694,16 +808,24 @@ export class TasksPanel implements Component {
       this.paint();
       return;
     }
+    const task = row.task;
     this.notice =
-      row.task.kind === "process"
-        ? `output: ${row.task.outputPath}`
-        : "a loop writes no output file";
+      task.kind === "process"
+        ? `output: ${task.outputPath}`
+        : task.kind === "cmd-loop" && task.lastOutputPath !== undefined
+          ? `output: ${task.lastOutputPath}`
+          : "a loop writes no output file";
     this.paint();
   }
 
   // ---- data ----------------------------------------------------------------
   private detailRow(): PanelTaskView | undefined {
-    return this.rows.find((row) => row.task.id === this.detailId);
+    return (
+      this.rows.find((row) => row.task.id === this.detailId) ??
+      // A fire is not a row, so a fire detail is found among the children: the
+      // panel opened it from its loop, and `←` goes back there (ADR-0014).
+      this.allRows.find((row) => row.task.id === this.detailId)
+    );
   }
 
   /** The iteration under the cursor, or the newest one when the store trimmed the pick. */
@@ -713,6 +835,15 @@ export class TasksPanel implements Component {
       if (found !== undefined) return found;
     }
     return task.iterations.at(-1);
+  }
+
+  /** The fire under the cursor, or the newest one when the history cap trimmed it. */
+  private currentFire(task: CmdLoopTask): FireRecord | undefined {
+    if (this.iterationFire !== undefined) {
+      const found = task.fireHistory.find((fire) => fire.fire === this.iterationFire);
+      if (found !== undefined) return found;
+    }
+    return task.fireHistory.at(-1);
   }
 
   private async readTail(): Promise<void> {
@@ -933,7 +1064,18 @@ export class TasksPanel implements Component {
     const right = theme.fg("dim", rightText(row, this.now()));
     const growth = this.growthText(row);
 
-    const head = ` ${pointer} ${dot} ${name} ${id} ${separator} ${kind} ${status}${exit} `;
+    const headPlain = ` ${pointer} ${dot} ${name} ${id} ${separator} ${kind} ${status}${exit} `;
+    // The strip is a command loop's own column: the newest fires, oldest left, so a
+    // failure count can never hide a run that never happened (ADR-0015). It drops
+    // its oldest cells on a narrow row and disappears entirely before wrapping.
+    const strip =
+      task.kind === "cmd-loop"
+        ? this.fireStrip(
+            task,
+            width - 2 - visibleWidth(headPlain) - visibleWidth(right) - visibleWidth(growth) - 2,
+          )
+        : "";
+    const head = strip === "" ? headPlain : `${headPlain}${strip} `;
     // The numbers sit against the right edge so a column of sizes can be compared
     // by eye, which is what a reader does with them.
     const tail = `${right}${growth}`;
@@ -946,12 +1088,32 @@ export class TasksPanel implements Component {
       : line;
   }
 
+  /**
+   * The fire strip: newest STRIP_CELLS fires, oldest left, one coloured cell each.
+   * On a narrow row the oldest cells drop first, and when nothing fits the strip is
+   * omitted rather than wrapped, so the row keeps its shape (ADR-0015).
+   */
+  private fireStrip(task: CmdLoopTask, room: number): string {
+    const theme = this.theme;
+    const newest = task.fireHistory.slice(-STRIP_CELLS);
+    // Widths are counted on the bare glyphs, so a theme's escapes never cost a
+    // cell its place in the strip.
+    let cells = newest.map((fire) => {
+      const plain = `#${String(fire.fire)}${FIRE_MARK[fire.outcome]}`;
+      return { plain, themed: theme.fg(FIRE_COLOUR[fire.outcome], plain) };
+    });
+    const fitted = (): number =>
+      cells.reduce((total, cell) => total + cell.plain.length, 0) + Math.max(0, cells.length - 1);
+    while (cells.length > 0 && fitted() > room) cells = cells.slice(1);
+    return cells.map((cell) => cell.themed).join(" ");
+  }
+
   private renderDetail(width: number): string[] {
     const row = this.detailRow();
     if (row === undefined) return this.renderList(width);
-    return row.task.kind === "llm-loop"
-      ? this.renderLoopDetail(row, width)
-      : this.renderProcessDetail(width);
+    if (row.task.kind === "llm-loop") return this.renderLoopDetail(row, width);
+    if (row.task.kind === "cmd-loop") return this.renderCommandLoopDetail(row, width);
+    return this.renderProcessDetail(width);
   }
 
   private renderProcessDetail(width: number): string[] {
@@ -1083,6 +1245,86 @@ export class TasksPanel implements Component {
     );
   }
 
+  /** A command loop detail: schedule facts, then the fires it produced, newest first. */
+  private renderCommandLoopDetail(row: PanelTaskView, width: number): string[] {
+    const theme = this.theme;
+    const task = row.task;
+    if (task.kind !== "cmd-loop") return this.renderList(width);
+    const colour = STATUS_COLOUR[task.status];
+    const envCount = Object.keys(task.env ?? {}).length;
+    const body: string[] = [
+      this.field("Status", theme.fg(colour, task.status)),
+      this.field("Kind", task.kind),
+      this.field("Runtime", formatDuration(row.elapsedMs)),
+      this.field("Updated", this.updatedText(task.updatedAt)),
+      this.field("Schedule", task.schedule),
+      this.field("Fires", firesText(task)),
+      this.field("Next fire", nextFireText(task, row)),
+      this.field(
+        "Last fire",
+        task.lastFireAt === undefined ? "—" : formatClockTime(task.lastFireAt),
+      ),
+    ];
+    if (task.expiresAt !== undefined) {
+      body.push(this.field("Expires", formatClockTime(task.expiresAt)));
+    }
+    if (task.endedAt !== undefined) {
+      body.push(this.field("Ended", formatClockTime(task.endedAt)));
+    }
+    if (task.error !== undefined) body.push(this.field("Error", theme.fg(colour, task.error)));
+    body.push(this.field("Command", singleLine(task.command, Math.max(1, width - 14))));
+    if (task.cwd !== undefined) body.push(this.field("CWD", task.cwd));
+    body.push(
+      this.field(
+        "Env",
+        envCount === 0 ? "—" : `${String(envCount)} variable${envCount === 1 ? "" : "s"}`,
+      ),
+    );
+    body.push(this.field("Wake on failure", task.wakeOnFailure === false ? "off" : "on"));
+    body.push(
+      this.field("Last exit", task.lastExitCode === undefined ? "—" : String(task.lastExitCode)),
+    );
+    if (task.lastOutputPath !== undefined) {
+      body.push(this.field("Last output", task.lastOutputPath));
+    }
+    body.push(
+      this.field(
+        "Size",
+        task.lastOutputBytes === undefined ? "—" : formatBytes(task.lastOutputBytes),
+      ),
+    );
+    body.push("", theme.fg("muted", firesHeading(task)));
+
+    const newestFirst = [...task.fireHistory].reverse();
+    if (newestFirst.length === 0) {
+      body.push(theme.fg("dim", "  no fire recorded yet"));
+    } else {
+      const selected = this.currentFire(task);
+      const top = Math.min(
+        Math.max(0, this.iterationTop),
+        Math.max(0, newestFirst.length - LIST_VISIBLE_ROWS),
+      );
+      const visible = newestFirst.slice(top, top + LIST_VISIBLE_ROWS);
+      if (top > 0) body.push(theme.fg("dim", `  … ${String(top)} newer above`));
+      for (const fire of visible) {
+        const marker = fire.fire === selected?.fire ? theme.fg("accent", "›") : " ";
+        const text = fireLine(fire);
+        body.push(`${marker} ${truncateToWidth(text, Math.max(1, width - 4), "…", false)}`);
+      }
+      const below = newestFirst.length - top - visible.length;
+      if (below > 0) body.push(theme.fg("dim", `  … ${String(below)} older below`));
+    }
+
+    if (this.notice !== undefined) body.push(theme.fg("warning", `  ${this.notice}`));
+    return this.frame(
+      `loop: ${task.name}`,
+      `${task.id} · ${task.status} · ${task.schedule}`,
+      body,
+      "↑/↓ select · Enter fire · ← list · k stop · alt+q close",
+      width,
+    );
+  }
+
   /** An iteration detail: the tool calls that turn made, oldest first; `←` goes back. */
   private renderIterationDetail(width: number): string[] {
     const theme = this.theme;
@@ -1190,7 +1432,10 @@ function dotColour(task: Task): ThemeColor {
 /** Exit column: a process has a code, a loop has fires instead. */
 function exitText(task: Task): string {
   if (task.kind === "llm-loop") return "";
-  return task.exitCode === undefined ? "" : `exit ${String(task.exitCode)}`;
+  // A command loop carries the code of its newest fire; the fires themselves are
+  // rows in its detail (ADR-0015).
+  const code = task.kind === "cmd-loop" ? task.lastExitCode : task.exitCode;
+  return code === undefined ? "" : `exit ${String(code)}`;
 }
 
 /**
@@ -1261,12 +1506,12 @@ function isCommandCall(call: IterationCall): boolean {
   return COMMAND_TOOLS.has(call.tool);
 }
 
-function firesText(task: LlmLoopTask): string {
+function firesText(task: LoopBase): string {
   if (task.maxFires === undefined) return String(task.fires);
   return `${String(task.fires)} / ${String(task.maxFires)}`;
 }
 
-function nextFireText(task: LlmLoopTask, row: PanelTaskView): string {
+function nextFireText(task: LoopBase, row: PanelTaskView): string {
   if (task.nextFireAt === undefined) return "—";
   const at = formatClockTime(task.nextFireAt);
   return row.untilNextFireMs === undefined
@@ -1286,6 +1531,49 @@ function iterationsText(task: LlmLoopTask): string {
   const suffix = dropped === 0 ? "" : ` · ${String(dropped)} older dropped`;
   return `iterations · newest first · ${String(kept)} kept${suffix}`;
 }
+
+/** Fire list heading: kept and dropped counts are both stated, never hidden. */
+function firesHeading(task: CmdLoopTask): string {
+  const kept = task.fireHistory.length;
+  const dropped = Math.max(0, task.fires - kept);
+  const suffix = dropped === 0 ? "" : ` · ${String(dropped)} older dropped`;
+  if (kept === 0) return dropped === 0 ? "fires · none yet" : `fires · none kept${suffix}`;
+  return `fires · newest first · ${String(kept)} kept${suffix}`;
+}
+
+/** One fire row: number, time, outcome, exit code, duration and bytes (ADR-0015). */
+function fireLine(fire: FireRecord): string {
+  const exit =
+    fire.exitCode === undefined || fire.exitCode === null
+      ? "exit —"
+      : `exit ${String(fire.exitCode)}`;
+  return [
+    `#${String(fire.fire)}`,
+    formatClockTime(fire.at),
+    fire.outcome,
+    exit,
+    fire.durationMs === undefined ? "—" : formatDuration(fire.durationMs),
+    fire.outputBytes === undefined ? "—" : formatBytes(fire.outputBytes),
+  ].join(" · ");
+}
+
+/** The glyph a strip cell prints for its outcome; `–` never ran (ADR-0015). */
+const FIRE_MARK: Record<FireOutcome, string> = {
+  running: "•",
+  success: "✓",
+  failed: "✗",
+  skipped: "–",
+  interrupted: "!",
+};
+
+/** Strip colour by outcome: live, done, failed, never-ran, cut short by a stop. */
+const FIRE_COLOUR: Record<FireOutcome, ThemeColor> = {
+  running: STATUS_COLOUR.running,
+  success: STATUS_COLOUR.completed,
+  failed: STATUS_COLOUR.failed,
+  skipped: "muted",
+  interrupted: STATUS_COLOUR.interrupted,
+};
 
 /** One iteration row: fire number, result, when it ran, and what it cost. */
 function iterationLine(iteration: Iteration): string {
@@ -1352,9 +1640,9 @@ function matchesQuery(task: Task, query: string): boolean {
   // status word is the string the row colours.
   const kind = kindWord(task.kind);
   const fields =
-    task.kind === "process"
-      ? [task.name, task.id, task.command, task.status, kind]
-      : [task.name, task.id, task.prompt, task.status, kind];
+    task.kind === "llm-loop"
+      ? [task.name, task.id, task.prompt, task.status, kind]
+      : [task.name, task.id, task.command, task.status, kind];
   return fields.some((field) => field.toLowerCase().includes(needle));
 }
 
