@@ -16,6 +16,13 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { commandPreview, formatBytes, formatDuration } from "../base/format.js";
+import {
+  clampSearchMatches,
+  DEFAULT_SEARCH_BYTES,
+  DEFAULT_SEARCH_MATCHES,
+  MAX_SEARCH_MATCHES,
+  searchOutputFile,
+} from "../base/search.js";
 import type { ProcessTask } from "../base/task.js";
 
 import { parseTimeoutSeconds, parseWaitSeconds } from "./limits.js";
@@ -94,6 +101,25 @@ const WaitParameters = Type.Object({
   ),
 });
 
+const GrepParameters = Type.Object({
+  id: Type.String({ description: "Task id whose output to search." }),
+  pattern: Type.String({
+    description:
+      "Plain text to look for, matched as a substring of a single line. Not a regular expression: `.` and `*` are ordinary characters. Case is ignored unless `ignoreCase` is false.",
+  }),
+  ignoreCase: Type.Optional(
+    Type.Boolean({
+      description:
+        "Match whatever the case. Defaults to true; pass false for an exact-case search.",
+    }),
+  ),
+  maxMatches: Type.Optional(
+    Type.Number({
+      description: `How many matching lines to return at most. Defaults to ${String(DEFAULT_SEARCH_MATCHES)}, never more than ${String(MAX_SEARCH_MATCHES)}.`,
+    }),
+  ),
+});
+
 const DEFAULT_LOG_LINES = 50;
 const MAX_LOG_LINES = 2000;
 /**
@@ -103,6 +129,16 @@ const MAX_LOG_LINES = 2000;
  */
 const FULL_MAX_BYTES = 4 * 1024 * 1024;
 const COMMAND_PREVIEW_LENGTH = 80;
+/**
+ * One `bg_grep` answer is capped as a whole — header, matching lines and the
+ * trailer together — so a noisy pattern cannot flood the context. The trailer is
+ * paid for before the search runs, because its length decides how much room the
+ * match list gets.
+ */
+const GREP_RESULT_BYTES = DEFAULT_SEARCH_BYTES;
+const GREP_TRAILER_BYTES = 48;
+/** Characters of the pattern the header and the verdict quote back at most. */
+const PATTERN_PREVIEW_LENGTH = 120;
 
 function scopeOf(ctx: ExtensionToolContext): TaskScope {
   return { cwd: ctx.cwd, sessionId: ctx.sessionManager.getSessionId() };
@@ -110,6 +146,23 @@ function scopeOf(ctx: ExtensionToolContext): TaskScope {
 
 function text(content: string): AgentToolResult<Record<string, unknown>> {
   return { content: [{ type: "text", text: content }], details: {} };
+}
+
+/** `1 line`, `40 lines`: a line count as an answer reads it. */
+function lineCount(lines: number): string {
+  return `${String(lines)} ${lines === 1 ? "line" : "lines"}`;
+}
+
+/**
+ * The pattern as an answer echoes it. A long pattern would otherwise be quoted
+ * back in full and spend the byte budget the matching lines need — the caller
+ * already knows what it asked for; `details` still carries it whole.
+ */
+function patternPreview(pattern: string): string {
+  const quoted = JSON.stringify(pattern);
+  return quoted.length <= PATTERN_PREVIEW_LENGTH
+    ? quoted
+    : `${quoted.slice(0, PATTERN_PREVIEW_LENGTH)}…`;
 }
 
 /** One task as a labelled block, the shape both `bg_run` and `bg_status` return. */
@@ -204,7 +257,7 @@ export function processTaskTools(tasks: ProcessTasks): ToolDefinition[] {
               "",
               describeTask(view),
               "",
-              `Read its output with bg_logs id=${task.id}; check it with bg_status id=${task.id}.`,
+              `Read its output with bg_logs id=${task.id}, search it with bg_grep id=${task.id}, check it with bg_status id=${task.id}.`,
             ].join("\n"),
           },
         ],
@@ -343,6 +396,88 @@ export function processTaskTools(tasks: ProcessTasks): ToolDefinition[] {
       };
     },
   };
+  const grep: ToolDefinition<typeof GrepParameters> = {
+    name: "bg_grep",
+    label: "Search background task output",
+    description:
+      "Search a background task's whole output file for a plain substring and return only the matching lines, each prefixed with its line number. Case is ignored unless `ignoreCase` is false. The answer is bounded in lines and bytes, and it says how many matches it left out.",
+    parameters: GrepParameters,
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const id = params.id.trim();
+      if (id.length === 0) {
+        return text("Pass the id of the task to search; bg_status lists the ids of this session.");
+      }
+      if (params.pattern.length === 0) {
+        return text(
+          "Pass the text to look for. bg_grep matches a plain substring, and an empty one would match every line.",
+        );
+      }
+
+      const view = await tasks.get(scopeOf(ctx), id);
+      if (view === undefined) {
+        return text(`No background task with id ${id} in this session.`);
+      }
+
+      const ignoreCase = params.ignoreCase !== false;
+      const maxMatches = clampSearchMatches(params.maxMatches);
+      const header = [
+        `name: ${view.task.name} · ${view.task.id} · ${view.task.kind} · ${view.task.status}`,
+        `elapsed ${formatDuration(view.elapsedMs)} · output ${formatBytes(view.outputBytes)} · ${
+          ignoreCase ? "case-insensitive" : "case-sensitive"
+        } search for ${patternPreview(params.pattern)}`,
+      ].join("\n");
+      // The cap covers the whole answer, so the header and the trailer are paid
+      // for first and only what is left goes to the match list.
+      const room = GREP_RESULT_BYTES - Buffer.byteLength(header) - GREP_TRAILER_BYTES;
+      const search = await searchOutputFile(view.task.outputPath, {
+        pattern: params.pattern,
+        ignoreCase,
+        maxMatches,
+        maxBytes: Math.max(1, room),
+        // Every caller in production reads the host's output files, so the host
+        // is the fallback encoding. A test needing another one calls the reader.
+        platform: process.platform,
+      });
+      const details = {
+        id: view.task.id,
+        status: view.task.status,
+        pattern: params.pattern,
+        ignoreCase,
+        maxMatches,
+        matches: search.matches.length,
+        total: search.total,
+        omitted: search.omitted,
+        scannedLines: search.scannedLines,
+        clipped: search.clipped,
+        outputBytes: view.outputBytes,
+      };
+
+      const body = search.matches.map((match) => `${String(match.line)}: ${match.text}`).join("\n");
+      if (body.length === 0) {
+        // An empty string would read as "nothing to say"; a search owes a verdict.
+        // The two verdicts differ: nothing matched, or the header ate the budget.
+        const verdict =
+          search.total === 0
+            ? `No matches for ${patternPreview(params.pattern)} in ${lineCount(search.scannedLines)} of output.`
+            : `Found ${lineCount(search.total)} matching lines, but none fit in this answer's byte budget.`;
+        return {
+          content: [{ type: "text", text: `${header}\n\n${verdict}` }],
+          details,
+        };
+      }
+
+      const trailer = search.omitted > 0 ? `… ${String(search.omitted)} more matches` : "";
+      return {
+        content: [
+          {
+            type: "text",
+            text: [header, "", body, ...(trailer.length > 0 ? ["", trailer] : [])].join("\n"),
+          },
+        ],
+        details,
+      };
+    },
+  };
 
   const kill: ToolDefinition<typeof KillParameters> = {
     name: "bg_kill",
@@ -378,5 +513,5 @@ export function processTaskTools(tasks: ProcessTasks): ToolDefinition[] {
     },
   };
 
-  return [run, status, logs, kill, wait];
+  return [run, status, logs, grep, kill, wait];
 }

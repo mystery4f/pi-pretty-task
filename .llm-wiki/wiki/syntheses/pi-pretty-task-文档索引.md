@@ -36,6 +36,8 @@ updated: 2026-11-14
 | [0012 面板三页、只列根、一条链一行](../../docs/adr/0012-panel-tabs-and-roots.md) | `1/2/3` 切页、只列根、链整条一行、触发与步骤不单独占行 |
 | [0013 链是第四种 kind，持有一条队列](../../docs/adr/0013-chain-is-a-task-kind-holding-a-queue.md) | `kind: "chain"`、`steps` 存 id + 游标、一次一步、只排 process |
 | [0014 子记录是记录，不是行](../../docs/adr/0014-children-are-records-not-rows.md) | 触发与步骤是普通 Task、不占列表行、可被 `bg_*` 直接查；计数含子记录；`k` 级联 |
+| [0015 循环行内嵌触发的紧凑条带](../../docs/adr/0015-loop-row-carries-a-fire-strip.md) | 最近 3 次触发 `#43✓ #44✓ #45✗`、旧在左、窄了从左侧丢；回车展开全部 |
+| [0016 子任务的 id 不携带父与序号](../../docs/adr/0016-child-ids-stay-opaque.md) | 触发与步骤都用 `bg-` + 随机；父与序号是字段；别名写 `name#seq (id)` |
 
 ## 工具链与代码风格
 
