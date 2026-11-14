@@ -8,16 +8,27 @@
 
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { formatClockTime, formatDuration } from "../src/tasks/base/format.js";
 import type { OutputTail } from "../src/tasks/base/output.js";
-import type { CmdLoopTask, FireRecord, LlmLoopTask, ProcessTask } from "../src/tasks/base/task.js";
+import type {
+  ChainTask,
+  CmdLoopTask,
+  FireRecord,
+  LlmLoopTask,
+  ProcessTask,
+} from "../src/tasks/base/task.js";
 import type { Iteration, IterationCall } from "../src/tasks/loop/iteration.js";
 import {
   DETAIL_OUTPUT_LINES,
+  PANEL_FILTERS,
+  PANEL_TABS,
+  type PanelFilter,
   type PanelSource,
   type PanelStopResult,
+  type PanelTab,
   type PanelTaskView,
+  rememberPanelTab,
   TasksPanel,
 } from "../src/ui/tasks-panel.js";
 import { fakeTheme } from "./support/extension-harness.js";
@@ -115,6 +126,29 @@ function cmdLoopView(
   };
 }
 
+/**
+ * One chain: a queue of step ids and a cursor (ADR-0013). The steps themselves are
+ * ordinary process records, listed separately so a test can resolve them by id.
+ */
+function chainView(
+  id: string,
+  overrides: Partial<ChainTask> = {},
+  elapsedMs = 8_000,
+): PanelTaskView {
+  const created = overrides.createdAt ?? 1_000;
+  const task: ChainTask = {
+    kind: "chain",
+    id,
+    name: `chain ${id}`,
+    status: "running",
+    createdAt: created,
+    updatedAt: created,
+    steps: [],
+    cursor: 0,
+    ...overrides,
+  };
+  return { task, elapsedMs, outputBytes: 0 };
+}
 /** One fire, as the loop keeps it: the numbers a fire row prints. */
 function fireOf(fire: number, overrides: Partial<FireRecord> = {}): FireRecord {
   const at = CLOCK + fire * 10_000;
@@ -158,11 +192,18 @@ function iterationOf(
   };
 }
 /** A source stand-in: rows to list, tails to read, stops to record. */
+/** A source stand-in: rows to list, tails to read, stops to record. */
 class FakeSource implements PanelSource {
+  /** The session the panel belongs to; a row tagged otherwise came from elsewhere. */
+  readonly sessionId = "mine0000-0000-4000-8000-000000000000";
   rows: PanelTaskView[] = [];
+  /** Roots of the other sessions in the same checkout, tagged with their session. */
+  otherRows: PanelTaskView[] = [];
   readonly tails = new Map<string, OutputTail | Error>();
   readonly stopped: string[] = [];
   readonly tailed: string[] = [];
+  /** The session each tail was asked for; undefined means this panel's own. */
+  readonly tailedFrom: Array<string | undefined> = [];
   listCalls = 0;
 
   async list(): Promise<readonly PanelTaskView[]> {
@@ -170,8 +211,13 @@ class FakeSource implements PanelSource {
     return this.rows;
   }
 
-  async tail(id: string): Promise<OutputTail | undefined> {
+  async others(): Promise<readonly PanelTaskView[]> {
+    return this.otherRows;
+  }
+
+  async tail(id: string, sessionId?: string): Promise<OutputTail | undefined> {
     this.tailed.push(id);
+    this.tailedFrom.push(sessionId);
     const answer = this.tails.get(id);
     if (answer instanceof Error) throw answer;
     return answer ?? { text: "", lines: 0, truncated: false };
@@ -208,14 +254,17 @@ interface Opened {
  */
 function plainTheme(): Theme {
   const plain = (_colour: string, text: string): string => text;
+  // A weight or a slant takes the text alone, so it cannot share the two-argument
+  // shape of a colour: a stray colour argument would be read as the text itself.
+  const decorate = (text: string): string => text;
   return {
     fg: plain,
     bg: plain,
-    bold: plain,
-    italic: plain,
-    underline: plain,
-    inverse: plain,
-    strikethrough: plain,
+    bold: decorate,
+    italic: decorate,
+    underline: decorate,
+    inverse: decorate,
+    strikethrough: decorate,
   } as unknown as Theme;
 }
 
@@ -257,6 +306,42 @@ function openPanel(
   return { panel, source, done, drawn: () => panel.render(WIDTH).join("\n") };
 }
 
+/**
+ * Open the panel and walk to a page with the key a reader presses, so the tab
+ * machinery is exercised rather than bypassed.
+ */
+async function openOn(
+  tab: PanelTab | PanelFilter,
+  source: FakeSource,
+  now: () => number = () => 13_000,
+  theme: Theme = fakeTheme(),
+): Promise<Opened> {
+  const opened = openPanel(source, now, theme);
+  await opened.panel.settle();
+  opened.panel.handleInput(tabKey(tab));
+  return opened;
+}
+
+/**
+ * The key that reaches a page or a filter from wherever the panel opens: `1`–`3`
+ * for a page, `f` as many times as the filter is from `all`.
+ */
+function tabKey(choice: PanelTab | PanelFilter): string {
+  switch (choice) {
+    case "processes":
+    case "loops":
+    case "chains":
+      return String(PANEL_TABS.indexOf(choice) + 1);
+    default:
+      return "f".repeat(PANEL_FILTERS.indexOf(choice));
+  }
+}
+
+// The remembered page outlives a panel, which is the point of it; each test still
+// wants the panel a first-time reader gets.
+beforeEach(() => {
+  rememberPanelTab("processes");
+});
 /** Output lines named `output-01` … `output-NN`, oldest first. */
 function numberedOutput(count: number): string[] {
   return Array.from(
@@ -309,7 +394,7 @@ describe("task list", () => {
     const { panel, drawn } = openPanel(new FakeSource());
     await panel.settle();
 
-    expect(drawn()).toContain("No tasks yet");
+    expect(drawn()).toContain("No processes here");
     expect(drawn()).toContain("bg_run");
     expect(
       drawn()
@@ -568,7 +653,7 @@ describe("stopping and closing", () => {
   });
 });
 
-it("stops every row on a, one source call per task", async () => {
+it("stops every row on the open page on a, one source call per task", async () => {
   const source = new FakeSource();
   source.rows = [view("first1"), view("second"), loopView("loop01")];
   const { panel, drawn } = openPanel(source);
@@ -577,32 +662,181 @@ it("stops every row on a, one source call per task", async () => {
   panel.handleInput("a");
   await panel.settle();
 
-  expect(source.stopped.sort()).toEqual(["first1", "loop01", "second"]);
-  expect(drawn()).toContain("stopped 3 tasks");
+  // `a` acts on what the page lists: the loop keeps running from here (ADR-0012).
+  expect(source.stopped.sort()).toEqual(["first1", "second"]);
+  expect(drawn()).toContain("stopped 2 tasks");
 
   panel.dispose();
 });
 
-it("narrows the list to loops on l and restores it on the second press", async () => {
-  const source = new FakeSource();
-  source.rows = [view("build1", { name: "build job" }), loopView("loop01", { name: "review" })];
-  const { panel, drawn } = openPanel(source);
-  await panel.settle();
+describe("the three pages", () => {
+  /** One record of each kind, so every page has something of its own to list. */
+  function threeKinds(): FakeSource {
+    const source = new FakeSource();
+    source.rows = [
+      view("bg-build", { name: "web build", createdAt: 1_000 }),
+      loopView("lp-review", { name: "nightly review", createdAt: 2_000 }),
+      chainView("ch-deploy", { name: "deploy queue", createdAt: 3_000 }),
+    ];
+    return source;
+  }
 
-  panel.handleInput("l");
-  await panel.settle();
-  expect(drawn()).toContain("review");
-  expect(drawn()).not.toContain("build job");
+  it("opens on Processes and lists no other page's root", async () => {
+    const { panel, drawn } = openPanel(threeKinds());
+    await panel.settle();
 
-  panel.handleInput("l");
-  await panel.settle();
-  expect(drawn()).toContain("build job");
+    expect(plain(drawn())).toContain("1 Processes");
+    expect(drawn()).toContain("web build");
+    expect(drawn()).not.toContain("nightly review");
+    expect(drawn()).not.toContain("deploy queue");
 
-  panel.dispose();
+    panel.dispose();
+  });
+
+  it("switches pages on 1, 2 and 3, and washes the open one in the band", async () => {
+    const { panel, drawn } = openPanel(threeKinds());
+    await panel.settle();
+
+    panel.handleInput("2");
+    expect(drawn()).toContain("nightly review");
+    expect(drawn()).not.toContain("web build");
+    expect(drawn()).toContain("<selectedBg><text> 2 Loops </text></selectedBg>");
+
+    panel.handleInput("3");
+    expect(drawn()).toContain("deploy queue");
+    expect(drawn()).not.toContain("nightly review");
+
+    panel.handleInput("1");
+    expect(drawn()).toContain("web build");
+
+    panel.dispose();
+  });
+
+  it("walks the pages with tab and wraps from the last one to the first", async () => {
+    const { panel, drawn } = openPanel(threeKinds());
+    await panel.settle();
+
+    panel.handleInput("\t");
+    expect(drawn()).toContain("nightly review");
+    panel.handleInput("\t");
+    expect(drawn()).toContain("deploy queue");
+    panel.handleInput("\t");
+    expect(drawn()).toContain("web build");
+
+    panel.dispose();
+  });
+
+  it("leaves a detail view for the page a tab key names", async () => {
+    const { panel, drawn } = openPanel(threeKinds());
+    await panel.settle();
+
+    panel.handleInput(ENTER);
+    expect(plain(drawn())).toContain("Command:");
+
+    // A tab key leaves any view: the page's list, not its detail, is where it lands.
+    panel.handleInput("2");
+    expect(drawn()).toContain("nightly review");
+    expect(drawn()).not.toContain("web build");
+    panel.handleInput(ENTER);
+    expect(plain(drawn())).toContain("Schedule:");
+    panel.dispose();
+  });
+
+  it("reopens on the page the reader left", async () => {
+    const first = openPanel(threeKinds());
+    await first.panel.settle();
+    first.panel.handleInput("3");
+    first.panel.dispose();
+
+    const second = openPanel(threeKinds());
+    await second.panel.settle();
+    expect(second.drawn()).toContain("deploy queue");
+    expect(second.drawn()).not.toContain("web build");
+
+    second.panel.dispose();
+  });
+
+  it("gives a page with nothing of its kind its own words", async () => {
+    const source = new FakeSource();
+    source.rows = [view("bg-build", { name: "web build" })];
+    const { panel, drawn } = await openOn("chains", source);
+
+    expect(drawn()).toContain("No chains here");
+
+    panel.dispose();
+  });
+
+  it("reaches no row of another page, whichever page the query was typed on", async () => {
+    const { panel, drawn } = openPanel(threeKinds());
+    await panel.settle();
+
+    panel.handleInput("/");
+    for (const character of "deploy") panel.handleInput(character);
+    // No process row answers to `deploy`, and the chain on another page is not
+    // allowed to answer for it either (ADR-0012).
+    expect(drawn()).toContain("Nothing on this page matches the search");
+    expect(drawn()).not.toContain("deploy queue");
+
+    // Leaving search keeps the query; the page it names is reached by a page key.
+    panel.handleInput("\x1bq");
+    panel.handleInput("3");
+    expect(drawn()).toContain("deploy queue");
+
+    // While the query is being typed, a digit is a character of it, not a page key.
+    panel.handleInput("/");
+    panel.handleInput("3");
+    expect(plain(drawn())).toContain("search: deploy3");
+
+    panel.dispose();
+  });
+
+  it("holds the selected row across a refresh and a narrower screen", async () => {
+    const source = new FakeSource();
+    source.rows = [
+      view("bg-aaaaa", { name: "first build", updatedAt: 1_000 }),
+      view("bg-bbbbb", { name: "second build", updatedAt: 2_000 }),
+      view("bg-ccccc", { name: "third build", updatedAt: 3_000 }),
+    ];
+    const { panel } = openPanel(source, () => 13_000, plainTheme());
+    await panel.settle();
+
+    panel.handleInput(DOWN);
+    await panel.settle();
+    const selected = (): string | undefined =>
+      panel
+        .render(WIDTH)
+        .find((line) => line.includes("›"))
+        ?.split(/\s+/)
+        .find((word) => word.startsWith("bg-"));
+
+    expect(selected()).toBe("bg-bbbbb");
+
+    // The store answers in a new order; the reader's row is still the one marked.
+    source.rows = [
+      source.rows[0] as PanelTaskView,
+      { ...(source.rows[1] as PanelTaskView), task: { ...(source.rows[1] as PanelTaskView).task } },
+      {
+        ...(source.rows[2] as PanelTaskView),
+        task: { ...(source.rows[2] as PanelTaskView).task, updatedAt: 50_000 },
+      },
+    ];
+    await panel.refresh();
+    expect(selected()).toBe("bg-bbbbb");
+
+    // Narrowing the screen must not reorder a filtered list either.
+    const order = (width: number): string[] =>
+      panel
+        .render(width)
+        .filter((line) => line.includes("build"))
+        .map((line) => line.split(/\s+/).find((word) => word.startsWith("bg-")) ?? "");
+    expect(order(70)).toEqual(order(100));
+
+    panel.dispose();
+  });
 });
 
 describe("loop tasks in the list", () => {
-  it("mixes loop rows with process rows, the loop row carrying its iterations and last fire", async () => {
+  it("draws a loop row with its fire count and next fire, and no output size", async () => {
     const source = new FakeSource();
     const lastFireAt = CLOCK;
     source.rows = [
@@ -621,24 +855,20 @@ describe("loop tasks in the list", () => {
       ),
       view("build1", { name: "nightly build", createdAt: 1_000 }, 5000, 1536),
     ];
-    const { panel, drawn } = openPanel(source);
-    await panel.settle();
+    const { panel, drawn } = await openOn("loops", source);
 
     const lines = drawn().split("\n");
     const loopRow = lines.find((line) => line.includes("review loop"));
-    const processRow = lines.find((line) => line.includes("nightly build"));
-    if (loopRow === undefined || processRow === undefined) throw new Error("both rows must render");
+    if (loopRow === undefined) throw new Error("the loop row must render");
 
-    expect(drawn().indexOf("review loop")).toBeLessThan(drawn().indexOf("nightly build"));
-    // The row carries the fires and the countdown; the dropped iterations and the
-    // last fire's wall-clock time live in the detail.
+    // A loop keeps no output file, so its row carries the schedule's numbers; the
+    // dropped iterations and the last fire's wall-clock time live in the detail.
     expect(loopRow).toContain("<muted>llm</muted>");
     expect(loopRow).toContain("5 fires");
     expect(loopRow).toContain("next 4.0s");
     expect(loopRow).not.toContain("KiB");
-    expect(processRow).toContain("<muted>proc</muted>");
-    expect(processRow).toContain("1.5 KiB");
-    expect(processRow).not.toContain("iterations");
+    // The process belongs to its own page, which is where its size is drawn.
+    expect(drawn()).not.toContain("nightly build");
 
     panel.dispose();
   });
@@ -646,8 +876,7 @@ describe("loop tasks in the list", () => {
   it("opens a loop without asking the source for an output tail", async () => {
     const source = new FakeSource();
     source.rows = [loopView("loop01", { name: "review loop" })];
-    const { panel } = openPanel(source);
-    await panel.settle();
+    const { panel } = await openOn("loops", source);
 
     panel.handleInput(ENTER);
     await panel.settle();
@@ -680,7 +909,7 @@ describe("the loop detail view", () => {
         4_000,
       ),
     ];
-    const { panel, drawn } = openPanel(source);
+    const { panel, drawn } = await openOn("loops", source);
     await panel.settle();
 
     panel.handleInput(ENTER);
@@ -703,7 +932,7 @@ describe("the loop detail view", () => {
   it("states dropped iterations even when no iteration record is left", async () => {
     const source = new FakeSource();
     source.rows = [loopView("loop01", { name: "review loop", fires: 40, droppedIterations: 40 })];
-    const { panel, drawn } = openPanel(source);
+    const { panel, drawn } = await openOn("loops", source);
     await panel.settle();
 
     panel.handleInput(ENTER);
@@ -732,7 +961,7 @@ describe("the loop detail view", () => {
         iterations: [iterationOf(1, calls, { endedAt: CLOCK + 2_000, droppedCalls: 4 })],
       }),
     ];
-    const { panel, drawn } = openPanel(source);
+    const { panel, drawn } = await openOn("loops", source);
     await panel.settle();
 
     panel.handleInput(ENTER);
@@ -764,7 +993,7 @@ describe("the loop detail view", () => {
         ],
       }),
     ];
-    const { panel, drawn } = openPanel(source);
+    const { panel, drawn } = await openOn("loops", source);
     await panel.settle();
 
     panel.handleInput(ENTER);
@@ -806,7 +1035,7 @@ describe("the loop detail view", () => {
         iterations: [iterationOf(1, calls)],
       }),
     ];
-    const { panel, drawn } = openPanel(source);
+    const { panel, drawn } = await openOn("loops", source);
     await panel.settle();
 
     panel.handleInput(ENTER);
@@ -838,7 +1067,7 @@ describe("the loop detail view", () => {
       source.stopped.push(id);
       return { outcome: "completed", view: loopView(id, { status: "completed" }) };
     };
-    const { panel, drawn } = openPanel(source);
+    const { panel, drawn } = await openOn("loops", source);
     await panel.settle();
 
     panel.handleInput(ENTER);
@@ -854,7 +1083,7 @@ describe("the loop detail view", () => {
 });
 
 describe("the list header", () => {
-  it("tallies every ending above the rows, whatever the filters hide", async () => {
+  it("tallies every ending above the rows, whatever the page or filter hides", async () => {
     const source = new FakeSource();
     source.rows = [
       view("run0001", { name: "server", status: "running" }),
@@ -872,63 +1101,118 @@ describe("the list header", () => {
       expect(header).toContain(`<muted>${label}</muted>`);
     }
 
-    // Only the running row is live, so history stays out of the list until `h`.
-    expect(drawn()).toContain("server");
-    expect(drawn()).not.toContain("lint");
+    // The filter narrows the rows, never the tally: with `failed` on, only `lint`
+    // is listed and the header still names all five endings (ADR-0012).
+    panel.handleInput("f");
+    panel.handleInput("f");
+    expect(plain(drawn())).toContain("status: failed");
+    expect(drawn()).toContain("lint");
+    expect(drawn()).not.toContain("server");
 
     panel.dispose();
   });
 });
 
-describe("history, rerun and the output path", () => {
-  it("shows finished rows on h and hides them again", async () => {
+describe("the status filter", () => {
+  /** One row per ending the filter has to tell apart, plus a paused schedule. */
+  function byStatus(): FakeSource {
     const source = new FakeSource();
     source.rows = [
       view("run0001", { name: "server", status: "running" }),
       view("done001", { name: "build", status: "completed", exitCode: 0 }),
+      view("bad0001", { name: "lint", status: "failed" }),
+      view("slow001", { name: "deploy", status: "killed", killReason: "timeout" }),
+      view("kill001", { name: "watch", status: "killed", killReason: "user" }),
+      loopView("loop01", { name: "review loop", status: "paused" }),
     ];
-    const { panel, drawn } = openPanel(source);
-    await panel.settle();
-    expect(drawn()).not.toContain("build");
+    return source;
+  }
 
-    panel.handleInput("h");
+  it("walks all, running, failed and done on f, and names the filter in the header", async () => {
+    const { panel, drawn } = openPanel(byStatus());
     await panel.settle();
+
+    // `all` is where the panel opens: the past is as reachable as the present.
+    expect(plain(drawn())).toContain("status: all");
     expect(drawn()).toContain("build");
-    expect(drawn()).toContain("showing history");
 
-    panel.handleInput("h");
-    await panel.settle();
-    expect(drawn()).not.toContain("build");
+    panel.handleInput("f");
+    expect(plain(drawn())).toContain("status: running");
+    expect(drawn()).toContain("server");
+    expect(drawn()).not.toContain("lint");
+    expect(drawn()).toContain("showing running");
+
+    panel.handleInput("f");
+    expect(plain(drawn())).toContain("status: failed");
+    expect(drawn()).toContain("lint");
+    expect(drawn()).not.toContain("server");
+
+    // A killed task finished without failing, so it is done, not failed.
+    panel.handleInput("f");
+    expect(plain(drawn())).toContain("status: done");
+    expect(drawn()).toContain("watch");
+    expect(drawn()).toContain("deploy");
+    expect(drawn()).toContain("build");
+    expect(drawn()).not.toContain("lint");
+
+    panel.handleInput("f");
+    expect(plain(drawn())).toContain("status: all");
 
     panel.dispose();
   });
 
-  it("keeps history hidden on an idle session until h asks for it", async () => {
+  it("counts a paused schedule as running, since it is still owed a turn", async () => {
+    const { panel, drawn } = await openOn("loops", byStatus());
+    panel.handleInput("f");
+
+    expect(drawn()).toContain("review loop");
+    expect(drawn()).toContain("status: running");
+    expect(drawn()).not.toContain("Nothing");
+
+    panel.dispose();
+  });
+
+  it("keeps the filter inside the page it was set on", async () => {
+    const { panel, drawn } = await openOn("loops", byStatus());
+    expect(drawn()).toContain("review loop");
+
+    panel.handleInput("f");
+    panel.handleInput("f");
+    panel.handleInput("f");
+    // Done: the paused loop is not done, so the page empties.
+    expect(drawn()).toContain("Nothing here matches this status");
+
+    // Processes are untouched by a filter set on the loops page.
+    panel.handleInput("1");
+    expect(drawn()).toContain("status: done");
+    expect(drawn()).toContain("build");
+    expect(drawn()).not.toContain("server");
+
+    panel.dispose();
+  });
+
+  it("keeps a chain under running while its steps run, and under done once they end", async () => {
     const source = new FakeSource();
     source.rows = [
-      view("done001", { name: "build", status: "completed", exitCode: 0 }),
-      view("done002", { name: "lint", status: "completed", exitCode: 0 }),
+      chainView("ch-run01", { name: "ship it" }),
+      chainView("ch-done1", { name: "old news", status: "completed" }),
     ];
-    const { panel, drawn } = openPanel(source);
-    await panel.settle();
+    const { panel, drawn } = await openOn("chains", source);
 
-    // Nothing runs and h was never pressed: the list stays empty and says how
-    // to get the past back, even though the counts already know it exists.
-    expect(drawn()).not.toContain("build");
-    expect(drawn()).toContain("History is hidden — press h to show it.");
+    panel.handleInput("f");
+    expect(drawn()).toContain("ship it");
+    expect(drawn()).not.toContain("old news");
 
-    panel.handleInput("h");
-    await panel.settle();
-    expect(drawn()).toContain("build");
-
-    // A later refresh must not undo the reader's choice either way.
-    panel.handleInput("h");
-    await panel.settle();
-    expect(drawn()).not.toContain("build");
+    // Failed, then done: the finished queue is the only one left on the page.
+    panel.handleInput("f");
+    panel.handleInput("f");
+    expect(drawn()).toContain("old news");
+    expect(drawn()).not.toContain("ship it");
 
     panel.dispose();
   });
-
+});
+describe("rerun and the output path", () => {
   it("reruns the selected task with R and selects the new row", async () => {
     const source = new FakeSource();
     source.rows = [view("run0001", { name: "server" })];
@@ -947,8 +1231,7 @@ describe("history, rerun and the output path", () => {
   it("refuses to rerun a loop row", async () => {
     const source = new FakeSource();
     source.rows = [loopView("loop01", { name: "review loop" })];
-    const { panel, drawn } = openPanel(source);
-    await panel.settle();
+    const { panel, drawn } = await openOn("loops", source);
 
     panel.handleInput("R");
     await panel.settle();
@@ -1041,7 +1324,7 @@ describe("recency and search", () => {
     panel.dispose();
   });
 
-  it("filters live rows by a command substring as the query is typed", async () => {
+  it("filters the page by a command substring as the query is typed", async () => {
     const source = searchFixture();
     const { panel, drawn } = openPanel(source);
     await panel.settle();
@@ -1049,11 +1332,11 @@ describe("recency and search", () => {
     panel.handleInput("/");
     for (const character of "build") panel.handleInput(character);
 
-    expect(plain(drawn())).toContain("filter: build");
+    expect(plain(drawn())).toContain("search: build");
     expect(drawn()).toContain("web build");
     expect(drawn()).not.toContain("unit tests");
-    // The counts still cover every task: the failed lint run is history, hidden
-    // from the list but not forgotten by the header.
+    // The counts still cover every task: the failed lint run is out of the query,
+    // not out of the tally.
     expect(drawn()).toContain("<error>");
 
     panel.dispose();
@@ -1078,21 +1361,18 @@ describe("recency and search", () => {
     const source = new FakeSource();
     source.rows = [
       loopView("lp-abcde", { name: "nightly review", createdAt: 2_000 }),
-      view("bg-aaaaa", { name: "nightly build", createdAt: 1_000 }),
+      cmdLoopView("lc-abcde", { name: "nightly probe", createdAt: 1_000 }),
     ];
-    const { panel, drawn } = openPanel(source);
-    await panel.settle();
+    const { panel, drawn } = await openOn("loops", source);
 
     panel.handleInput("/");
     for (const character of "llm") panel.handleInput(character);
 
     expect(drawn()).toContain("nightly review");
-    expect(drawn()).not.toContain("nightly build");
-
-    panel.dispose();
+    expect(drawn()).not.toContain("nightly probe");
   });
 
-  it("filters by the status word without revealing the history h hides", async () => {
+  it("finds a row by the status word it draws, and by no word it does not", async () => {
     const source = searchFixture();
     const { panel, drawn } = openPanel(source);
     await panel.settle();
@@ -1100,19 +1380,11 @@ describe("recency and search", () => {
     panel.handleInput("/");
     for (const character of "failed") panel.handleInput(character);
 
-    // The query matches a failed record, but history stays the reader's call.
-    expect(plain(drawn())).toContain("filter: failed");
-    expect(drawn()).not.toContain("lint run");
-    expect(plain(drawn())).toContain("History is hidden");
-
-    // Leaving search keeps the query; h then reveals the past under the filter.
-    panel.handleInput(ALT_Q);
-    panel.handleInput("h");
-    await panel.settle();
+    // The status word is printed in the row's status column, so it is a fair
+    // thing to type; nothing reaches a row by a word the row never shows.
+    expect(plain(drawn())).toContain("search: failed");
     expect(drawn()).toContain("lint run");
     expect(drawn()).not.toContain("web build");
-
-    panel.dispose();
   });
 
   it("turns a pasted command into a one-line query", async () => {
@@ -1123,8 +1395,8 @@ describe("recency and search", () => {
     panel.handleInput("/");
     panel.handleInput("\x1b[200~npm test\nnpm run lint\x1b[201~");
 
-    expect(plain(drawn())).toContain("filter: npm test npm run lint");
-    expect(plain(drawn())).not.toContain("filter: npm test\n");
+    expect(plain(drawn())).toContain("search: npm test npm run lint");
+    expect(plain(drawn())).not.toContain("search: npm test\n");
 
     panel.dispose();
   });
@@ -1138,7 +1410,7 @@ describe("recency and search", () => {
     for (const character of "build") panel.handleInput(character);
     panel.handleInput(BACKSPACE);
 
-    expect(plain(drawn())).toContain("filter: buil");
+    expect(plain(drawn())).toContain("search: buil");
     expect(drawn()).toContain("web build");
 
     panel.dispose();
@@ -1155,7 +1427,7 @@ describe("recency and search", () => {
     panel.handleInput(ALT_Q);
     expect(done).not.toHaveBeenCalled();
     // The header keeps saying why rows are missing after search mode is left.
-    expect(plain(drawn())).toContain("filter: build");
+    expect(plain(drawn())).toContain("search: build");
     expect(drawn()).toContain("web build");
 
     panel.handleInput(ALT_Q);
@@ -1214,7 +1486,7 @@ describe("command loops in the list and in the detail", () => {
     // A recording theme keeps every glyph in place and still says what colour the
     // panel asked for, so the strip can be checked for both order and outcome.
     const { theme, painted } = recordingTheme();
-    const { panel, drawn } = openPanel(source, () => 13_000, theme);
+    const { panel, drawn } = await openOn("loops", source, () => 13_000, theme);
     await panel.settle();
 
     // A wide page fits all three cells; how the strip gives way is the next test.
@@ -1257,7 +1529,7 @@ describe("command loops in the list and in the detail", () => {
         5_000,
       ),
     ];
-    const { panel } = openPanel(source, () => 13_000, plainTheme());
+    const { panel } = await openOn("loops", source, () => 13_000, plainTheme());
     await panel.settle();
 
     const widths = [160, 140, 120, 100, 90, 80, 70, 60, 50, 44, 38];
@@ -1315,7 +1587,7 @@ describe("command loops in the list and in the detail", () => {
         40 * 60_000,
       ),
     ];
-    const { panel, drawn } = openPanel(source, () => 13_000, plainTheme());
+    const { panel, drawn } = await openOn("loops", source, () => 13_000, plainTheme());
     await panel.settle();
 
     const rowAt = (width: number): string => {
@@ -1358,7 +1630,7 @@ describe("command loops in the list and in the detail", () => {
     healthySource.rows = [
       cmdLoopView("lc00002", { name: "healthy loop", fires: 2 }, 30_000, 10_000),
     ];
-    const healthyPanel = openPanel(healthySource, () => 13_000, plainTheme());
+    const healthyPanel = await openOn("loops", healthySource, () => 13_000, plainTheme());
     await healthyPanel.panel.settle();
     const healthy = healthyPanel
       .drawn()
@@ -1399,7 +1671,7 @@ describe("command loops in the list and in the detail", () => {
         5_000,
       ),
     ];
-    const { panel, drawn } = openPanel(source);
+    const { panel, drawn } = await openOn("loops", source);
     await panel.settle();
 
     panel.handleInput(ENTER);
@@ -1444,7 +1716,7 @@ describe("command loops in the list and in the detail", () => {
       child,
     ];
     source.tails.set("bg-00045", { text: "hello from fire 45", lines: 1, truncated: false });
-    const { panel, drawn } = openPanel(source);
+    const { panel, drawn } = await openOn("loops", source);
     await panel.settle();
 
     panel.handleInput(ENTER);
@@ -1476,7 +1748,7 @@ describe("command loops in the list and in the detail", () => {
       cmdLoopView("lc00001", { name: "nightly probe", command: "node probe.js" }),
       cmdLoopView("lc00002", { name: "nightly review" }),
     ];
-    const first = openPanel(byCommand);
+    const first = await openOn("loops", byCommand);
     await first.panel.settle();
 
     first.panel.handleInput("/");
@@ -1491,7 +1763,7 @@ describe("command loops in the list and in the detail", () => {
       cmdLoopView("lc00001", { name: "nightly probe", command: "node probe.js" }),
       cmdLoopView("lc00002", { name: "nightly review" }),
     ];
-    const second = openPanel(byKind);
+    const second = await openOn("loops", byKind);
     await second.panel.settle();
 
     second.panel.handleInput("/");
@@ -1500,5 +1772,277 @@ describe("command loops in the list and in the detail", () => {
     expect(second.drawn()).toContain("nightly probe");
     expect(second.drawn()).toContain("nightly review");
     second.panel.dispose();
+  });
+});
+
+describe("chains in the list and in the detail", () => {
+  const CHAIN = "ch-abcde";
+
+  /**
+   * One chain of three steps as the store keeps them: the steps are ordinary process
+   * records with a `parentId`, so the panel resolves them by id and never lists them
+   * as rows of their own (ADR-0014).
+   */
+  function chainOf(names: readonly string[] = ["build", "deploy", "smoke"]): PanelTaskView[] {
+    const ids = names.map((_, index) => `bg-0000${String(index + 1)}`);
+    const steps = names.map((name, index) =>
+      view(
+        ids[index] ?? "bg-00000",
+        {
+          name,
+          parentId: CHAIN,
+          status: index === 0 ? "completed" : index === 1 ? "running" : "waiting",
+          createdAt: 1_000 + index * 2_000,
+          updatedAt: 3_000 + index * 2_000,
+          ...(index === 0 ? { exitCode: 0, endedAt: 3_000 } : {}),
+        },
+        3_000,
+      ),
+    );
+    return [
+      chainView(
+        CHAIN,
+        { name: "build", steps: ids, cursor: 1, createdAt: 1_000, updatedAt: 5_000 },
+        12_000,
+      ),
+      ...steps,
+    ];
+  }
+
+  it("draws a chain as one row of steps, the running one in the accent colour", async () => {
+    const source = new FakeSource();
+    source.rows = chainOf();
+    const { theme, painted } = recordingTheme();
+    const { panel, drawn } = await openOn("chains", source, () => 13_000, theme);
+    await panel.settle();
+
+    const lines = panel
+      .render(WIDTH)
+      .join("\n")
+      .split("\n")
+      .filter((line) => line.includes("build → deploy → smoke"));
+    expect(lines).toHaveLength(1);
+    // The chain is one row: its steps never get rows of their own.
+    expect(drawn()).not.toContain("bg-00002");
+    expect(drawn()).not.toContain("1/3");
+    expect(drawn()).toContain("2/3");
+    // The step being worked on is the one the page points at.
+    expect(painted).toContainEqual({ colour: "accent", text: "deploy" });
+    expect(painted).toContainEqual({ colour: "success", text: "build" });
+    expect(painted).toContainEqual({ colour: "muted", text: "smoke" });
+
+    panel.dispose();
+  });
+
+  it("sheds the finished steps on a narrow row and keeps the running one", async () => {
+    const source = new FakeSource();
+    source.rows = chainOf(["compile assets", "deploy edge", "smoke test"]);
+    const { panel } = await openOn("chains", source, () => 13_000, plainTheme());
+    await panel.settle();
+
+    const narrow = panel.render(70).join("\n");
+    expect(narrow).toContain("deploy edge");
+    expect(narrow).not.toContain("compile assets");
+    expect(narrow).toContain("…");
+    // Nothing wraps: every line still fits the width it was given.
+    for (const line of panel.render(70)) expect(visibleWidth(line)).toBeLessThanOrEqual(70);
+
+    panel.dispose();
+  });
+
+  it("opens the chain detail on its steps, in run order, with what each ended with", async () => {
+    const source = new FakeSource();
+    source.rows = chainOf();
+    const { panel, drawn } = await openOn("chains", source, () => 13_000, plainTheme());
+    await panel.settle();
+
+    panel.handleInput(ENTER);
+    await panel.settle();
+
+    const text = drawn();
+    expect(text).toContain("chain: build");
+    expect(text).toContain("1 of 3 done · step 2 of 3");
+    const build = text.indexOf("1. build");
+    const deploy = text.indexOf("2. deploy");
+    const smoke = text.indexOf("3. smoke");
+    expect(build).toBeGreaterThan(-1);
+    expect(build).toBeLessThan(deploy);
+    expect(deploy).toBeLessThan(smoke);
+    // Every line carries its status, its duration and, where it has one, its exit code.
+    expect(text).toMatch(/1\. build\s+completed\s+2\.0s\s+exit 0/);
+    expect(text).toMatch(/2\. deploy\s+running\s+10\.0s\b/);
+    // A step that has not run yet has no duration and no exit code to report.
+    expect(text).toMatch(/3\. smoke\s+waiting\s+—/);
+
+    panel.dispose();
+  });
+
+  it("stops the whole chain from the running step on k, never a step of its own", async () => {
+    const source = new FakeSource();
+    source.rows = chainOf();
+    const { panel, source: fake, drawn } = await openOn("chains", source);
+    await panel.settle();
+
+    panel.handleInput("k");
+    await panel.settle();
+
+    expect(fake.stopped).toEqual([CHAIN]);
+    expect(drawn()).toContain(`stopped ${CHAIN}`);
+    expect(fake.stopped).not.toContain("bg-00002");
+
+    panel.dispose();
+  });
+
+  it("refuses to rerun a chain and to name an output file it does not have", async () => {
+    const source = new FakeSource();
+    source.rows = chainOf();
+    const { panel, drawn } = await openOn("chains", source);
+    await panel.settle();
+
+    panel.handleInput("R");
+    await panel.settle();
+    expect(drawn()).toContain("A chain is a queue; run its steps again with bg_run.");
+    expect(source.reran).toEqual([]);
+
+    panel.handleInput("c");
+    await panel.settle();
+    expect(drawn()).toContain("a chain writes no output of its own");
+
+    panel.dispose();
+  });
+
+  it("finds a chain by a step name its row shows, and by no word it leaves out", async () => {
+    const source = new FakeSource();
+    source.rows = chainOf().map((row) =>
+      row.task.kind === "process" && row.task.name === "deploy"
+        ? { ...row, task: { ...row.task, command: "curl -sf https://edge" } }
+        : row,
+    );
+    const { panel, drawn } = await openOn("chains", source, () => 13_000, plainTheme());
+    await panel.settle();
+
+    panel.handleInput("/");
+    for (const character of "deploy") panel.handleInput(character);
+    await panel.settle();
+    expect(drawn()).toContain("build → deploy → smoke");
+
+    // A step's command is not on the row, so it must not bring the row back.
+    for (let index = 0; index < "deploy".length; index += 1) panel.handleInput("\u007f");
+    for (const character of "curl") panel.handleInput(character);
+    await panel.settle();
+    expect(drawn()).toContain("Nothing on this page matches the search");
+    expect(drawn()).not.toContain("build → deploy → smoke");
+
+    panel.dispose();
+  });
+
+  it("counts a fire the pages never give a row, as ADR 0014 asks", async () => {
+    const source = new FakeSource();
+    source.rows = [
+      view("bg-aaaaa", { name: "server", status: "running" }),
+      view("bg-bbbbb", { name: "unit tests", status: "completed", exitCode: 0 }),
+      // The failing fire of some command loop: a record, not a row.
+      view("bg-ccccc", {
+        name: "watch loop #7",
+        parentId: "lc00001",
+        fire: 7,
+        status: "failed",
+        exitCode: 1,
+      }),
+    ];
+    const { panel, drawn } = await openOn("processes", source, () => 13_000, plainTheme());
+    await panel.settle();
+
+    expect(drawn()).toContain("Failed 1");
+    expect(drawn()).toContain("Running 1");
+    expect(drawn()).not.toContain("watch loop #7");
+
+    panel.dispose();
+  });
+});
+
+describe("the other sessions sharing a checkout", () => {
+  const STRANGER = "7f2c9d10-4b3a-4e55-9a01-6c7d8e9f0a1b";
+
+  /**
+   * One session's row of its own, and one root another session left in the same
+   * checkout: `o` is the only key that brings the second into view (ticket #27).
+   */
+  function twoSessions(): FakeSource {
+    const source = new FakeSource();
+    source.rows = [view("bg-a1b2c", { name: "web build" })];
+    source.otherRows = [{ ...view("bg-x1x2x", { name: "deploy the edge" }), sessionId: STRANGER }];
+    return source;
+  }
+
+  it("keeps another session's rows off the page until o asks for them", async () => {
+    const source = twoSessions();
+    const { panel, drawn } = await openOn("processes", source, () => 13_000, plainTheme());
+    await panel.settle();
+
+    expect(drawn()).not.toContain("deploy the edge");
+    // The counts speak for this session only: another session's run is not ours.
+    expect(drawn()).toContain("Running 1");
+
+    panel.handleInput("o");
+    await panel.settle();
+    const revealed = drawn();
+    expect(revealed).toContain("deploy the edge");
+    // The row is tagged with the session it came from, shortened to fit a column.
+    expect(revealed).toContain("@7f2c9d");
+    expect(revealed).toContain("Running 1");
+
+    panel.handleInput("o");
+    await panel.settle();
+    expect(drawn()).not.toContain("deploy the edge");
+
+    panel.dispose();
+  });
+
+  it("stops and reruns nothing on another session's row", async () => {
+    const source = twoSessions();
+    const { panel, drawn } = await openOn("processes", source, () => 13_000, plainTheme());
+    await panel.settle();
+
+    panel.handleInput("o");
+    await panel.settle();
+    panel.handleInput(DOWN);
+    panel.handleInput("k");
+    await panel.settle();
+    expect(source.stopped).toEqual([]);
+    expect(drawn()).toContain("another session's task is read-only here");
+
+    panel.handleInput("R");
+    await panel.settle();
+    expect(source.reran).toEqual([]);
+
+    // Nor does "stop all" reach across: only this session's own row stops.
+    panel.handleInput("a");
+    await panel.settle();
+    expect(source.stopped).toEqual(["bg-a1b2c"]);
+
+    panel.dispose();
+  });
+
+  it("names the whole session in the detail and reads its output from there", async () => {
+    const source = twoSessions();
+    source.tails.set("bg-x1x2x", { text: "edge ok", lines: 1, truncated: false });
+    const { panel, drawn } = await openOn("processes", source, () => 13_000, plainTheme());
+    await panel.settle();
+
+    panel.handleInput("o");
+    await panel.settle();
+    panel.handleInput(DOWN);
+    panel.handleInput(ENTER);
+    await panel.settle();
+
+    const text = drawn();
+    expect(text).toContain("deploy the edge");
+    // A six-character tag cannot be the whole truth, so the detail spells it out.
+    expect(text).toContain(STRANGER);
+    expect(source.tailed).toContain("bg-x1x2x");
+    expect(source.tailedFrom).toContain(STRANGER);
+
+    panel.dispose();
   });
 });

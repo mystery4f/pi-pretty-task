@@ -15,7 +15,7 @@ import {
   TASKS_SHORTCUT,
 } from "../src/ui/tasks-command.js";
 import { TasksPanel } from "../src/ui/tasks-panel.js";
-import { createHarness, type Harness, resultText } from "./support/extension-harness.js";
+import { createHarness, type Harness, resultText, type Turn } from "./support/extension-harness.js";
 import { isAlive, killTree, makeTempDir, waitFor, writeScript } from "./support/processes.js";
 
 const cleanup: Array<() => Promise<void>> = [];
@@ -42,8 +42,11 @@ interface LoopStarted {
   fires: number;
 }
 /** Open the panel the way `/tasks` does and hand back the live component. */
-async function openPanel(harness: Harness): Promise<{ panel: TasksPanel; closed: Promise<void> }> {
-  const closed = harness.runCommand(TASKS_COMMAND);
+async function openPanel(
+  harness: Harness,
+  turn?: Turn,
+): Promise<{ panel: TasksPanel; closed: Promise<void> }> {
+  const closed = harness.runCommand(TASKS_COMMAND, undefined, turn);
   const component = harness.lastCustom();
   if (!(component instanceof TasksPanel)) throw new Error("the tasks command opened no panel");
   await component.settle();
@@ -182,7 +185,7 @@ describe("/tasks command", () => {
     expect(harness.commandNames).toContain(TASKS_COMMAND);
 
     const { panel, closed } = await openPanel(harness);
-    expect(panel.render(100).join("\n")).toContain("No tasks yet");
+    expect(panel.render(100).join("\n")).toContain("No processes here");
     expect(harness.lastCustomOptions()?.overlay).toBe(true);
 
     panel.handleInput("\u001bq");
@@ -271,6 +274,8 @@ describe("/tasks command", () => {
     // A 10s loop run five times: five iterations, one command each.
     for (let fire = 1; fire <= 5; fire += 1) await fireLoop(harness, clock, fire);
     const { panel, closed } = await openPanel(harness);
+    // A loop gets its own page (ADR-0012); the panel opens on Processes.
+    panel.handleInput("2");
     const list = panel.render(100).join("\n");
     expect(list).toContain("review loop");
     expect(list).toContain(created.id);
@@ -323,6 +328,7 @@ describe("/tasks command", () => {
     await fireLoop(harness, clock, 1);
 
     const { panel, closed } = await openPanel(harness);
+    panel.handleInput("2");
     expect(panel.render(100).join("\n")).toContain("stop me");
 
     // One key for both kinds: on a loop row `k` ends the schedule, not a process.
@@ -339,5 +345,58 @@ describe("/tasks command", () => {
     panel.handleInput("\u001bq");
     await closed;
     expect(harness.widgets.at(-1)?.lines.join(" | ")).toContain("1 finished");
+  });
+
+  it("shows another session's task read-only, tagged and never stopped by k", async () => {
+    const dir = await makeTempDir();
+    cleanup.push(dir.dispose);
+    // One checkout, two sessions: the second keeps its own store under the same root.
+    const harness = createHarness({ cwd: dir.path, sessionId: "session-mine" });
+    const theirs: Turn = { cwd: dir.path, sessionId: "7f2c9d10-4b3a-4e55-9a01-6c7d8e9f0a1b" };
+    const command = await writeScript(
+      dir.path,
+      "edge.js",
+      "console.log('edge ok');\nsetTimeout(() => {}, 60000);\n",
+    );
+    const started = (await harness.call("bg_run", { name: "edge deploy", command }, theirs))
+      .details as StartedTask;
+    const pid = started.pid;
+    if (pid === undefined) throw new Error("bg_run reported no pid");
+    spawned.push(pid);
+    await waitFor("the other session's task to print its line", async () => {
+      const logs = await harness.call("bg_logs", { id: started.id, lines: 5 }, theirs);
+      return resultText(logs).includes("edge ok");
+    });
+
+    const { panel, closed } = await openPanel(harness);
+    // A reopened panel lands on the last page used, so this test names its own.
+    panel.handleInput("1");
+    // This session's own page is empty: the row is another session's to own.
+    expect(panel.render(100).join("\n")).toContain("No processes here");
+
+    panel.handleInput("o");
+    await panel.settle();
+    const list = panel.render(100).join("\n");
+    expect(list).toContain("edge deploy");
+    expect(list).toContain("@7f2c9d");
+
+    // The detail names the whole session and reads that session's output file.
+    panel.handleInput("\r");
+    await panel.settle();
+    const detail = panel.render(100).join("\n");
+    expect(detail).toContain(theirs.sessionId);
+    expect(detail).toContain("edge ok");
+
+    // `k` on another session's task says why and leaves the process running.
+    panel.handleInput("k");
+    await panel.settle();
+    expect(panel.render(100).join("\n")).toContain("another session's task is read-only here");
+    expect(isAlive(pid)).toBe(true);
+
+    panel.handleInput("\u001bq");
+    await closed;
+    // This session owns no task, and the other session's running one is not its
+    // count: the line above the editor stays empty rather than borrowing a run.
+    expect(harness.widgets.at(-1)?.lines).toEqual([]);
   });
 });

@@ -300,7 +300,7 @@ export function createExtension(
   for (const tool of loopTaskTools(loops)) pi.registerTool(tool);
   pi.registerMessageRenderer(TASK_FINISHED_CUSTOM_TYPE, renderTaskFinished);
   pi.registerMessageRenderer(LOOP_WAKE_CUSTOM_TYPE, renderLoopWake);
-  registerTasksCommand(pi, processTasks, loops);
+  registerTasksCommand(pi, processTasks, loops, chainTasks);
 
   // The status line is the panel's lasting trace (ADR-0003): it has to exist
   // before anyone opens `/tasks`, and it has to follow the tasks it counts.
@@ -310,7 +310,7 @@ export function createExtension(
     const ui = statusUi;
     const scope = statusScope;
     if (ui === undefined || scope === undefined) return;
-    void publishStatus(ui, processTasks, loops, scope);
+    void publishStatus(ui, processTasks, loops, chainTasks, scope);
   };
   /**
    * Adopt the UI of whatever event is running. `session_start` is the normal way
@@ -329,7 +329,7 @@ export function createExtension(
     statusUi = ctx.ui;
     statusScope = scope;
     uiAttached = ctx.hasUI === true;
-    if (fresh) await publishStatus(ctx.ui, processTasks, loops, scope);
+    if (fresh) await publishStatus(ctx.ui, processTasks, loops, chainTasks, scope);
   };
 
   const interval = options.pumpIntervalMs ?? DEFAULT_PUMP_INTERVAL_MS;
@@ -397,7 +397,7 @@ export function createExtension(
     uiAttached = ctx.hasUI;
     // The line exists before the panel is ever opened; `/tasks` only refreshes it,
     // so the first paint is awaited rather than left to race the session start.
-    await publishStatus(ctx.ui, processTasks, loops, scope);
+    await publishStatus(ctx.ui, processTasks, loops, chainTasks, scope);
     // Old sessions are reclaimed here, once per session start and never on a
     // timer: a sweep only runs where its cost can be waited out, and a process
     // that stays up for days never deletes history a user is still reading.
