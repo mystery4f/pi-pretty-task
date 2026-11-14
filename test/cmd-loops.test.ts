@@ -285,35 +285,141 @@ describe("command loops", () => {
     }
   });
 
-  it("announces a failed fire and stays silent when wakeOnFailure is off", async () => {
+  it("wakes once per failing fire with its exit code, duration and the last eight lines", async () => {
+    const task = await setup();
+    // Twelve numbered lines: a chatty failure may quote its tail, never the run.
+    const script = await writeScript(
+      task.directory.path,
+      "chatty.js",
+      [
+        "for (let index = 1; index <= 12; index += 1) {",
+        '  console.log("step-" + String(index).padStart(2, "0"));',
+        "}",
+        "// Keep the child alive long enough that the fire has a duration to report.",
+        "setTimeout(() => process.exit(7), 1_500);",
+        "",
+      ].join("\n"),
+    );
+    const loop = await createCmd(task.harness, { command: script, name: "chatty" });
+
+    await fireDue(task, loop);
+    // The child is running on the pinned clock: two seconds pass before it ends.
+    task.advance(2_000);
+    const first = await waitForFire(task.harness, loop.id, 1, "failed");
+    // The fire row is persisted before the notice is sent (`finishFire` awaits
+    // the row, then the send), so polling for the row can win that race.
+    await waitFor("the failure notice", () => task.harness.messages.length === 1);
+
+    // One message, in the completion notice's shape: a follow-up that starts a
+    // turn, displayed as a normal entry in the transcript.
+    expect(task.harness.messages).toHaveLength(1);
+    const notice = task.harness.messages[0];
+    expect(notice?.customType).toBe("task-finished");
+    expect(notice?.options).toEqual({ deliverAs: "followUp", triggerTurn: true });
+    expect(notice?.display).toBe(true);
+    expect(first.exitCode).toBe(7);
+    expect(notice?.content).toContain("name: chatty #1");
+    expect(notice?.content).toContain("status: failed");
+    // The fire ran for the two seconds the clock advanced, and the message says so.
+    expect(first.durationMs).toBe(2_000);
+    expect(notice?.content).toContain("duration: 2.0s");
+    expect(notice?.content).toContain("exit code: 7");
+    expect(notice?.details).toMatchObject({
+      status: "failed",
+      exitCode: 7,
+      durationMs: first.durationMs,
+    });
+
+    // The tail is bounded: the last eight lines, oldest first, and the rest stays
+    // readable through the child's own record.
+    const quoted = notice?.content.split("\n").filter((line) => line.startsWith("  "));
+    expect(quoted).toEqual([
+      "  step-05",
+      "  step-06",
+      "  step-07",
+      "  step-08",
+      "  step-09",
+      "  step-10",
+      "  step-11",
+      "  step-12",
+    ]);
+    expect(notice?.content).toContain(`read more: bg_logs id=${String(first.taskId)}`);
+    expect(notice?.details).toMatchObject({ outputTruncated: true });
+
+    // It is a normal transcript entry: the registered renderer draws it from the
+    // details, with theme tokens instead of raw escape codes.
+    const drawn = task.harness.render(notice?.customType ?? "", notice?.details);
+    expect(drawn).toContain("chatty #1");
+    expect(drawn).toContain("exit code: 7");
+    expect(drawn).toContain("step-12");
+    expect(drawn).toContain("<error>");
+
+    // A second failing fire wakes again: one message each, never two for one.
+    await fireDue(task, await loopDetails(task.harness, loop.id));
+    await waitForFire(task.harness, loop.id, 2, "failed");
+    await waitFor("the second failure notice", () => task.harness.messages.length === 2);
+    expect(task.harness.messages[1]?.content).toContain("name: chatty #2");
+    expect(task.harness.messages[1]?.content).toContain("exit code: 7");
+
+    // An idle transition sends nothing more: the notice is one message, not a
+    // queued wake that gets re-delivered when the agent settles.
+    await task.harness.emit({ type: "agent_settled", aborted: false });
+    await task.harness.flushWakes();
+    expect(task.harness.messages).toHaveLength(2);
+  });
+
+  it("stays silent when wake on failure is off, and still records the failure", async () => {
     const task = await setup();
     const script = await writeScript(
       task.directory.path,
       "boom.js",
       'console.error("boom");\nprocess.exit(3);\n',
     );
-    const loud = await createCmd(task.harness, { command: script, name: "loud" });
-
-    await fireDue(task, loud);
-    await waitForFire(task.harness, loud.id, 1, "failed");
-
-    // The fire row is persisted before the notice is sent (`finishFire` awaits
-    // the row, then the send), so polling for the row can win that race.
-    await waitFor("the failure notice", () => task.harness.messages.length === 1);
-    expect(task.harness.messages).toHaveLength(1);
-    const notice = task.harness.messages[0];
-    expect(notice?.customType).toBe("task-finished");
-    expect(notice?.content).toContain("name: loud #1");
-    expect(notice?.content).toContain("exit code: 3");
-    expect(notice?.content).toContain("boom");
-
     const quiet = await createCmd(task.harness, {
       command: script,
       name: "quiet",
       wakeOnFailure: false,
     });
+
     await fireDue(task, quiet);
     await waitForFire(task.harness, quiet.id, 1, "failed");
+
+    expect(task.harness.messages).toEqual([]);
+    // Silent is not invisible: the loop and its fire still carry the failure.
+    const view = await loopDetails(task.harness, quiet.id);
+    expect(view.lastExitCode).toBe(3);
+    expect(view.consecutiveFailures).toBe(1);
+    expect(view.fireHistory?.[0]).toMatchObject({ outcome: "failed", exitCode: 3 });
+    const listed = resultText(await task.harness.call("loop_list", { id: quiet.id }));
+    expect(listed).toContain("wake on failure: off");
+    // The row reads `newest #1 failed · exit 3 ...` and the fire listing repeats
+    // it per fire, so a silent loop is still a diagnosable one.
+    expect(listed).toContain("newest #1 failed · exit 3");
+    expect(listed).toContain("· failed · exit 3");
+  });
+
+  it("wakes mid-turn when a fire fails, and says nothing about output it never printed", async () => {
+    const task = await setup();
+    const script = await writeScript(task.directory.path, "silent.js", "process.exit(4);\n");
+    const loop = await createCmd(task.harness, { command: script, name: "silent" });
+
+    // A background fire can end while the agent is in the middle of a turn; the
+    // notice still goes out and pi holds it for the end of that turn.
+    await task.harness.emit({ type: "agent_start" });
+    await fireDue(task, loop);
+    await waitForFire(task.harness, loop.id, 1, "failed");
+    await waitFor("the failure notice", () => task.harness.messages.length === 1);
+
+    const notice = task.harness.messages[0];
+    expect(notice?.content).toContain("exit code: 4");
+    // No output means no tail to quote: the notice says nothing it cannot show,
+    // and the child's file is still one `bg_logs` call away.
+    expect(notice?.content).not.toContain("last output:");
+    expect(notice?.details).toMatchObject({ outputTail: "", outputTruncated: false });
+    expect(notice?.content).toContain("read more: bg_logs id=");
+
+    await task.harness.emit({ type: "agent_settled", aborted: false });
+    await task.harness.flushWakes();
     expect(task.harness.messages).toHaveLength(1);
   });
 
