@@ -9,7 +9,7 @@
 
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  STATUS_LINE_KEY,
+  SUMMARY_KEY,
   statusLineText,
   TASKS_COMMAND,
   TASKS_SHORTCUT,
@@ -115,13 +115,21 @@ describe("status line", () => {
     expect(running).toContain("/tasks");
   });
 
-  it("says so when the session has no tasks at all", () => {
-    expect(statusLineText([])).toContain("no tasks");
-    expect(statusLineText([])).toContain("/tasks");
+  it("has nothing to say when the session has no tasks at all", async () => {
+    const dir = await makeTempDir();
+    cleanup.push(dir.dispose);
+    const harness = createHarness({ cwd: dir.path, sessionId: "session-empty" });
+
+    await harness.startSession();
+
+    // No count to show means no line: the widget slot is cleared, not zeroed.
+    expect(harness.widgets.at(-1)).toEqual({ key: SUMMARY_KEY, lines: [] });
+    expect(harness.statuses).toEqual([]);
   });
 
   it("names the shortcut, which is registered and opens the same panel", async () => {
     expect(statusLineText([])).toContain("Shift↓");
+    expect(statusLineText([])).toBe(" · /tasks or Shift↓");
 
     const dir = await makeTempDir();
     cleanup.push(dir.dispose);
@@ -135,8 +143,7 @@ describe("status line", () => {
     panel.handleInput("x");
     await opened;
 
-    expect(harness.statuses.at(-1)?.text).toContain("Shift↓");
-    expect(harness.widgetKeys).toEqual([]);
+    expect(harness.widgets.at(-1)?.key).toBe(SUMMARY_KEY);
   });
 
   it("appears even when the extension is loaded mid-session", async () => {
@@ -147,9 +154,8 @@ describe("status line", () => {
     // `/reload` never emits session_start, so the first turn is the way in.
     await harness.emit({ type: "agent_start" });
 
-    const last = harness.statuses.at(-1);
-    expect(last?.key).toBe(STATUS_LINE_KEY);
-    expect(last?.text).toContain("Shift↓");
+    // With no task yet there is no line, but the slot is now known to the extension.
+    expect(harness.widgetKeys).toContain(SUMMARY_KEY);
   });
 
   it("is published at session start, before /tasks was ever opened", async () => {
@@ -159,10 +165,8 @@ describe("status line", () => {
 
     await harness.startSession();
 
-    const last = harness.statuses.at(-1);
-    expect(last?.key).toBe(STATUS_LINE_KEY);
-    expect(last?.text).toContain("no tasks");
-    expect(harness.widgetKeys).toEqual([]);
+    expect(harness.widgetKeys).toContain(SUMMARY_KEY);
+    expect(harness.statuses).toEqual([]);
   });
 });
 
@@ -182,25 +186,23 @@ describe("/tasks command", () => {
     await closed;
 
     // ADR 0003: the overlay is gone, and what remains is one line of text.
-    expect(harness.widgetKeys).toEqual([]);
+    expect(harness.widgetKeys).toEqual([SUMMARY_KEY]);
   });
 
-  it("leaves exactly one status-line summary when the panel closes", async () => {
+  it("leaves exactly one summary line when the panel closes", async () => {
     const dir = await makeTempDir();
     cleanup.push(dir.dispose);
     const harness = createHarness({ cwd: dir.path, sessionId: "session-status" });
 
     const { panel, closed } = await openPanel(harness);
-    expect(harness.statuses).toHaveLength(0);
+    expect(harness.widgetKeys).toEqual([]);
 
     panel.handleInput("x");
     await closed;
 
-    expect(harness.statuses).toHaveLength(1);
-    expect(harness.statuses[0]?.key).toBe(STATUS_LINE_KEY);
-    expect(harness.statuses[0]?.text).toContain("no tasks");
-    expect(harness.statuses[0]?.text).toContain("/tasks");
-    expect(harness.widgetKeys).toEqual([]);
+    // One slot, cleared: an idle session keeps no line above the editor.
+    expect(harness.widgetKeys).toEqual([SUMMARY_KEY]);
+    expect(harness.widgets[0]?.lines).toEqual([]);
   });
 
   it("lists a running process, shows its output, and stops it through the store", async () => {
@@ -244,8 +246,7 @@ describe("/tasks command", () => {
     panel.handleInput("x");
     await closed;
 
-    expect(harness.statuses.at(-1)?.text).toContain("1 finished");
-    expect(harness.widgetKeys).toEqual([]);
+    expect(harness.widgets.at(-1)?.lines.join(" | ")).toContain("1 finished");
   });
 
   it("shows a loop's iterations newest first, each with the commands its turn ran", async () => {
@@ -300,8 +301,9 @@ describe("/tasks command", () => {
     await closed;
 
     // The line was repainted as the turn ran; what matters is where it lands.
-    expect(harness.statuses.at(-1)?.text).toContain("1 running");
-    expect(harness.widgetKeys).toEqual([]);
+    const last = harness.widgets.at(-1);
+    expect(last?.lines.join(" | ")).toContain("1 running");
+    expect(last?.lines.join(" | ")).toContain("Shift↓");
   });
 
   it("stops a loop with k on its row, and the schedule never fires again", async () => {
@@ -333,7 +335,6 @@ describe("/tasks command", () => {
 
     panel.handleInput("x");
     await closed;
-    expect(harness.statuses.at(-1)?.text).toContain("1 finished");
-    expect(harness.widgetKeys).toEqual([]);
+    expect(harness.widgets.at(-1)?.lines.join(" | ")).toContain("1 finished");
   });
 });

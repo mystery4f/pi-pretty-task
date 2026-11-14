@@ -83,7 +83,9 @@ export interface Harness {
   lastCustomOptions(): CustomOptions | undefined;
   /** Every status-line update the extension made, oldest first. */
   readonly statuses: readonly StatusUpdate[];
-  /** Keys passed to `setWidget`; stays empty because the panel is not a widget. */
+  /** Every widget the extension set, oldest first; an empty list clears the slot. */
+  readonly widgets: readonly WidgetUpdate[];
+  /** Keys passed to `setWidget`, for a quick "did it use the widget slot" check. */
   readonly widgetKeys: readonly string[];
   /**
    * Pump loops due at a fake instant, as the extension timer would. While the
@@ -102,6 +104,12 @@ export interface Harness {
   emit(event: { readonly type: string } & Record<string, unknown>, turn?: Turn): Promise<void>;
   /** Run the extension's session_start handlers for a turn. */
   startSession(turn?: Turn): Promise<void>;
+}
+
+/** One call the extension made to `ctx.ui.setWidget`. */
+export interface WidgetUpdate {
+  readonly key: string;
+  readonly lines: readonly string[];
 }
 
 /** One call the extension made to `ctx.ui.setStatus`. */
@@ -174,6 +182,7 @@ export function createHarness(defaultTurn: Turn, options: HarnessOptions = {}): 
   const shortcuts = new Map<string, ShortcutDefinition>();
   const statuses: StatusUpdate[] = [];
   const widgetKeys: string[] = [];
+  const widgets: WidgetUpdate[] = [];
   let opened: { component: Component; options: CustomOptions } | undefined;
 
   const fakeTui = { requestRender: () => undefined } as unknown as TUI;
@@ -203,8 +212,9 @@ export function createHarness(defaultTurn: Turn, options: HarnessOptions = {}): 
     setStatus(key: string, text: string | undefined): void {
       statuses.push({ key, text });
     },
-    setWidget(key: string): void {
+    setWidget(key: string, content: readonly string[] | undefined): void {
       widgetKeys.push(key);
+      widgets.push({ key, lines: content === undefined ? [] : [...content] });
     },
     notify(): void {
       // Notices are not what these tests assert; recorded nowhere on purpose.
@@ -328,6 +338,7 @@ export function createHarness(defaultTurn: Turn, options: HarnessOptions = {}): 
     lastCustom: () => opened?.component,
     lastCustomOptions: () => opened?.options,
     statuses,
+    widgets,
     widgetKeys,
     pump(at) {
       return controller.pump(at);

@@ -36,12 +36,17 @@ export const TASKS_SHORTCUT = "shift+down";
  */
 export const TASKS_HINT = "/tasks or Shift↓";
 
-/** Status-line slot this package owns; one line, replaced in place. */
-export const STATUS_LINE_KEY = "pi-pretty-task";
+/** Widget slot this package owns; one line above the editor, replaced in place. */
+export const SUMMARY_KEY = "pi-pretty-task";
+
+/** Kept for the footer readers of the earlier build; the summary moved above the editor. */
+export const STATUS_LINE_KEY = SUMMARY_KEY;
 
 /**
  * The one line that stands in for the panel while it is closed: how many tasks
- * are running, how many have ended, and how to get the panel back.
+ * are running, how many have ended, and how to get the panel back. It lives just
+ * above the editor — the footer row is shared with every other extension and the
+ * count gets lost there.
  */
 export function statusLineText(tasks: readonly Task[]): string {
   const running = tasks.filter((task) => task.status === "running").length;
@@ -49,7 +54,6 @@ export function statusLineText(tasks: readonly Task[]): string {
   const parts: string[] = [];
   if (running > 0) parts.push(`${String(running)} running`);
   if (finished > 0) parts.push(`${String(finished)} finished`);
-  if (parts.length === 0) parts.push("no tasks");
   return `${parts.join(" · ")} · ${TASKS_HINT}`;
 }
 
@@ -163,7 +167,10 @@ async function openPanel(
   await publishStatus(ctx.ui, processes, loops, scope);
 }
 
-/** Replace the status line with the panel's one-line summary of both kinds. */
+/**
+ * Replace the one-line summary of both kinds. With no task there is nothing to
+ * count, so the line is removed rather than left saying zero.
+ */
 export async function publishStatus(
   ui: ExtensionUIContext,
   processes: ProcessTasks,
@@ -173,9 +180,9 @@ export async function publishStatus(
   try {
     const [running, scheduled] = await Promise.all([processes.list(scope), loops.list(scope)]);
     const tasks = [...running.map((view) => view.task), ...scheduled.map((view) => view.task)];
-    ui.setStatus(STATUS_LINE_KEY, statusLineText(tasks));
+    ui.setWidget(SUMMARY_KEY, tasks.length === 0 ? undefined : [statusLineText(tasks)]);
   } catch {
     // The count is a courtesy: a store that cannot list still gets the way back in.
-    ui.setStatus(STATUS_LINE_KEY, `/${TASKS_COMMAND}`);
+    ui.setWidget(SUMMARY_KEY, [`/${TASKS_COMMAND} or Shift↓`]);
   }
 }
