@@ -647,8 +647,8 @@ describe("stopping and closing", () => {
     await panel.settle();
 
     expect(done).not.toHaveBeenCalled();
-    expect(drawn()).toContain("xenon build");
-    expect(drawn()).not.toContain("lint ");
+    expect(plain(drawn())).toContain("xenon build");
+    expect(plain(drawn())).not.toContain("lint ");
     panel.dispose();
   });
 });
@@ -775,12 +775,12 @@ describe("the three pages", () => {
     // No process row answers to `deploy`, and the chain on another page is not
     // allowed to answer for it either (ADR-0012).
     expect(drawn()).toContain("Nothing on this page matches the search");
-    expect(drawn()).not.toContain("deploy queue");
+    expect(plain(drawn())).not.toContain("deploy queue");
 
     // Leaving search keeps the query; the page it names is reached by a page key.
     panel.handleInput("\x1bq");
     panel.handleInput("3");
-    expect(drawn()).toContain("deploy queue");
+    expect(plain(drawn())).toContain("deploy queue");
 
     // While the query is being typed, a digit is a character of it, not a page key.
     panel.handleInput("/");
@@ -1417,6 +1417,28 @@ describe("recency and search", () => {
     panel.dispose();
   });
 
+  it("lights the characters it matched, and only those, inside the row", async () => {
+    const source = new FakeSource();
+    source.rows = [view("bg-aaaaa", { name: "deploy-bg" })];
+    const { panel, drawn } = openPanel(source);
+    await panel.settle();
+
+    panel.handleInput("/");
+    for (const character of "dbg") panel.handleInput(character);
+
+    const row = drawn()
+      .split("\n")
+      .find((line) => line.includes("bg-aaaaa"));
+    expect(row).toBeDefined();
+    expect(row).toContain("<bold><accent>d</accent></bold>");
+    expect(row).toContain("<bold><accent>bg</accent></bold>");
+    // The characters between matches keep the name's own colour.
+    expect(row).toContain("<text>eploy-</text>");
+    expect(plain(row ?? "")).toContain("deploy-bg");
+
+    panel.dispose();
+  });
+
   it("finds a row by its id", async () => {
     const source = searchFixture();
     const { panel, drawn } = openPanel(source);
@@ -2008,6 +2030,27 @@ describe("chains in the list and in the detail", () => {
     await panel.settle();
     expect(drawn()).toContain("Nothing on this page matches the search");
     expect(drawn()).not.toContain("build → deploy → smoke");
+
+    panel.dispose();
+  });
+
+  it("lights the matched step inside a chain's column", async () => {
+    const source = new FakeSource();
+    source.rows = chainOf();
+    const { panel, drawn } = await openOn("chains", source);
+    await panel.settle();
+
+    panel.handleInput("/");
+    for (const character of "smo") panel.handleInput(character);
+
+    const row = drawn()
+      .split("\n")
+      .find((line) => line.includes("ch-abcde"));
+    expect(row).toBeDefined();
+    // `smoke` is a waiting step, so its own colour is muted; only the query's
+    // characters take the accent.
+    expect(row).toContain("<bold><accent>smo</accent></bold><muted>ke</muted>");
+    expect(plain(row ?? "")).toContain("build → deploy → smoke");
 
     panel.dispose();
   });
