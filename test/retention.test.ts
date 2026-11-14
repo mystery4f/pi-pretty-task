@@ -286,6 +286,21 @@ describe("retention", () => {
     expect(lines).toEqual([]);
   });
 
+  it("survives a tasks directory that cannot be listed at all", async () => {
+    const dir = await makeTempDir();
+    cleanup.push(dir.dispose);
+    await mkdir(join(dir.path, ".pi"), { recursive: true });
+    await writeFile(join(dir.path, RUNTIME_STATE_DIRECTORY), "not a directory");
+
+    const report = await pruneSessions({
+      scope: { cwd: dir.path, sessionId: "current-session" },
+      retentionDays: 7,
+      now: () => NOW,
+    });
+
+    expect(report).toEqual({ sessions: 0, bytes: 0, failures: 0 });
+  });
+
   it("frees the ids it removed", async () => {
     const root = await projectRoot();
     const directory = await storedSession(root, "old-session", [processTask()], {
