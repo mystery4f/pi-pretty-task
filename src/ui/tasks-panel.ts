@@ -136,6 +136,9 @@ export class TasksPanel implements Component {
   private callTop = 0;
 
   private notice: string | undefined;
+  /** Bytes each task had at the previous refresh, so the list can show `+4.1KB ↑`. */
+  private readonly lastBytes = new Map<string, number>();
+  private readonly recentGrowth = new Map<string, { bytes: number; at: number }>();
   /** Serialises async work so a keypress never races the refresh it started. */
   private pending: Promise<void> = Promise.resolve();
 
@@ -176,6 +179,8 @@ export class TasksPanel implements Component {
       // A store that cannot list is a store with nothing to show, not a crash.
       this.rows = [];
     }
+    this.trackGrowth();
+
     if (!this.rows.some((row) => row.task.id === this.selectedId)) {
       this.selectedId = this.rows[0]?.task.id;
       this.listTop = 0;
@@ -196,6 +201,27 @@ export class TasksPanel implements Component {
     }
   }
 
+  /**
+   * Remember how much each task grew since the last look, so a list row can say
+   * `+4.1KB ↑` the way a file manager shows a download. A finished task keeps its
+   * final size and shows no arrow.
+   */
+  private trackGrowth(): void {
+    const now = Date.now();
+    for (const row of this.rows) {
+      const before = this.lastBytes.get(row.task.id);
+      this.lastBytes.set(row.task.id, row.outputBytes);
+      if (before === undefined || row.outputBytes <= before) continue;
+      this.recentGrowth.set(row.task.id, { bytes: row.outputBytes - before, at: now });
+    }
+  }
+
+  /** The `+size ↑` a still-growing task shows for a few seconds after a refresh. */
+  private growthText(row: PanelTaskView): string {
+    const recent = this.recentGrowth.get(row.task.id);
+    if (recent === undefined || Date.now() - recent.at >= 3000) return "";
+    return ` ${this.theme.fg("warning", `+${formatBytes(recent.bytes)} ↑`)}`;
+  }
   render(width: number): string[] {
     // Field values are cut against the frame they sit in, so the frame never has to
     // re-measure text that already carries colour.
@@ -567,7 +593,7 @@ export class TasksPanel implements Component {
   ): string[] {
     const theme = this.theme;
     const inner = Math.max(1, width - 2);
-    const edge = (glyph: string): string => theme.fg("border", glyph);
+    const edge = (glyph: string): string => theme.fg("borderAccent", glyph);
     // The frame pads but never cuts: every line handed to it was already fitted by the
     // caller (list cells pad themselves, `field` cuts its value to the frame). Cutting
     // here as well would double-truncate text that merely carries colour.
@@ -666,8 +692,9 @@ export class TasksPanel implements Component {
     const name = theme.fg(STATUS_COLOUR[task.status], pad(task.name, nameRoom));
     const exit = theme.fg("dim", pad(exitText(task), exitRoom));
     const right = theme.fg("dim", padStart(rightText(row), rightRoom));
+    const growth = this.growthText(row);
 
-    const line = ` ${pointer} ${dot} ${name} ${id} ${kind}${separator}${status}${exit}${right}`;
+    const line = ` ${pointer} ${dot} ${name} ${id} ${kind}${separator}${status}${exit}${right}${growth}`;
     // A selected row is washed in one block of background, the way the panel this
     // replaces marks its cursor: the eye finds it without a colour of its own.
     return selected
@@ -690,13 +717,19 @@ export class TasksPanel implements Component {
     const task = row.task;
     const colour = STATUS_COLOUR[task.status];
     const body: string[] = [
+      this.field("Name", theme.fg("accent", task.name)),
+      this.field("ID", theme.fg("accent", task.id)),
       this.field("Status", theme.fg(colour, task.status)),
       this.field("Runtime", formatDuration(row.elapsedMs)),
-      this.field("Output", formatSize(row)),
+      this.field("Started", formatClockTime(task.createdAt)),
+      this.field("Output", task.outputPath),
+      this.field("Size", formatSize(row)),
     ];
+    if (task.endedAt !== undefined) {
+      body.push(this.field("Ended", formatClockTime(task.endedAt)));
+    }
     if (task.pid !== undefined) body.push(this.field("PID", String(task.pid)));
     body.push(this.field("Command", singleLine(task.command, Math.max(1, width - 14))));
-    body.push(this.field("Output file", task.outputPath));
     if (task.cwd !== undefined) body.push(this.field("CWD", task.cwd));
     if (task.exitCode !== undefined) {
       body.push(this.field("Exit code", theme.fg(colour, String(task.exitCode))));
@@ -723,7 +756,7 @@ export class TasksPanel implements Component {
   private outputBox(width: number): string[] {
     const theme = this.theme;
     const inner = Math.max(1, width - 2);
-    const edge = (glyph: string): string => theme.fg("borderMuted", glyph);
+    const edge = (glyph: string): string => theme.fg("borderAccent", glyph);
     const row = (content = ""): string => {
       const cut =
         visibleWidth(content) > inner ? truncateToWidth(content, inner, "…", false) : content;
@@ -739,6 +772,9 @@ export class TasksPanel implements Component {
       for (const line of this.detailLines.slice(from, to)) lines.push(row(` ${line}`));
       if (this.detailTruncated) lines.push(row(theme.fg("dim", " … older output left out")));
     }
+    // Keep the window the same height whatever the output does: a box that grows
+    // and shrinks under the reader's eyes is harder to scan than an empty one.
+    while (lines.length < DETAIL_OUTPUT_LINES + 1) lines.push(row());
     lines.push(edge(`╰${"─".repeat(inner)}╯`));
     return lines;
   }
