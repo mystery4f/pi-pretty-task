@@ -10,7 +10,7 @@
 
 import { afterEach, describe, expect, it } from "vitest";
 import type { TaskScope } from "../src/tasks/base/runtime-state.js";
-import { MAX_RUNNING_TASKS_ENV } from "../src/tasks/base/settings.js";
+import { DEFAULT_MAX_RUNNING_TASKS, MAX_RUNNING_TASKS_ENV } from "../src/tasks/base/settings.js";
 import { TaskSessions } from "../src/tasks/base/task-sessions.js";
 import { ChainTasks, type ChainTaskView } from "../src/tasks/chain/chain-tasks.js";
 import {
@@ -66,6 +66,26 @@ describe("the running-task cap", () => {
     ).rejects.toThrow(/already has 2 running process tasks; the limit is 2/);
     // A refused start is not a task that failed: nothing was written to explain.
     expect(await stores.processes.listAll(scope)).toHaveLength(2);
+  });
+
+  it("refuses the twenty-first task, the ceiling the scope doc promises", async () => {
+    const dir = await makeTempDir();
+    cleanup.push(dir.dispose);
+    const stores = makeStores({});
+    const scope: TaskScope = { cwd: dir.path, sessionId: "session-cap-twenty" };
+
+    for (let n = 1; n <= DEFAULT_MAX_RUNNING_TASKS; n += 1) {
+      await stores.processes.start({ ...scope, command: "sleep 1", name: `task ${String(n)}` });
+    }
+
+    await expect(
+      stores.processes.start({ ...scope, command: "sleep 1", name: "twenty-first" }),
+    ).rejects.toThrow(
+      new RegExp(
+        `already has ${String(DEFAULT_MAX_RUNNING_TASKS)} running process tasks; the limit is ${String(DEFAULT_MAX_RUNNING_TASKS)} \\(${MAX_RUNNING_TASKS_ENV}\\)`,
+      ),
+    );
+    expect(await stores.processes.listAll(scope)).toHaveLength(DEFAULT_MAX_RUNNING_TASKS);
   });
 
   it("counts a child task against the same ceiling", async () => {
