@@ -16,6 +16,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { commandPreview, formatBytes, formatDuration } from "../base/format.js";
+import type { ProcessTask } from "../base/task.js";
 
 import { parseTimeoutSeconds } from "./limits.js";
 import type { ProcessTasks, ProcessTaskView, TaskScope } from "./process-tasks.js";
@@ -23,7 +24,7 @@ import type { ProcessTasks, ProcessTaskView, TaskScope } from "./process-tasks.j
 const RunParameters = Type.Object({
   command: Type.String({
     description:
-      "Shell command to run in the background. Windows runs it through `cmd.exe /d /s /c` — cmd syntax, not POSIX sh; POSIX runs it through `sh -c`. Output is stored as raw bytes.",
+      "Shell command to run in the background. The shell depends on the platform and on the extension's configuration; `shell` picks another one for this call. Output is stored as raw bytes.",
   }),
   name: Type.Optional(
     Type.String({ description: "Short label for the task; defaults to the command itself." }),
@@ -33,6 +34,15 @@ const RunParameters = Type.Object({
       description:
         "Optional runtime cap in seconds. When it passes, the task is stopped with kill reason `timeout`; without it the task runs until it ends or is stopped.",
     }),
+  ),
+  shell: Type.Optional(
+    Type.Union(
+      [Type.Literal("default"), Type.Literal("cmd"), Type.Literal("bash"), Type.Literal("sh")],
+      {
+        description:
+          "Shell for this call: `default` follows the configured shell, the others name one. Windows has `cmd` and `bash`, POSIX has `bash` and `sh`; anything else is rejected.",
+      },
+    ),
   ),
 });
 
@@ -135,12 +145,21 @@ export function processTaskTools(tasks: ProcessTasks): ToolDefinition[] {
           return text(`${reason} The task was not started.`);
         }
       }
-      const task = await tasks.start({
-        ...scopeOf(ctx),
-        command: params.command,
-        ...(params.name === undefined ? {} : { name: params.name }),
-        ...(timeoutMs === undefined ? {} : { timeoutMs }),
-      });
+      let task: ProcessTask;
+      try {
+        task = await tasks.start({
+          ...scopeOf(ctx),
+          command: params.command,
+          ...(params.name === undefined ? {} : { name: params.name }),
+          ...(timeoutMs === undefined ? {} : { timeoutMs }),
+          ...(params.shell === undefined ? {} : { shell: params.shell }),
+        });
+      } catch (error) {
+        // A shell this call cannot have, or a shell that is not installed: the store
+        // throws before a record is written, so the turn gets the reason and no task.
+        const reason = error instanceof Error ? error.message : String(error);
+        return text(`${reason} The task was not started.`);
+      }
       const view = (await tasks.get(scopeOf(ctx), task.id)) ?? {
         task,
         elapsedMs: 0,

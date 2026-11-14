@@ -10,6 +10,8 @@
 
 import { open } from "node:fs/promises";
 
+import { decodeOutput } from "./decode.js";
+
 /** Tail of one output file. */
 export interface OutputTail {
   text: string;
@@ -24,6 +26,8 @@ export interface OutputTailOptions {
   lines: number;
   /** Maximum bytes to read from the end of the file. Defaults to 128 KiB. */
   maxBytes?: number;
+  /** Platform whose console encoding the reader falls back to; defaults to this host. */
+  platform?: NodeJS.Platform;
 }
 
 const DEFAULT_MAX_BYTES = 128 * 1024;
@@ -57,7 +61,9 @@ export async function readOutputTail(
 
     // The file keeps the raw bytes; a reader gets one line ending, because a
     // Windows shell writes CRLF while everything else here writes LF.
-    const all = buffer.toString("utf8").replace(/\r\n/g, "\n").split("\n");
+    const all = decodeOutput(buffer, { platform: options.platform ?? process.platform })
+      .replace(/\r\n/g, "\n")
+      .split("\n");
     let truncated = start > 0;
     // A tail that begins in the middle of a line would render as garbage.
     if (truncated) all.shift();

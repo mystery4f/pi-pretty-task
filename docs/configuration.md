@@ -1,19 +1,75 @@
 # 配置与上限
 
-本文档说明 v0.1 的全部配置面：一个经由环境变量给出的输出字节上限，以及 `bg_run` 每次可以自带的运行超时。两者都以“终止原因”收尾，见 `GLOSSARY.md` 的 Process task 条目。
+本文档说明 v0.1 的全部配置面：命令在哪个 shell 里跑、输出字节上限，以及 `bg_run` 每次可以自带的运行超时。上限与超时都以“终止原因”收尾，见 `GLOSSARY.md` 的 Process task 条目；shell 与解码的决定见 `docs/adr/0008-shell-choice-and-output-decoding.md`。
 
 ## 命令在哪个 shell 里跑
 
-`bg_run` 的 `command` 不是一条跨平台的“shell 脚本”，它交给当前平台的默认 shell：
+`bg_run` 的 `command` 不是一条跨平台的“shell 脚本”，它交给当前平台选定的 shell。默认是各平台的老样子，可以整体换掉，也可以只换一次调用：
 
-| 平台 | 实际调用 | 该写哪种语法 |
+| 平台 | 默认 | 可选 |
 |---|---|---|
-| Windows | `cmd.exe /d /s /c "<command>"`（`ComSpec` 指向别的 shell 时用它） | cmd：`for /L %i in (1,1,5) do @echo tick %i` |
-| POSIX | `sh -c "<command>"`（`-c`，非登录 shell） | sh：`for i in 1 2 3 4 5; do echo "tick $i"; sleep 2; done` |
+| Windows | `cmd.exe /d /s /c "<command>"`（`ComSpec` 指向别的 shell 时用它） | `cmd`、`bash` |
+| POSIX | `"$SHELL" -c "<command>"`，`$SHELL` 为空时用 `/bin/sh`（`-c`，非登录 shell） | `inherit`、`bash`、`sh` |
 
-拿 POSIX 语法喂 Windows 会得到 `此时不应有 i` 这类 cmd 报错，状态 `failed`、退出码 1——这不是任务失败，是命令写错了方言。v0.1 不提供 shell 选择参数；需要 PowerShell 或 bash 时把解释器写进命令里，例如 `powershell -NoProfile -Command "..."` 或 `bash -lc "..."`（后者要求 PATH 上有 bash）。
+语法要跟着 shell 走。cmd 写 `for /L %i in (1,1,5) do @echo tick %i`，bash 写 `for i in 1 2 3 4 5; do echo "tick $i"; sleep 2; done`。拿 POSIX 语法喂 Windows 的默认 shell 会得到 `此时不应有 i` 这类 cmd 报错，状态 `failed`、退出码 1——这不是任务失败，是命令写错了方言。
 
-输出按字节原样追加，不做转码：Windows 控制台程序按系统代码页（中文环境通常是 GBK）写出中文报错，读回来就是乱码。要 UTF-8，开局 `chcp 65001` 或让命令自己输出 UTF-8。
+### 四个键
+
+| 键 | 平台 | 取值 | 默认 |
+|---|---|---|---|
+| `PI_PRETTY_TASK_SHELL` | Windows | `cmd`、`bash` | `cmd` |
+| `PI_PRETTY_TASK_SHELL_PATH` | Windows | 绝对路径，给上一条点名的 shell 用 | 无（`cmd` 取 `ComSpec`，`bash` 在 PATH 上找 `bash.exe`、`bash.com`） |
+| `PI_PRETTY_TASK_POSIX_SHELL` | POSIX | `inherit`、`bash`、`sh` | `inherit` |
+| `PI_PRETTY_TASK_POSIX_SHELL_PATH` | POSIX | 绝对路径，且必须是可执行文件 | 无（先找 `/bin/<name>`，再找 PATH） |
+
+Windows 上改用 PATH 上的 bash：
+
+```
+set PI_PRETTY_TASK_SHELL=bash
+```
+
+bash 不在 PATH 上时，用单独的键给出路径（两个键成对出现，只给路径不给 shell 是错误）：
+
+```
+set PI_PRETTY_TASK_SHELL=bash
+set PI_PRETTY_TASK_SHELL_PATH=D:\Git\bin\bash.exe
+```
+
+POSIX 上改用 bash，或者干脆钉死一个 sh：
+
+```
+export PI_PRETTY_TASK_POSIX_SHELL=bash
+export PI_PRETTY_TASK_POSIX_SHELL_PATH=/usr/local/bin/bash
+```
+
+```
+export PI_PRETTY_TASK_POSIX_SHELL=sh
+```
+
+取值在扩展加载时校验一次，错误信息带上键名、收到的值和可选项，例如：
+
+```
+PI_PRETTY_TASK_SHELL does not accept "zsh"; on win32 it is one of: cmd, bash
+PI_PRETTY_TASK_POSIX_SHELL_PATH is set without PI_PRETTY_TASK_POSIX_SHELL; it only supplies the path of the shell that key names
+```
+
+**不做静默兜底**：找不到 bash 就加载失败并说明搜过哪里，而不是悄悄退回 cmd——退回会让一条 bash 命令在 cmd 里跑，报错却指向另一件事。平台之外的键同样是错误（在 Windows 上设 `PI_PRETTY_TASK_POSIX_SHELL` 没人读，就当配置错误报出来）。
+
+### 只换一次调用
+
+`bg_run` 的 `shell` 取 `default`、`cmd`、`bash`、`sh`：`default`（不给也一样）跟随上面的配置，其余取值直接点名一个 shell。平台不支持的取值当场拒绝，信息列出该平台允许的取值，任务不会创建：
+
+```
+shell "sh" is not available on win32; use one of: default, cmd, bash
+```
+
+`inherit` 不在 `bg_run` 的取值里——它是“跟随平台默认”的配置意图，一次调用则应该点名具体 shell。
+
+### 编码
+
+输出按字节原样落盘，不做转码；读回来的时候才解码，顺序是：先严格按 UTF-8，能解就是它；解不了且开头是续字节（读到的尾巴切在字符中间）就去掉最多 3 个续字节再试；仍然解不了时，Windows 按 GB18030（GBK 的超集，中文控制台的代码页）解码，POSIX 保持 UTF-8 有损解码（丢掉坏字节、留下 `�`）。POSIX 不猜老代码页：那里非法 UTF-8 更可能是二进制而不是 GBK。
+
+所以 Windows 上 `ping` 之类按代码页写中文的控制台程序，中文能读回来；要 UTF-8 仍然可以 `chcp 65001` 或让命令自己输出 UTF-8。
 
 ## 输出字节上限
 
@@ -49,4 +105,4 @@ pi 会把这条信息报告为 “Failed to load extension: …”。**不做静
 
 ## 上限如何落到进程上
 
-上限由 `src/tasks/process/limits.ts` 解析，扩展入口 `src/index.ts` 在注册任何工具之前调用它，解析结果交给 `ProcessTasks`，由其传给 supervisor 的输出写入点。超限与超时都不引入第二套终止机制：它们只是带着原因调用 `ProcessTasks.stop()`，与 `bg_kill` 走同一条路。
+上限由 `src/tasks/process/limits.ts` 解析，shell 策略由 `src/tasks/process/shell.ts` 解析；扩展入口 `src/index.ts` 在注册任何工具之前调用两者，解析结果交给 `ProcessTasks`，由其传给 supervisor 的输出写入点与 `spawn` 调用。`bg_run` 的 `shell` 在 `spawn` 之前解析完，不支持的取值不会留下一条跑不起来的记录。超限与超时都不引入第二套终止机制：它们只是带着原因调用 `ProcessTasks.stop()`，与 `bg_kill` 走同一条路。读输出时 `src/tasks/base/decode.ts` 是唯一解码点，`src/tasks/base/output.ts` 的尾巴读取与 `bg_logs` 的整段读取共用它。

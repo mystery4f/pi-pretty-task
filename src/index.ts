@@ -17,6 +17,7 @@ import { type LoopFire, LoopTasks } from "./tasks/loop/loop-tasks.js";
 import { loopTaskTools } from "./tasks/loop/tools.js";
 import { parseOutputCapBytes } from "./tasks/process/limits.js";
 import { ProcessTasks } from "./tasks/process/process-tasks.js";
+import { resolveShellPolicy } from "./tasks/process/shell.js";
 import { processTaskTools } from "./tasks/process/tools.js";
 import { LOOP_WAKE_CUSTOM_TYPE, renderLoopWake, sendLoopWake } from "./ui/loop-wake.js";
 import {
@@ -77,7 +78,11 @@ export function createExtension(
   // Configuration is read first, before anything is registered: a value that is
   // not usable has to fail the load with a message that names the key, because a
   // limit that silently becomes `NaN` would end every task on its first byte.
-  const outputCapBytes = parseOutputCapBytes(options.env ?? process.env);
+  const env = options.env ?? process.env;
+  const outputCapBytes = parseOutputCapBytes(env);
+  // The shell is settled here for the same reason: a selector that names a shell
+  // this platform does not have must fail the load, not the first `bg_run`.
+  const shellPolicy = resolveShellPolicy({ env });
   const now = options.now ?? Date.now;
   const sessions = new TaskSessions({ now });
   const iterations = new Iterations({
@@ -102,6 +107,7 @@ export function createExtension(
     sessions,
     now,
     outputCapBytes,
+    shellPolicy,
     // The store does not await the announcement; a notice outlives the task.
     onFinish: (view) => {
       void notifyTaskFinished(pi, view);

@@ -18,6 +18,7 @@ import { processOutputPath, sessionTaskDirectory, type TaskScope } from "../base
 import type { KillReason, ProcessTask, Task } from "../base/task.js";
 import { type TaskSession, TaskSessions } from "../base/task-sessions.js";
 import { DEFAULT_OUTPUT_CAP_BYTES } from "./limits.js";
+import { resolveShellPolicy, type ShellChoice, type ShellPolicy } from "./shell.js";
 import { type RunningProcess, type StopOutcome, startProcess } from "./supervisor.js";
 
 export type { TaskScope };
@@ -30,6 +31,8 @@ export interface StartProcessTaskInput extends TaskScope {
    * seconds; the record and the timer speak milliseconds.
    */
   timeoutMs?: number;
+  /** Shell for this command; the configured one unless the call picks another. */
+  shell?: ShellChoice;
 }
 
 /** A task as it looks right now: the record plus the values that keep moving. */
@@ -82,6 +85,11 @@ export interface ProcessTasksOptions {
   onFinish?: (view: ProcessTaskView) => void;
   /** Shared session loader; one instance is passed to every kind of store. */
   sessions?: TaskSessions;
+  /**
+   * Shell resolved at load time. Absent, the store resolves one from `env`: a task
+   * started by a test still runs in the platform's default shell.
+   */
+  shellPolicy?: ShellPolicy;
 }
 /**
  * The process store's view of a shared session: the loaded records plus the
@@ -167,6 +175,8 @@ export class ProcessTasks {
   private readonly killConfirmMs: number | undefined;
   private readonly outputCapBytes: number;
   private readonly onFinish: ((view: ProcessTaskView) => void) | undefined;
+  /** The shell every task starts in, resolved once so a bad config fails at load. */
+  private readonly shellPolicy: ShellPolicy;
 
   /** Loads and saves the shared record set; both kinds write through it. */
   private readonly hub: TaskSessions;
@@ -179,6 +189,8 @@ export class ProcessTasks {
     this.killConfirmMs = options.killConfirmMs;
     this.outputCapBytes = options.outputCapBytes ?? DEFAULT_OUTPUT_CAP_BYTES;
     this.onFinish = options.onFinish;
+    this.shellPolicy =
+      options.shellPolicy ?? resolveShellPolicy({ platform: this.platform, env: this.env });
   }
 
   /** Start a command in the background and return its record immediately. */
@@ -216,6 +228,8 @@ export class ProcessTasks {
         },
         platform: this.platform,
         env: this.env,
+        shellPolicy: this.shellPolicy,
+        shell: input.shell,
       });
     } catch (error) {
       session.tasks.delete(id);
@@ -263,7 +277,9 @@ export class ProcessTasks {
     const session = await this.session(scope);
     const task = session.tasks.get(id);
     if (task === undefined || task.kind !== "process") return undefined;
-    const tail = await readOutputTail(task.outputPath, options);
+    // Every reader of a task's output comes through here, so one decoder serves
+    // `bg_logs`, the panel and a completion notice alike (ADR-0008).
+    const tail = await readOutputTail(task.outputPath, { ...options, platform: this.platform });
     return { view: this.view(session, task), tail };
   }
 

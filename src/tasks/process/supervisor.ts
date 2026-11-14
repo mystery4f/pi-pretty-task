@@ -11,46 +11,16 @@ import { type ChildProcess, execFile, spawn } from "node:child_process";
 import { createWriteStream } from "node:fs";
 import { win32 as windowsPath } from "node:path";
 
-/** How one command is handed to this platform's shell. */
-export interface ShellInvocation {
-  readonly executable: string;
-  readonly args: readonly string[];
-  readonly windowsVerbatimArguments: boolean;
-}
+import {
+  resolveShellPolicy,
+  type ShellChoice,
+  type ShellPolicy,
+  selectShell,
+  shellInvocation,
+} from "./shell.js";
 
-/**
- * Pick the shell for a command.
- *
- * Windows runs the command through `cmd.exe /d /s /c "<command>"` with verbatim
- * arguments, exactly as a terminal does, so builtins, `&&` and quoted paths
- * behave the same. `/d` skips AutoRun registry commands, `/s` makes the outer
- * quote pair be stripped rather than reinterpreted, and verbatim arguments stop
- * Node from re-quoting anything we pass — without them a command containing
- * quotes reaches cmd mangled.
- *
- * POSIX runs the user's own shell with `-c`: no `-l`, so no login-shell startup
- * files run and the command sees the environment pi was started with.
- */
-export function resolveShellInvocation(
-  command: string,
-  platform: NodeJS.Platform = process.platform,
-  env: NodeJS.ProcessEnv = process.env,
-): ShellInvocation {
-  if (platform === "win32") {
-    const comSpec = env.ComSpec;
-    return {
-      executable: comSpec !== undefined && comSpec.length > 0 ? comSpec : "cmd.exe",
-      args: ["/d", "/s", "/c", `"${command}"`],
-      windowsVerbatimArguments: true,
-    };
-  }
-  const shell = env.SHELL;
-  return {
-    executable: shell !== undefined && shell.length > 0 ? shell : "/bin/sh",
-    args: ["-c", command],
-    windowsVerbatimArguments: false,
-  };
-}
+/** How one command is handed to this platform's shell lives with the policy (ADR-0008). */
+export type { ShellInvocation } from "./shell.js";
 
 /** How a process ended. */
 export interface ProcessExit {
@@ -115,6 +85,10 @@ export interface StartProcessOptions {
   onOutputCap?: () => void;
   platform?: NodeJS.Platform;
   env?: NodeJS.ProcessEnv;
+  /** Shell resolved at load time; resolved from `env` when it is not given. */
+  shellPolicy?: ShellPolicy;
+  /** Shell for this one command; the policy's shell unless this names another. */
+  shell?: ShellChoice;
 }
 
 /**
@@ -128,7 +102,13 @@ export interface StartProcessOptions {
 export function startProcess(options: StartProcessOptions): RunningProcess {
   const platform = options.platform ?? process.platform;
   const env = options.env ?? process.env;
-  const invocation = resolveShellInvocation(options.command, platform, env);
+  // A per-call shell is resolved before anything is spawned, so a shell this platform
+  // does not have rejects the call instead of leaving a task that cannot run.
+  const policy = options.shellPolicy ?? resolveShellPolicy({ platform, env });
+  const invocation = shellInvocation(
+    selectShell(policy, options.shell, { platform, env }),
+    options.command,
+  );
   const output = createWriteStream(options.outputPath, { flags: "a" });
   let bytesWritten = 0;
   // Stop state lives outside the exit promise: a stop can answer before the exit
