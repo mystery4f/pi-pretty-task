@@ -6,10 +6,13 @@
  * @author mystery4f <40482524+mystery4f@users.noreply.github.com>
  */
 
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readFile, realpath, writeFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
+import { Value } from "typebox/value";
 import { afterEach, describe, expect, it } from "vitest";
-
+import { sessionTaskDirectory, taskRecordPath } from "../src/tasks/base/runtime-state.js";
+import { ProcessTasks } from "../src/tasks/process/process-tasks.js";
+import { processTaskTools } from "../src/tasks/process/tools.js";
 import { createHarness, type Harness, resultText } from "./support/extension-harness.js";
 import { isAlive, killTree, makeTempDir, waitFor, writeScript } from "./support/processes.js";
 
@@ -22,6 +25,7 @@ interface TaskDetails {
   outputBytes: number;
   pid?: number;
   exitCode?: number | null;
+  cwd: string;
   outputPath: string;
   killReason?: string;
 }
@@ -45,11 +49,21 @@ async function startRunning(
   harness: Harness,
   command: string,
   name = "slow build",
+  extra: Record<string, unknown> = {},
 ): Promise<TaskDetails> {
-  const result = await harness.call("bg_run", { name, command });
+  const result = await harness.call("bg_run", { name, command, ...extra });
   const details = result.details as TaskDetails;
   trackPid(details);
   return details;
+}
+
+/** Ask for one task's status until it is no longer running. */
+async function waitForEnd(harness: Harness, id: string): Promise<TaskDetails> {
+  await waitFor("the task to finish", async () => {
+    const status = await harness.call("bg_status", { id });
+    return (status.details as TaskDetails).status !== "running";
+  });
+  return (await harness.call("bg_status", { id })).details as TaskDetails;
 }
 
 describe("bg_run", () => {
@@ -119,6 +133,136 @@ describe("bg_run output", () => {
         .map((line) => Number(line.split(" ")[1]));
     expect(sequence("out")).toEqual(Array.from({ length: 50 }, (_, index) => index * 2));
     expect(sequence("err")).toEqual(Array.from({ length: 50 }, (_, index) => index * 2 + 1));
+  });
+});
+
+describe("bg_run's directory and environment", () => {
+  it("resolves a relative cwd from the session directory and runs the child there", async () => {
+    const dir = await makeTempDir();
+    cleanup.push(dir.dispose);
+    const work = join(dir.path, "nested", "work");
+    await mkdir(work, { recursive: true });
+    const command = await writeScript(
+      dir.path,
+      "where.js",
+      "require('node:fs').writeFileSync('cwd.txt', process.cwd());\n",
+    );
+    const harness = createHarness({ cwd: dir.path, sessionId: "session-cwd" });
+
+    const task = await startRunning(harness, command, "relative cwd", {
+      cwd: join("nested", "work"),
+    });
+
+    // The record keeps the absolute path, resolved once against the session.
+    expect(task.cwd).toBe(resolve(dir.path, "nested", "work"));
+    expect(resultText(await harness.call("bg_status", { id: task.id }))).toContain(task.cwd);
+
+    const done = await waitForEnd(harness, task.id);
+    expect(done.status).toBe("completed");
+
+    // The script wrote into its own cwd, so the file exists only inside `work`.
+    const reported = (await readFile(join(work, "cwd.txt"), "utf8")).trim();
+    expect(await realpath(reported)).toBe(await realpath(work));
+  });
+
+  it("rejects a cwd that is missing or not a directory, leaving no task record", async () => {
+    const dir = await makeTempDir();
+    cleanup.push(dir.dispose);
+    const file = join(dir.path, "not-a-directory.txt");
+    await writeFile(file, "file\n", "utf8");
+    const harness = createHarness({ cwd: dir.path, sessionId: "session-cwd-invalid" });
+
+    const missing = await harness.call("bg_run", { command: "echo hi", cwd: "no-such-dir" });
+    expect(resultText(missing)).toContain(resolve(dir.path, "no-such-dir"));
+    expect(resultText(missing)).toContain("The task was not started.");
+
+    const notDirectory = await harness.call("bg_run", {
+      command: "echo hi",
+      cwd: "not-a-directory.txt",
+    });
+    expect(resultText(notDirectory)).toContain(resolve(dir.path, "not-a-directory.txt"));
+    expect(resultText(notDirectory)).toContain("is not a directory");
+    expect(resultText(notDirectory)).toContain("The task was not started.");
+
+    expect(resultText(await harness.call("bg_status", {}))).toContain("No background tasks");
+    // Not even a half-written record: the rejection happens before the first save.
+    await expect(
+      readFile(taskRecordPath(sessionTaskDirectory(dir.path, "session-cwd-invalid")), "utf8"),
+    ).rejects.toThrow();
+  });
+
+  it("merges env over the extension's environment for the child only, never onto disk", async () => {
+    const dir = await makeTempDir();
+    cleanup.push(dir.dispose);
+    const command = await writeScript(
+      dir.path,
+      "env.js",
+      [
+        "const value = process.env.PI_PRETTY_TASK_TEST;",
+        "process.stdout.write('value=' + (value === undefined ? 'undefined' : value) + '\\n');",
+        "",
+      ].join("\n"),
+    );
+    const harness = createHarness({ cwd: dir.path, sessionId: "session-env" });
+    const secret = "s3cret-token";
+
+    const withEnv = await startRunning(harness, command, "with env", {
+      env: { PI_PRETTY_TASK_TEST: secret },
+    });
+    await waitForEnd(harness, withEnv.id);
+    expect(resultText(await harness.call("bg_logs", { id: withEnv.id }))).toContain(
+      `value=${secret}`,
+    );
+
+    // An empty string is a value too: it blanks the variable for this child.
+    const blanked = await startRunning(harness, command, "blank env", {
+      env: { PI_PRETTY_TASK_TEST: "" },
+    });
+    await waitForEnd(harness, blanked.id);
+    const blankedText = resultText(await harness.call("bg_logs", { id: blanked.id }));
+    expect(blankedText.split("\n").filter((line) => line.startsWith("value="))).toEqual(["value="]);
+
+    // The next call does not inherit the previous call's variables.
+    const without = await startRunning(harness, command, "without env");
+    await waitForEnd(harness, without.id);
+    expect(resultText(await harness.call("bg_logs", { id: without.id }))).toContain(
+      "value=undefined",
+    );
+
+    // A record in a file is not a safe place for a token: neither the value nor
+    // its name is written, and no tool prints it.
+    const recordPath = taskRecordPath(sessionTaskDirectory(dir.path, "session-env"));
+    type SavedRecord = { tasks: Array<{ id: string; status: string }> };
+    const readRecord = async (): Promise<SavedRecord | undefined> => {
+      try {
+        return JSON.parse(await readFile(recordPath, "utf8")) as SavedRecord;
+      } catch {
+        return undefined;
+      }
+    };
+    await waitFor("the final record to reach the disk", async () => {
+      const record = await readRecord();
+      return (
+        record?.tasks.some((task) => task.id === without.id && task.status === "completed") ?? false
+      );
+    });
+    const record = await readFile(recordPath, "utf8");
+    expect(record).not.toContain(secret);
+    expect(record).not.toContain("PI_PRETTY_TASK_TEST");
+    expect(resultText(await harness.call("bg_status", { id: withEnv.id }))).not.toContain(secret);
+  });
+
+  it("accepts env only as string values, at the schema seam", () => {
+    const run = processTaskTools(new ProcessTasks()).find((tool) => tool.name === "bg_run");
+    if (run === undefined) throw new Error("bg_run is not registered");
+    const accepts = (env: unknown): boolean =>
+      Value.Check(run.parameters, { command: "echo hi", env });
+
+    expect(accepts({ PI_PRETTY_TASK_TEST: "yes" })).toBe(true);
+    // An empty string is a value and blanks the variable.
+    expect(accepts({ PI_PRETTY_TASK_TEST: "" })).toBe(true);
+    expect(accepts({ PI_PRETTY_TASK_TEST: undefined })).toBe(false);
+    expect(accepts({ PI_PRETTY_TASK_TEST: 1 })).toBe(false);
   });
 });
 

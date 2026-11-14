@@ -44,6 +44,18 @@ const RunParameters = Type.Object({
       },
     ),
   ),
+  cwd: Type.Optional(
+    Type.String({
+      description:
+        "Directory the command runs in. A relative path is resolved against the session's working directory; the resolved absolute path is kept in the task record and shown by the panel and bg_status. The directory must already exist.",
+    }),
+  ),
+  env: Type.Optional(
+    Type.Record(Type.String(), Type.String(), {
+      description:
+        "Environment variables for this command only, merged over the extension's environment for the child. An empty string blanks a variable. Neither names nor values are written to the task record or printed by any tool.",
+    }),
+  ),
 });
 
 const StatusParameters = Type.Object({
@@ -98,6 +110,7 @@ export function describeTask(view: ProcessTaskView, options: { full?: boolean } 
     `elapsed: ${formatDuration(view.elapsedMs)}`,
     `output: ${formatBytes(view.outputBytes)}`,
     `output file: ${task.outputPath}`,
+    `cwd: ${task.cwd}`,
     `command: ${options.full === true ? task.command : commandPreview(task.command, COMMAND_PREVIEW_LENGTH)}`,
   ];
   if (task.exitCode !== undefined && task.exitCode !== null) {
@@ -120,6 +133,7 @@ function taskDetails(view: ProcessTaskView) {
     pid: view.task.pid,
     exitCode: view.task.exitCode,
     command: view.task.command,
+    cwd: view.task.cwd,
     outputPath: view.task.outputPath,
     killReason: view.task.killReason,
   };
@@ -153,10 +167,13 @@ export function processTaskTools(tasks: ProcessTasks): ToolDefinition[] {
           ...(params.name === undefined ? {} : { name: params.name }),
           ...(timeoutMs === undefined ? {} : { timeoutMs }),
           ...(params.shell === undefined ? {} : { shell: params.shell }),
+          ...(params.cwd === undefined ? {} : { workingDirectory: params.cwd }),
+          ...(params.env === undefined ? {} : { env: params.env }),
         });
       } catch (error) {
-        // A shell this call cannot have, or a shell that is not installed: the store
-        // throws before a record is written, so the turn gets the reason and no task.
+        // A shell this call cannot have, a shell that is not installed, or a
+        // directory that cannot be used: the store throws before a record is
+        // written, so the turn gets the reason and no task.
         const reason = error instanceof Error ? error.message : String(error);
         return text(`${reason} The task was not started.`);
       }

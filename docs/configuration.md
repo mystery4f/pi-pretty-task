@@ -1,6 +1,6 @@
 # 配置与上限
 
-本文档说明 v0.1 的全部配置面：命令在哪个 shell 里跑、输出字节上限，以及 `bg_run` 每次可以自带的运行超时。上限与超时都以“终止原因”收尾，见 `GLOSSARY.md` 的 Process task 条目；shell 与解码的决定见 `docs/adr/0008-shell-choice-and-output-decoding.md`。
+本文档说明 v0.1 的全部配置面：命令在哪个 shell 里跑、输出字节上限，以及 `bg_run` 每次可以自带的运行超时、工作目录与环境变量。上限与超时都以“终止原因”收尾，见 `GLOSSARY.md` 的 Process task 条目；shell 与解码的决定见 `docs/adr/0008-shell-choice-and-output-decoding.md`。
 
 ## 命令在哪个 shell 里跑
 
@@ -98,6 +98,23 @@ pi 会把这条信息报告为 “Failed to load extension: …”。**不做静
 `bg_run` 接受可选的 `timeoutSeconds`：正数秒，最多 `2147483.647`（`setTimeout` 能计量的最长延迟，超过会被 Node 折成 1ms，等于立刻超时）。到点后走同一个 `stop` 路径，状态 `killed`，终止原因 `timeout`，`bg_status` 与 `bg_logs` 同样显示 `kill reason: timeout`。非法值（`0`、负数、`NaN`、`Infinity`）在启动进程之前就被拒绝，任务不会创建。
 
 **没有默认超时。** v0.1 的验收要求一条 10 分钟的长任务不被杀掉，默认超时与这条验收直接冲突；需要上限的调用方自己给出秒数。
+
+## 每次调用的目录与环境变量
+
+`bg_run` 每次调用可以自带 `cwd` 和 `env`，只影响这次派生出来的子进程：
+
+| 参数 | 形状 | 作用 |
+|---|---|---|
+| `cwd` | string | 命令在哪个目录里跑 |
+| `env` | `{ [名字]: string }` | 只给这个子进程的环境变量 |
+
+`cwd` 按会话工作目录解析：相对路径拼在会话目录后面，绝对路径原样使用，没给就用会话目录。最终使用的绝对路径写进任务记录，面板与 `bg_status` 都显示它，之后不再重新解析。目录必须存在且确实是目录，否则在创建任务记录之前就拒绝，错误信息带上解析后的路径，例如：
+
+```
+Working directory /work/project/no-such-dir does not exist. The task was not started.
+```
+
+`env` 合并到扩展自身的 `process.env` 之上，只作用于这个子进程；空字符串也是值，可以把变量清空。`undefined` 或非字符串会被 schema 拒绝。**`env` 不落盘**：名字和值都不写进 `.pi/tasks/<session>/tasks.json`，也没有任何工具会把值打印出来——文件里的记录不是存放 token 的地方，而进程启动时已经拿到了它。
 
 ## 为什么只有环境变量
 

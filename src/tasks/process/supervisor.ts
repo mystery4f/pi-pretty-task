@@ -85,6 +85,12 @@ export interface StartProcessOptions {
   onOutputCap?: () => void;
   platform?: NodeJS.Platform;
   env?: NodeJS.ProcessEnv;
+  /**
+   * Variables for this child only, layered over `env`. Empty strings are values
+   * and blank the variable; the base environment still decides the shell and
+   * carries the stop commands.
+   */
+  envOverrides?: Record<string, string>;
   /** Shell resolved at load time; resolved from `env` when it is not given. */
   shellPolicy?: ShellPolicy;
   /** Shell for this one command; the policy's shell unless this names another. */
@@ -102,6 +108,9 @@ export interface StartProcessOptions {
 export function startProcess(options: StartProcessOptions): RunningProcess {
   const platform = options.platform ?? process.platform;
   const env = options.env ?? process.env;
+  // A call's variables reach the child and nowhere else: the base env still
+  // decides which shell runs and which commands stop the tree.
+  const childEnv = options.envOverrides === undefined ? env : { ...env, ...options.envOverrides };
   // A per-call shell is resolved before anything is spawned, so a shell this platform
   // does not have rejects the call instead of leaving a task that cannot run.
   const policy = options.shellPolicy ?? resolveShellPolicy({ platform, env });
@@ -118,7 +127,7 @@ export function startProcess(options: StartProcessOptions): RunningProcess {
   let stopping: Promise<StopResult> | undefined;
   const child = spawn(invocation.executable, [...invocation.args], {
     cwd: options.cwd,
-    env,
+    env: childEnv,
     // stdio: the shell inherits these pipes, so grandchildren write here too.
     stdio: ["ignore", "pipe", "pipe"],
     // POSIX: a new process group makes the whole tree addressable by one

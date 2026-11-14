@@ -13,6 +13,7 @@
  */
 
 import { stat } from "node:fs/promises";
+import { resolve } from "node:path";
 import { type OutputTail, readOutputTail } from "../base/output.js";
 import { processOutputPath, sessionTaskDirectory, type TaskScope } from "../base/runtime-state.js";
 import type { KillReason, ProcessTask, Task } from "../base/task.js";
@@ -33,6 +34,17 @@ export interface StartProcessTaskInput extends TaskScope {
   timeoutMs?: number;
   /** Shell for this command; the configured one unless the call picks another. */
   shell?: ShellChoice;
+  /**
+   * Directory for this call, relative to the session's cwd unless it is absolute.
+   * Resolved once, before a record exists; the record keeps the absolute path.
+   */
+  workingDirectory?: string;
+  /**
+   * Variables for the child only, merged over the extension's environment. Not
+   * recorded: a task file is not a safe place for a token, and the child already
+   * has what it needs.
+   */
+  env?: Record<string, string>;
 }
 
 /** A task as it looks right now: the record plus the values that keep moving. */
@@ -196,6 +208,9 @@ export class ProcessTasks {
   /** Start a command in the background and return its record immediately. */
   async start(input: StartProcessTaskInput): Promise<ProcessTask> {
     const session = await this.session(input);
+    // The directory is settled before the record exists: a cwd that cannot be
+    // used rejects the call instead of leaving a task that never started.
+    const cwd = await this.resolveWorkingDirectory(input.cwd, input.workingDirectory);
     const id = this.createId(session);
     const name = input.name?.trim();
     const task: ProcessTask = {
@@ -205,7 +220,7 @@ export class ProcessTasks {
       status: "running",
       createdAt: this.now(),
       command: input.command,
-      cwd: input.cwd,
+      cwd,
       outputPath: processOutputPath(session.directory, id),
       outputBytes: 0,
     };
@@ -228,6 +243,7 @@ export class ProcessTasks {
         },
         platform: this.platform,
         env: this.env,
+        envOverrides: input.env,
         shellPolicy: this.shellPolicy,
         shell: input.shell,
       });
@@ -452,6 +468,32 @@ export class ProcessTasks {
       limitReasons: new Map(),
       runtimeCaps: new Map(),
     };
+  }
+
+  /**
+   * Resolve the directory this call runs in and make sure it is usable. A
+   * relative request is resolved against the session's cwd, the same base the
+   * task record uses; without a request the session's cwd is used as it is.
+   */
+  private async resolveWorkingDirectory(
+    sessionCwd: string,
+    requested: string | undefined,
+  ): Promise<string> {
+    const cwd = resolve(sessionCwd, requested ?? ".");
+    let isDirectory: boolean;
+    try {
+      isDirectory = (await stat(cwd)).isDirectory();
+    } catch (error) {
+      const code = error instanceof Error && "code" in error ? String(error.code) : "";
+      if (code === "ENOENT" || code === "ENOTDIR") {
+        throw new Error(`Working directory ${cwd} does not exist.`);
+      }
+      throw new Error(`Working directory ${cwd} cannot be used: ${errorMessage(error)}`);
+    }
+    if (!isDirectory) {
+      throw new Error(`Working directory ${cwd} is not a directory.`);
+    }
+    return cwd;
   }
 
   /**
