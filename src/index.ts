@@ -10,6 +10,7 @@
  */
 
 import type { ExtensionAPI, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
+import { publishLoopFired, publishTaskFinished } from "./tasks/base/events.js";
 import type { TaskScope } from "./tasks/base/runtime-state.js";
 import { readSettings } from "./tasks/base/settings.js";
 import { TaskSessions } from "./tasks/base/task-sessions.js";
@@ -139,6 +140,16 @@ export function createExtension(
       // the wake's own turn in `flushWakes`. Awaited: the fire is on disk before
       // the wake can be sent or the loop cancelled.
       await recordSafely(iterations.open(fire));
+      // Published once the iteration is on disk, so a listener that loads the
+      // loop finds the fire it was told about (issue #23).
+      publishLoopFired(pi.events, {
+        kind: "llm-loop",
+        id: fire.task.id,
+        name: fire.task.name,
+        fire: fire.fire,
+        at: fire.at,
+        iteration: { fire: fire.fire, startedAt: fire.at },
+      });
       wakes.record(fire);
       // A fire changes a loop's countdown, and its status line entry.
       publishStatusLine();
@@ -156,6 +167,16 @@ export function createExtension(
         ...(fire.task.env === undefined ? {} : { env: fire.task.env }),
         parentId: fire.task.id,
         fire: fire.fire,
+      });
+      // The child record is on disk — `start` persisted it — so the fire is
+      // announced with the task a listener can load (issue #23).
+      publishLoopFired(pi.events, {
+        kind: "cmd-loop",
+        id: fire.task.id,
+        name: fire.task.name,
+        fire: fire.fire,
+        at: fire.at,
+        taskId: child.id,
       });
       publishStatusLine();
       return { taskId: child.id };
@@ -186,6 +207,10 @@ export function createExtension(
     shellPolicy: settings.shellPolicy,
     // The store does not await the announcement; a notice outlives the task.
     onFinish: (view) => {
+      // Published first, and only here: the store awaited the write before
+      // calling this, so a listener reading the record finds the ending (issue
+      // #23). A fire's child task is a task too, and ends the same way.
+      publishTaskFinished(pi.events, view);
       if (view.task.parentId === undefined) {
         void notifyTaskFinished(pi, view);
       } else {
