@@ -69,7 +69,7 @@ describe("a stop whose tree survived", () => {
   it("leaves the task running with the reason, so its eventual exit is still the kill", async () => {
     const dir = await makeTempDir();
     cleanup.push(dir.dispose);
-    const stores = makeStores({});
+    const stores = makeStores({ survivedRetryMs: 60_000 });
     const scope: TaskScope = { cwd: dir.path, sessionId: "session-survived-stop" };
     const task = await stores.processes.start({ ...scope, command: "sleep 1", name: "stuck" });
     const fake = stores.supervisor.processes[0];
@@ -152,7 +152,7 @@ describe("a stop whose tree survived", () => {
   it("reports a surviving step as a surviving chain stop, not a clean one", async () => {
     const dir = await makeTempDir();
     cleanup.push(dir.dispose);
-    const stores = makeStores({});
+    const stores = makeStores({ survivedRetryMs: 60_000 });
     const scope: TaskScope = { cwd: dir.path, sessionId: "session-survived-chain" };
     const first = await stores.processes.start({ ...scope, command: "sleep 1", name: "first" });
     const queued = await stores.chainTasks.enqueue(scope, first.id, {
@@ -176,7 +176,7 @@ describe("a stop whose tree survived", () => {
   it("says in bg_kill that the chain ended but its step could not be stopped", async () => {
     const dir = await makeTempDir();
     cleanup.push(dir.dispose);
-    const stores = makeStores({});
+    const stores = makeStores({ survivedRetryMs: 60_000 });
     const scope: TaskScope = { cwd: dir.path, sessionId: "session-survived-chain-report" };
     const first = await stores.processes.start({ ...scope, command: "sleep 1", name: "first" });
     const queued = await stores.chainTasks.enqueue(scope, first.id, {
@@ -198,7 +198,7 @@ describe("a stop whose tree survived", () => {
   it("says in bg_kill that a single task outlived its kill", async () => {
     const dir = await makeTempDir();
     cleanup.push(dir.dispose);
-    const stores = makeStores({});
+    const stores = makeStores({ survivedRetryMs: 60_000 });
     const scope: TaskScope = { cwd: dir.path, sessionId: "session-survived-report" };
     const task = await stores.processes.start({ ...scope, command: "sleep 1", name: "stuck" });
     const fake = stores.supervisor.processes[0];

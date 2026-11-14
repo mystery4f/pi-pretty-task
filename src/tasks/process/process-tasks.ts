@@ -871,9 +871,12 @@ export class ProcessTasks {
    * `bg_kill` — can learn that the task outlived a stop that was already paid for.
    */
   private noteSurvival(session: SessionTasks, task: ProcessTask, detail: string | undefined): void {
-    task.error = `the process tree could not be stopped: ${
+    const note = `the process tree could not be stopped: ${
       detail ?? "it was still there after the forced kill"
     }. The task is still running; the kill will be tried again.`;
+    // Every retry that loses says the same sentence: one note, not one a second.
+    if (task.error === note) return;
+    task.error = note;
     task.updatedAt = this.now();
     void this.persist(session);
   }
