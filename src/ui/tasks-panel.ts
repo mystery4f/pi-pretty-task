@@ -1863,7 +1863,14 @@ function rightText(
     const candidates = [`${elapsed}${age}`, elapsed];
     return candidates.find((candidate) => visibleWidth(candidate) <= room) ?? elapsed;
   }
-  if (task.kind === "process") return `${elapsed} ${formatSize(row)}${age}`;
+  if (task.kind === "process") {
+    // The numbers give way in the order they matter: the age first, then the size,
+    // and the runtime last, so a narrow terminal still says how long it ran. The
+    // row is never wrapped and never pushed past its border (ADR-0015).
+    const size = formatSize(row);
+    const candidates = [`${elapsed} ${size}${age}`, `${elapsed} ${size}`, elapsed];
+    return candidates.find((candidate) => visibleWidth(candidate) <= room) ?? elapsed;
+  }
   if (task.kind === "chain") {
     // A chain reports its place in the queue: the step it is on, and how many it holds.
     // The steps' own bytes and exit codes read on the step lines of its detail.
