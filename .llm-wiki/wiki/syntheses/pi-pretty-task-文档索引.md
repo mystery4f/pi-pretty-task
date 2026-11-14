@@ -2,7 +2,7 @@
 type: synthesis
 title: pi-pretty-task 文档索引
 created: 2026-11-13
-updated: 2026-11-13
+updated: 2026-11-14
 ---
 
 # pi-pretty-task 文档索引
@@ -16,6 +16,7 @@ updated: 2026-11-13
 | [AGENTS.md](../../AGENTS.md) | 项目规则、产品模型、目录约定、验收标准 | 已定 |
 | [GLOSSARY.md](../../GLOSSARY.md) | 术语：Task（两种 kind：process / loop）/ Iteration / Panel / Status line | 已定 |
 | [scope-v1.md](../../docs/scope-v1.md) | v0.1 范围：做 / 不做 / 延后（含复杂度与风险） | 已定，随实现更新 |
+| [configuration.md](../../docs/configuration.md) | 配置面：`PI_PRETTY_TASK_OUTPUT_CAP_BYTES`（默认 20 MiB，启动校验）与 `bg_run` 的 `timeoutSeconds`；两类终止原因 | 已定 |
 
 ## 决策记录（ADR）
 
@@ -26,6 +27,8 @@ updated: 2026-11-13
 | [0003 面板用状态栏 + 浮层](../../docs/adr/0003-panel-not-persistent-widget.md) | 不做常驻 widget |
 | [0004 参考上游行为，重写代码结构](../../docs/adr/0004-reference-not-fork.md) | 不 fork，抄经验不抄类 |
 | [0005 Task 是 process 与 loop 的上位概念](../../docs/adr/0005-task-is-the-supertype.md) | 一种 Task、两种 kind、一张面板表；Iteration 是子记录 |
+| [0006 调度吃间隔简写与五段 cron](../../docs/adr/0006-cron-alongside-intervals.md) | 两种语法共用一个 `nextFire(after)`；六段拒绝 |
+| [0007 Iteration 历史上限与重启修复](../../docs/adr/0007-iteration-history-cap-and-restart-repair.md) | 各留最近 N 条并计数；重启把未完成的标 interrupted |
 
 ## 工具链与代码风格
 
