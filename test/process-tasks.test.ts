@@ -538,6 +538,30 @@ describe("bg_wait", () => {
     expect(resultText(result)).toContain("completed");
   });
 
+  it("wakes every wait on the same end", async () => {
+    const dir = await makeTempDir();
+    cleanup.push(dir.dispose);
+    const command = await writeScript(
+      dir.path,
+      "shared-job.js",
+      ["setTimeout(() => { process.exit(0); }, 300);", ""].join("\n"),
+    );
+    const harness = createHarness({ cwd: dir.path, sessionId: "session-wait-shared" });
+    const task = await startRunning(harness, command, "shared wait job");
+
+    const results = await Promise.all([
+      harness.call("bg_wait", { id: task.id, timeoutSeconds: 15 }),
+      harness.call("bg_wait", { id: task.id, timeoutSeconds: 15 }),
+    ]);
+
+    for (const result of results) {
+      const details = result.details as TaskDetails & { waited: boolean };
+      expect(details.status).toBe("completed");
+      expect(details.exitCode).toBe(0);
+      expect(details.waited).toBe(true);
+    }
+  });
+
   it("returns the running view, not an error, when the timeout passes", async () => {
     const dir = await makeTempDir();
     cleanup.push(dir.dispose);
