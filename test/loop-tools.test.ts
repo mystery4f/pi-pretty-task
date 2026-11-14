@@ -82,7 +82,7 @@ describe("loop tools", () => {
     });
 
     expect(created).toMatchObject({
-      kind: "llm-loop",
+      kind: "prompt-loop",
       status: "running",
       schedule: "10s",
       prompt: "review the diff",
@@ -466,7 +466,7 @@ describe("loop tools", () => {
     const listed = detailsOf(await task.harness.call("loop_list", { id: "lp0001" }));
     expect(listed).toMatchObject({
       id: "lp0001",
-      kind: "llm-loop",
+      kind: "prompt-loop",
       name: "legacy review",
       schedule: "10s",
       fires: 3,
@@ -479,7 +479,7 @@ describe("loop tools", () => {
       tasks: Array<{ id: string; kind: string; nextFireAt?: number }>;
     };
     expect(document.version).toBe(5);
-    expect(document.tasks[0]).toMatchObject({ id: "lp0001", kind: "llm-loop" });
+    expect(document.tasks[0]).toMatchObject({ id: "lp0001", kind: "prompt-loop" });
     expect(document.tasks[0]?.nextFireAt).toBeGreaterThan(first);
   });
 });

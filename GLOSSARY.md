@@ -1,6 +1,6 @@
 # pi-pretty-task
 
-一个 pi 扩展包：用一个面板管理同一套 Task，按 kind 分四类——跑命令的后台进程（`process`）、定时唤醒 LLM 的循环（`llm-loop`）、定时跑命令的循环（`cmd-loop`），以及把多个进程排成队列的链（`chain`）。
+一个 pi 扩展包：用一个面板管理同一套 Task，按 kind 分四类——跑命令的后台进程（`process`）、定时唤醒 LLM 的循环（`prompt-loop`）、定时跑命令的循环（`cmd-loop`），以及把多个进程排成队列的链（`chain`）。
 
 ## Language
 
@@ -13,7 +13,7 @@ _Avoid_: job, bg item, background job, task list entry
 _Avoid_: bg task, background job, subprocess, shell task
 
 **Llm loop task**:
-`kind: "llm-loop"` 的 Task。不跑命令；到点把一段预置 prompt 送进会话，唤醒 LLM 跑一轮。有间隔或 cron 表达式、prompt、最大触发次数、下次触发时间。
+`kind: "prompt-loop"` 的 Task。不跑命令；到点把一段预置 prompt 送进会话，唤醒 LLM 跑一轮。有间隔或 cron 表达式、prompt、最大触发次数、下次触发时间。
 _Avoid_: cron, timer, scheduler, job, watcher, loop（单独用时含义太宽）
 
 **Cmd loop task**:

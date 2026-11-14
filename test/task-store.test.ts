@@ -11,7 +11,12 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { previousTaskRecordPath, taskRecordPath } from "../src/tasks/base/runtime-state.js";
-import type { ChainTask, CmdLoopTask, LlmLoopTask, ProcessTask } from "../src/tasks/base/task.js";
+import type {
+  ChainTask,
+  CmdLoopTask,
+  ProcessTask,
+  PromptLoopTask,
+} from "../src/tasks/base/task.js";
 import { TaskStore } from "../src/tasks/base/task-store.js";
 import { makeTempDir } from "./support/processes.js";
 
@@ -46,10 +51,10 @@ function processTask(overrides: Partial<ProcessTask> = {}): ProcessTask {
 }
 
 /** A loop arm record, plus one field this version does not know, to prove it round-trips. */
-function loopRecord(overrides: Partial<LlmLoopTask> = {}): LlmLoopTask {
+function loopRecord(overrides: Partial<PromptLoopTask> = {}): PromptLoopTask {
   return {
     id: "lp12cd",
-    kind: "llm-loop",
+    kind: "prompt-loop",
     name: "nightly review",
     status: "completed",
     createdAt: 1_700_000_000_000,
@@ -63,7 +68,7 @@ function loopRecord(overrides: Partial<LlmLoopTask> = {}): LlmLoopTask {
     intervalMs: 300_000,
     iterations: [],
     ...overrides,
-  } as LlmLoopTask;
+  } as PromptLoopTask;
 }
 
 /** A command loop: a schedule with a command, its last three fires kept for the row. */
@@ -188,7 +193,7 @@ describe("the task record file", () => {
     expect(saved.version).toBe(5);
   });
 
-  it("reads a version 2 loop as an llm loop and keeps its schedule across the upgrade", async () => {
+  it("reads a version 2 loop as an prompt loop and keeps its schedule across the upgrade", async () => {
     const directory = await stateDirectory();
     const oldLoop = {
       id: "lp0001",
@@ -212,10 +217,11 @@ describe("the task record file", () => {
 
     const loaded = await new TaskStore(directory).load();
     const [record] = loaded;
-    if (record?.kind !== "llm-loop") throw new Error("the old loop did not load as an llm loop");
+    if (record?.kind !== "prompt-loop")
+      throw new Error("the old loop did not load as an prompt loop");
     expect(record).toMatchObject({
       id: "lp0001",
-      kind: "llm-loop",
+      kind: "prompt-loop",
       schedule: "15m",
       fires: 3,
       maxFires: 10,
@@ -355,7 +361,7 @@ describe("the task record file", () => {
     // turn outlives the process that was running it.
     expect(loaded).toHaveLength(1);
     const record = loaded[0];
-    if (record?.kind !== "llm-loop") throw new Error("the loop record did not load");
+    if (record?.kind !== "prompt-loop") throw new Error("the loop record did not load");
     expect(record.status).toBe("running");
     const [iteration] = record.iterations;
     expect(iteration).toMatchObject({ status: "interrupted", endedAt: 1_700_000_009_000 });

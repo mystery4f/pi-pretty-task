@@ -4,7 +4,7 @@
  * A Task carries what the kinds share — id, name, status and timeline. The
  * `kind` discriminator selects the arm, so fields that only mean something for
  * one kind live on that arm instead of being optional on a single flat object.
- * The `process`, `llm-loop`, `cmd-loop` and `chain` arms are the four implemented
+ * The `process`, `prompt-loop`, `cmd-loop` and `chain` arms are the four implemented
  * kinds, and all of them live in this one union so the store and the panel can
  * carry them together (ADR-0005).
  *
@@ -45,7 +45,7 @@ export type TaskStatus =
 export type KillReason = "user" | "timeout" | "output_cap" | "shutdown";
 
 /** Which kind of work a task represents. */
-export type TaskKind = "process" | "llm-loop" | "cmd-loop" | "chain";
+export type TaskKind = "process" | "prompt-loop" | "cmd-loop" | "chain";
 
 /** Fields every task carries, whatever its kind. */
 export interface TaskBase {
@@ -133,7 +133,7 @@ export interface FireRecord {
 
 /**
  * Fields a loop keeps whatever it fires. The scheduler only sees this shape, so
- * an llm loop and a cmd loop share one pump, one pause/resume/complete set of
+ * an prompt loop and a cmd loop share one pump, one pause/resume/complete set of
  * transitions and one fire counter.
  */
 export interface LoopBase extends TaskBase {
@@ -163,12 +163,12 @@ export interface LoopBase extends TaskBase {
   error?: string;
 }
 /**
- * An llm loop: a schedule that wakes the assistant with a stored prompt
+ * An prompt loop: a schedule that wakes the assistant with a stored prompt
  * (ADR-0001). It owns no command and no output file: a fire is a message, and
  * what the resulting turn does is recorded as an Iteration.
  */
-export interface LlmLoopTask extends LoopBase {
-  readonly kind: "llm-loop";
+export interface PromptLoopTask extends LoopBase {
+  readonly kind: "prompt-loop";
   /** Message injected into the session on every fire. */
   readonly prompt: string;
   /**
@@ -248,4 +248,4 @@ export interface ChainTask extends TaskBase {
 export const FIRE_HISTORY_LIMIT = 50;
 
 /** One tracked unit of work: a process task, a loop or a chain, never a second list. */
-export type Task = ProcessTask | LlmLoopTask | CmdLoopTask | ChainTask;
+export type Task = ProcessTask | PromptLoopTask | CmdLoopTask | ChainTask;

@@ -17,7 +17,7 @@ import type {
 import { Type } from "typebox";
 import { formatBytes, formatDuration } from "../base/format.js";
 import type { TaskScope } from "../base/runtime-state.js";
-import type { CmdLoopTask, FireRecord, LlmLoopTask } from "../base/task.js";
+import type { CmdLoopTask, FireRecord, PromptLoopTask } from "../base/task.js";
 import { LoopInputError, type LoopTasks, type LoopTaskView } from "./loop-tasks.js";
 
 const CreateParameters = Type.Object({
@@ -142,7 +142,7 @@ export function describeLoop(view: LoopTaskView): string {
   if (task.lastFireAt !== undefined) {
     lines.push(`last fire: ${new Date(task.lastFireAt).toISOString()}`);
   }
-  lines.push(task.kind === "llm-loop" ? iterationSummary(task) : fireSummary(task));
+  lines.push(task.kind === "prompt-loop" ? iterationSummary(task) : fireSummary(task));
   if (task.expiresAt !== undefined) {
     lines.push(`expires: ${new Date(task.expiresAt).toISOString()}`);
   }
@@ -150,7 +150,7 @@ export function describeLoop(view: LoopTaskView): string {
     lines.push(`ended: ${new Date(task.endedAt).toISOString()}`);
   }
   if (task.error !== undefined) lines.push(`error: ${task.error}`);
-  if (task.kind === "llm-loop") {
+  if (task.kind === "prompt-loop") {
     lines.push(`prompt: ${task.prompt}`);
   } else {
     if (task.cwd !== undefined) lines.push(`cwd: ${task.cwd}`);
@@ -174,7 +174,7 @@ export function describeLoop(view: LoopTaskView): string {
  * did. A loop with no iteration yet says so, because `iterations: none` is a fact
  * a caller can act on, unlike a missing line.
  */
-function iterationSummary(task: LlmLoopTask): string {
+function iterationSummary(task: PromptLoopTask): string {
   const dropped = task.droppedIterations ?? 0;
   const droppedText = dropped > 0 ? ` (${String(dropped)} older dropped)` : "";
   const newest = task.iterations.at(-1);
@@ -241,7 +241,7 @@ export function describeFires(task: CmdLoopTask): string {
  * an iteration is reachable from the loop, never as a row of its own (ADR-0002).
  * A truncated record says how much it dropped rather than hiding it.
  */
-export function describeIterations(task: LlmLoopTask): string {
+export function describeIterations(task: PromptLoopTask): string {
   if (task.iterations.length === 0) {
     return task.droppedIterations === undefined || task.droppedIterations === 0
       ? "No iteration yet: this loop has not fired."
@@ -309,7 +309,7 @@ function loopDetails(
     untilNextFireMs: view.untilNextFireMs,
     error: task.error,
   };
-  if (task.kind === "llm-loop") {
+  if (task.kind === "prompt-loop") {
     return {
       ...shared,
       prompt: task.prompt,
@@ -428,7 +428,7 @@ export function loopTaskTools(loops: LoopTasks): ToolDefinition[] {
               text: [
                 describeLoop(view),
                 "",
-                view.task.kind === "llm-loop"
+                view.task.kind === "prompt-loop"
                   ? describeIterations(view.task)
                   : describeFires(view.task),
               ].join("\n"),

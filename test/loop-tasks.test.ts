@@ -66,7 +66,7 @@ describe("LoopTasks", () => {
     });
 
     expect(created.task).toMatchObject({
-      kind: "llm-loop",
+      kind: "prompt-loop",
       name: "nightly review",
       schedule: "10m",
       prompt: "review the diff",
@@ -85,7 +85,7 @@ describe("LoopTasks", () => {
     expect(records).toHaveLength(1);
     expect(records[0]).toMatchObject({
       id: created.task.id,
-      kind: "llm-loop",
+      kind: "prompt-loop",
       schedule: "10m",
       prompt: "review the diff",
       fires: 0,
@@ -327,7 +327,7 @@ describe("LoopTasks", () => {
     task.advance(10_000);
     expect(await task.loops.pump(task.now)).toHaveLength(1);
     const before = await task.loops.get(task.scope, created.task.id);
-    if (before === undefined || before.task.kind !== "llm-loop") {
+    if (before === undefined || before.task.kind !== "prompt-loop") {
       throw new Error("the loop record disappeared");
     }
     expect(before.task).toMatchObject({ schedule: "10s", fires: 1, lastFireAt: task.now });
@@ -341,7 +341,7 @@ describe("LoopTasks", () => {
 
     expect(retuned?.outcome).toBe("rescheduled");
     const after = retuned?.view.task;
-    if (after === undefined || after.kind !== "llm-loop") {
+    if (after === undefined || after.kind !== "prompt-loop") {
       throw new Error("the loop record disappeared");
     }
     expect(after).toMatchObject({

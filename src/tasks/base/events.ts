@@ -50,9 +50,9 @@ interface LoopFiredBase {
   readonly at: number;
 }
 
-/** A `llm-loop` fire opened an iteration on its loop. */
-export interface LlmLoopFiredEvent extends LoopFiredBase {
-  readonly kind: "llm-loop";
+/** A `prompt-loop` fire opened an iteration on its loop. */
+export interface PromptLoopFiredEvent extends LoopFiredBase {
+  readonly kind: "prompt-loop";
   /**
    * The iteration the fire opened: the loop's child record, in the two fields a
    * reader needs to find it — the fire number is its key within the loop.
@@ -68,7 +68,7 @@ export interface CmdLoopFiredEvent extends LoopFiredBase {
 }
 
 /** Every shape a fire event takes: exactly one of the two produced something. */
-export type LoopFiredEvent = LlmLoopFiredEvent | CmdLoopFiredEvent;
+export type LoopFiredEvent = PromptLoopFiredEvent | CmdLoopFiredEvent;
 
 /**
  * A finished task as the payload builder sees it: the record plus how long it

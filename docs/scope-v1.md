@@ -40,7 +40,7 @@
 |---|---|---|---|
 | 状态栏摘要 | `pi-pretty-task · 1 running · 2 loops` | 低 | 低 |
 | `/tasks` 浮层 | 两行标题带（`── Background Tasks ──` + 各结局计数 Running / Succeeded / Failed / Timeout / Killed），三个标签页 `Processes`/`Loops`/`Chains`（`1`/`2`/`3`、`tab` 轮转，重开回上次的页）。每页只列根：链的步骤与循环的触发不占行，回车展开。行显示 name（用途描述）、id（`bg-`/`lp-`/`lc-`/`ch-` 前缀 + kind 标记）、状态、退出码、耗时与距上次更新的相对时间；按 `updatedAt` 降序；`h` 看历史，`f` 状态过滤，`o` 看其它会话（只读），`/` 进入搜索（子序列匹配 name/id/命令或 prompt/状态词，命中字符高亮，按命中质量排序，支持粘贴），`alt+q` 首次退出搜索、再次关闭面板 | 中（`ctx.ui.custom` + 键盘交互 + 单行输入 + 三页状态） | 中：终端尺寸、滚动与粘贴序列 |
-| 详情页 | process：完整命令、输出尾部、退出码，`↑/↓` 滚动、`r` 恢复跟随、`←` 返回；loop：prompt、schedule、每次触发（cmd-loop）或 Iteration（llm-loop）列表，选中触发可直接打开它的进程详情；chain：队列顺序、正在跑第几格、每格状态与退出码 | 中 | 中 |
+| 详情页 | process：完整命令、输出尾部、退出码，`↑/↓` 滚动、`r` 恢复跟随、`←` 返回；loop：prompt、schedule、每次触发（cmd-loop）或 Iteration（prompt-loop）列表，选中触发可直接打开它的进程详情；chain：队列顺序、正在跑第几格、每格状态与退出码 | 中 | 中 |
 | 快捷操作 | `k` 停止（循环/链为级联）、`a` 全部停止、`R` 重跑、`c` 输出路径、`h` 历史、`f` 过滤、`o` 其它会话、`x` 关闭 | 低 | 低 |
 
 ### 持久化与恢复

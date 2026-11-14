@@ -27,8 +27,8 @@ import type {
   CmdLoopTask,
   FireOutcome,
   FireRecord,
-  LlmLoopTask,
   LoopBase,
+  PromptLoopTask,
   Task,
   TaskKind,
   TaskStatus,
@@ -318,7 +318,7 @@ export class TasksPanel implements Component {
       const open = this.detailRow();
       if (
         open === undefined ||
-        open.task.kind !== "llm-loop" ||
+        open.task.kind !== "prompt-loop" ||
         this.currentIteration(open.task) === undefined
       ) {
         // The open iteration fell out of the store's history cap, or its loop vanished.
@@ -526,7 +526,7 @@ export class TasksPanel implements Component {
 
   private handleDetailInput(data: string): void {
     const row = this.detailRow();
-    if (row?.task.kind === "llm-loop") {
+    if (row?.task.kind === "prompt-loop") {
       this.handleLoopDetailInput(data, row.task);
       return;
     }
@@ -576,7 +576,7 @@ export class TasksPanel implements Component {
     if (data === "c") this.showOutputPath();
   }
 
-  private handleLoopDetailInput(data: string, task: LlmLoopTask): void {
+  private handleLoopDetailInput(data: string, task: PromptLoopTask): void {
     if (matchesKey(data, "left")) {
       this.mode = "list";
       this.iterationTop = 0;
@@ -717,7 +717,7 @@ export class TasksPanel implements Component {
   }
 
   /** Walk the newest-first iteration list, keeping the selected row on screen. */
-  private moveIteration(delta: number, task: LlmLoopTask): void {
+  private moveIteration(delta: number, task: PromptLoopTask): void {
     const newestFirst = [...task.iterations].reverse();
     if (newestFirst.length === 0) return;
     const selected = this.currentIteration(task);
@@ -736,7 +736,7 @@ export class TasksPanel implements Component {
 
   private openIteration(): void {
     const row = this.detailRow();
-    if (row === undefined || row.task.kind !== "llm-loop") return;
+    if (row === undefined || row.task.kind !== "prompt-loop") return;
     const iteration = this.currentIteration(row.task);
     if (iteration === undefined) {
       this.notice = "No iteration to open yet — this loop has not fired.";
@@ -751,7 +751,7 @@ export class TasksPanel implements Component {
 
   private scrollCalls(delta: number): void {
     const row = this.detailRow();
-    if (row === undefined || row.task.kind !== "llm-loop") return;
+    if (row === undefined || row.task.kind !== "prompt-loop") return;
     const iteration = this.currentIteration(row.task);
     if (iteration === undefined) return;
     const oldest = Math.max(0, iteration.calls.length - DETAIL_OUTPUT_LINES);
@@ -786,7 +786,7 @@ export class TasksPanel implements Component {
     const row = this.detailRow();
     // A loop opens on its newest history row; a process opens on its output tail.
     this.iterationFire =
-      row?.task.kind === "llm-loop"
+      row?.task.kind === "prompt-loop"
         ? row.task.iterations.at(-1)?.fire
         : row?.task.kind === "cmd-loop"
           ? row.task.fireHistory.at(-1)?.fire
@@ -1028,7 +1028,7 @@ export class TasksPanel implements Component {
   }
 
   /** The iteration under the cursor, or the newest one when the store trimmed the pick. */
-  private currentIteration(task: LlmLoopTask): Iteration | undefined {
+  private currentIteration(task: PromptLoopTask): Iteration | undefined {
     if (this.iterationFire !== undefined) {
       const found = task.iterations.find((iteration) => iteration.fire === this.iterationFire);
       if (found !== undefined) return found;
@@ -1498,7 +1498,7 @@ export class TasksPanel implements Component {
   private renderDetail(width: number): string[] {
     const row = this.detailRow();
     if (row === undefined) return this.renderList(width);
-    if (row.task.kind === "llm-loop") return this.renderLoopDetail(row, width);
+    if (row.task.kind === "prompt-loop") return this.renderLoopDetail(row, width);
     if (row.task.kind === "cmd-loop") return this.renderCommandLoopDetail(row, width);
     if (row.task.kind === "chain") return this.renderChainDetail(row, width);
     return this.renderProcessDetail(width);
@@ -1643,7 +1643,7 @@ export class TasksPanel implements Component {
   private renderLoopDetail(row: PanelTaskView, width: number): string[] {
     const theme = this.theme;
     const task = row.task;
-    if (task.kind !== "llm-loop") return this.renderList(width);
+    if (task.kind !== "prompt-loop") return this.renderList(width);
     const colour = STATUS_COLOUR[task.status];
     const body: string[] = [
       this.field("Status", theme.fg(colour, task.status)),
@@ -1788,7 +1788,7 @@ export class TasksPanel implements Component {
   private renderIterationDetail(width: number): string[] {
     const theme = this.theme;
     const row = this.detailRow();
-    if (row === undefined || row.task.kind !== "llm-loop") return this.renderList(width);
+    if (row === undefined || row.task.kind !== "prompt-loop") return this.renderList(width);
     const task = row.task;
     const iteration = this.currentIteration(task);
     if (iteration === undefined) return this.renderLoopDetail(row, width);
@@ -1900,7 +1900,7 @@ function dotColour(task: Task): ThemeColor {
 
 /** Exit column: a process has a code, a loop has fires instead, a chain has steps. */
 function exitText(task: Task): string {
-  if (task.kind === "llm-loop") return "";
+  if (task.kind === "prompt-loop") return "";
   if (task.kind === "chain") return "";
   // A command loop carries the code of its newest fire; the fires themselves are
   // rows in its detail (ADR-0015).
@@ -2027,7 +2027,7 @@ function firesText(task: LoopBase): string {
 }
 /**
  * Failed fires in a row on a command loop. Only a fire that ran can fail, so an
- * llm loop never carries a streak and its rows never claim one (ADR-0017).
+ * prompt loop never carries a streak and its rows never claim one (ADR-0017).
  */
 function failureStreak(task: Task): number {
   return task.kind === "cmd-loop" ? (task.consecutiveFailures ?? 0) : 0;
@@ -2048,7 +2048,7 @@ function nextFireText(task: LoopBase, row: PanelTaskView, backingOff = false): s
 }
 
 /** Iteration list heading: kept and dropped counts are both stated, never hidden. */
-function iterationsText(task: LlmLoopTask): string {
+function iterationsText(task: PromptLoopTask): string {
   const dropped = task.droppedIterations ?? 0;
   const kept = task.iterations.length;
   if (kept === 0) {
@@ -2184,7 +2184,7 @@ function kindWord(kind: TaskKind): "proc" | "llm" | "cmd" | "chn" {
   switch (kind) {
     case "process":
       return "proc";
-    case "llm-loop":
+    case "prompt-loop":
       return "llm";
     case "cmd-loop":
       return "cmd";
@@ -2205,7 +2205,7 @@ function inTab(task: Task, tab: PanelTab): boolean {
     case "processes":
       return task.kind === "process" && task.parentId === undefined;
     case "loops":
-      return task.kind === "llm-loop" || task.kind === "cmd-loop";
+      return task.kind === "prompt-loop" || task.kind === "cmd-loop";
     case "chains":
       return task.kind === "chain";
   }
@@ -2369,14 +2369,14 @@ function bestFieldMatch(
 ): RowMatch | undefined {
   const needle = query.toLowerCase();
   // The kind word is the one the row prints, so searching `proc` finds the
-  // processes the reader can see and searching `llm` finds the llm loops; the
+  // processes the reader can see and searching `llm` finds the prompt loops; the
   // status word is the string the row colours.
   const kind = kindWord(task.kind);
   // A chain with a queue spends its name column on the steps, so its own name is
   // no longer a word the row prints.
   const nameHidden = task.kind === "chain" && task.steps.length > 0;
   const fields: SearchField[] =
-    task.kind === "llm-loop"
+    task.kind === "prompt-loop"
       ? [
           { field: "name", text: task.name, bonus: NAME_BONUS, hidden: false },
           { field: "id", text: task.id, bonus: ID_BONUS, hidden: false },

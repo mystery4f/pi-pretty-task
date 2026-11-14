@@ -296,12 +296,12 @@ describe("chain tasks", () => {
     const stores = makeStores();
     const scope = { cwd: dir.path, sessionId: "session-chain-refuse" };
     const command = await writeScript(dir.path, "step.js", STEP_SCRIPT);
-    // An llm loop of the session, recorded by hand: this seam is the chain store.
+    // An prompt loop of the session, recorded by hand: this seam is the chain store.
     const session = await stores.sessions.session(scope);
     const now = Date.now();
     session.tasks.set("lp00001", {
       id: "lp00001",
-      kind: "llm-loop",
+      kind: "prompt-loop",
       name: "nightly",
       status: "running",
       createdAt: now,
@@ -314,7 +314,7 @@ describe("chain tasks", () => {
 
     await expect(
       stores.chainTasks.enqueue(scope, "lp00001", { command, name: "never" }),
-    ).rejects.toThrow("Only process tasks can be queued: lp00001 is a llm-loop.");
+    ).rejects.toThrow("Only process tasks can be queued: lp00001 is a prompt-loop.");
     await expect(
       stores.chainTasks.enqueue(scope, "ch00000", { command, name: "never" }),
     ).rejects.toThrow("No background task with id ch00000.");

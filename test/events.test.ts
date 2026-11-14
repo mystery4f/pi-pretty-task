@@ -204,7 +204,7 @@ describe("task-finished event", () => {
 });
 
 describe("loop-fired event", () => {
-  it("names the iteration an llm-loop fire opened", async () => {
+  it("names the iteration an prompt-loop fire opened", async () => {
     const task = await setup();
     const created = (
       await task.harness.call("loop_create", {
@@ -220,14 +220,14 @@ describe("loop-fired event", () => {
     expect(task.fired).toHaveLength(1);
     const event = task.fired[0] as LoopFiredEvent;
     expect(event).toEqual({
-      kind: "llm-loop",
+      kind: "prompt-loop",
       id: created.id,
       name: "ticker",
       fire: 1,
       at: task.now,
       iteration: { fire: 1, startedAt: task.now },
     });
-    // No child process: an llm loop never spawns one.
+    // No child process: an prompt loop never spawns one.
     expect("taskId" in event).toBe(false);
   });
 
@@ -245,7 +245,7 @@ describe("loop-fired event", () => {
       const event = data as LoopFiredEvent;
       const loop = tasksOnDisk(task.recordPath).find((entry) => entry.id === event.id);
       const iteration =
-        loop?.kind === "llm-loop"
+        loop?.kind === "prompt-loop"
           ? loop.iterations.find((entry) => entry.fire === event.fire)
           : undefined;
       seen.push(iteration);
@@ -357,7 +357,7 @@ describe("taskFinishedEvent", () => {
     const event = taskFinishedEvent({
       task: {
         id: "ll-abcde",
-        kind: "llm-loop",
+        kind: "prompt-loop",
         name: "ticker",
         status: "completed",
         createdAt: 1,
@@ -368,7 +368,7 @@ describe("taskFinishedEvent", () => {
 
     expect(event).toEqual({
       id: "ll-abcde",
-      kind: "llm-loop",
+      kind: "prompt-loop",
       name: "ticker",
       status: "completed",
       durationMs: 5,

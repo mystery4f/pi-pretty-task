@@ -2,13 +2,13 @@
  * Loop tasks: the schedule store, the pump that turns a due schedule into a
  * wake-up or a fire, and the pause/resume/complete/retune/delete transitions.
  *
- * A loop is a {@link LlmLoopTask} or a {@link CmdLoopTask} record like a process
+ * A loop is a {@link PromptLoopTask} or a {@link CmdLoopTask} record like a process
  * task is a {@link ProcessTask}; all of them live in one session record file
  * through {@link TaskSessions}. Nothing here starts a timer. The caller owns the
  * clock and calls {@link LoopTasks.pump} with the instant it wants handled, which
  * is what lets tests push a fake clock.
  *
- * An llm loop's fire is a wake-up the caller delivers into the session. A cmd
+ * An prompt loop's fire is a wake-up the caller delivers into the session. A cmd
  * loop's fire is a process task started through `onCommandFire`; this file never
  * spawns it, so a fire reuses the one process path instead of a second one.
  *
@@ -23,8 +23,8 @@ import type {
   CmdLoopTask,
   FireRecord,
   KillReason,
-  LlmLoopTask,
   LoopBase,
+  PromptLoopTask,
   TaskStatus,
 } from "../base/task.js";
 import { FIRE_HISTORY_LIMIT } from "../base/task.js";
@@ -38,11 +38,11 @@ import {
 } from "./schedule.js";
 
 /** Either kind of loop record; everything the panel and the tool share is on {@link LoopBase}. */
-export type LoopTask = LlmLoopTask | CmdLoopTask;
+export type LoopTask = PromptLoopTask | CmdLoopTask;
 
 /** One due wake-up; the caller sends its prompt into the session. */
 export interface LoopFire {
-  readonly task: LlmLoopTask;
+  readonly task: PromptLoopTask;
   /** Epoch ms the pump handled the fire at. */
   readonly at: number;
   /** One-based fire number, already recorded on the task. */
@@ -320,7 +320,7 @@ export class LoopTasks {
     const session = await this.sessions.session(input);
     const active = [...session.tasks.values()].filter(
       (task) =>
-        (task.kind === "llm-loop" || task.kind === "cmd-loop") &&
+        (task.kind === "prompt-loop" || task.kind === "cmd-loop") &&
         (task.status === "running" || task.status === "paused"),
     );
     if (active.length >= MAX_LOOPS) {
@@ -354,8 +354,8 @@ export class LoopTasks {
       prompt.length > 0
         ? {
             ...shared,
-            id: this.sessions.createId(session, "llm-loop"),
-            kind: "llm-loop",
+            id: this.sessions.createId(session, "prompt-loop"),
+            kind: "prompt-loop",
             prompt,
             iterations: [],
           }
@@ -384,7 +384,7 @@ export class LoopTasks {
     this.rememberScope(scope);
     const session = await this.sessions.session(scope);
     return [...session.tasks.values()]
-      .filter((task) => task.kind === "llm-loop" || task.kind === "cmd-loop")
+      .filter((task) => task.kind === "prompt-loop" || task.kind === "cmd-loop")
       .map((task) => this.view(task));
   }
 
@@ -614,7 +614,7 @@ export class LoopTasks {
       let changed = false;
 
       for (const record of session.tasks.values()) {
-        if (record.kind !== "llm-loop" && record.kind !== "cmd-loop") continue;
+        if (record.kind !== "prompt-loop" && record.kind !== "cmd-loop") continue;
         if (record.status !== "running") continue;
 
         const common = this.commonDueCheck(record, at);
@@ -629,7 +629,7 @@ export class LoopTasks {
         if (common === "skip") continue;
         const recurrence = common.recurrence;
 
-        if (record.kind === "llm-loop") {
+        if (record.kind === "prompt-loop") {
           const final = record.maxFires !== undefined && record.fires + 1 >= record.maxFires;
           record.fires += 1;
           record.lastFireAt = at;
@@ -804,7 +804,7 @@ export class LoopTasks {
 
   private findLoop(session: TaskSession, id: string): LoopTask | undefined {
     const task = session.tasks.get(id);
-    return task?.kind === "llm-loop" || task?.kind === "cmd-loop" ? task : undefined;
+    return task?.kind === "prompt-loop" || task?.kind === "cmd-loop" ? task : undefined;
   }
 
   private findCmdLoop(session: TaskSession, id: string): CmdLoopTask | undefined {

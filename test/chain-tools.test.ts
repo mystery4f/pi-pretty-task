@@ -242,7 +242,7 @@ describe("bg_run after", () => {
       await harness.call("bg_run", { command, after: loop.id, name: "never" }),
     );
     expect(refused).toContain("Only process tasks can be queued");
-    expect(refused).toContain("llm-loop");
+    expect(refused).toContain("prompt-loop");
     expect(refused).toContain("The task was not started.");
 
     const missing = resultText(await harness.call("bg_run", { command, after: "bg00000" }));

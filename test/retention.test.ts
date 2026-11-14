@@ -16,7 +16,7 @@ import {
   RUNTIME_STATE_DIRECTORY,
   sessionTaskDirectory,
 } from "../src/tasks/base/runtime-state.js";
-import type { LlmLoopTask, ProcessTask, Task } from "../src/tasks/base/task.js";
+import type { ProcessTask, PromptLoopTask, Task } from "../src/tasks/base/task.js";
 import { TaskStore } from "../src/tasks/base/task-store.js";
 import { createHarness } from "./support/extension-harness.js";
 import { makeTempDir } from "./support/processes.js";
@@ -56,10 +56,10 @@ function processTask(overrides: Partial<ProcessTask> = {}): ProcessTask {
   };
 }
 
-function llmLoopTask(overrides: Partial<LlmLoopTask> = {}): LlmLoopTask {
+function promptLoopTask(overrides: Partial<PromptLoopTask> = {}): PromptLoopTask {
   return {
     id: "lp1a2cf",
-    kind: "llm-loop",
+    kind: "prompt-loop",
     name: "nightly review",
     status: "completed",
     createdAt: NOW - 10 * DAY,
@@ -159,7 +159,7 @@ describe("retention", () => {
     const directory = await storedSession(
       root,
       "loop-session",
-      [llmLoopTask({ status: "running", nextFireAt: NOW + 50 * 60 * 1000 })],
+      [promptLoopTask({ status: "running", nextFireAt: NOW + 50 * 60 * 1000 })],
       { ageDays: 30 },
     );
 
@@ -195,7 +195,7 @@ describe("retention", () => {
       ageDays: 9,
       outputBytes: 4000,
     });
-    const second = await storedSession(root, "old-b", [llmLoopTask()], { ageDays: 40 });
+    const second = await storedSession(root, "old-b", [promptLoopTask()], { ageDays: 40 });
     const bytes = (await sizeOf(first)) + (await sizeOf(second));
     const lines: string[] = [];
 

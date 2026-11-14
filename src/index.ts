@@ -163,7 +163,7 @@ export function createExtension(
       // Published once the iteration is on disk, so a listener that loads the
       // loop finds the fire it was told about (issue #23).
       publishLoopFired(pi.events, {
-        kind: "llm-loop",
+        kind: "prompt-loop",
         id: fire.task.id,
         name: fire.task.name,
         fire: fire.fire,
@@ -343,7 +343,7 @@ export function createExtension(
    */
   const isDeliverable = (fire: LoopFire): boolean => {
     const task = fire.session.tasks.get(fire.task.id);
-    if (task?.kind !== "llm-loop") return false;
+    if (task?.kind !== "prompt-loop") return false;
     return task.status === "running" || fire.final;
   };
 

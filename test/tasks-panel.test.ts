@@ -15,8 +15,8 @@ import type {
   ChainTask,
   CmdLoopTask,
   FireRecord,
-  LlmLoopTask,
   ProcessTask,
+  PromptLoopTask,
 } from "../src/tasks/base/task.js";
 import type { Iteration, IterationCall } from "../src/tasks/loop/iteration.js";
 import {
@@ -66,14 +66,14 @@ function view(
 /** One loop row, with the iterations the store keeps under it. */
 function loopView(
   id: string,
-  overrides: Partial<LlmLoopTask> = {},
+  overrides: Partial<PromptLoopTask> = {},
   elapsedMs = 12_000,
   untilNextFireMs?: number,
 ): PanelTaskView {
   const created = overrides.createdAt ?? 1_000;
-  const task: LlmLoopTask = {
+  const task: PromptLoopTask = {
     id,
-    kind: "llm-loop",
+    kind: "prompt-loop",
     name: `loop ${id}`,
     status: "running",
     createdAt: created,
@@ -985,7 +985,7 @@ describe("the loop detail view", () => {
 
     const screen = drawn();
     expect(screen).toContain("review loop");
-    expect(screen).toContain("llm-loop");
+    expect(screen).toContain("prompt-loop");
     expect(screen).toContain("10s");
     expect(screen).toContain("5 / 10");
     expect(screen).toContain("review the diff and report");
@@ -1641,7 +1641,7 @@ describe("recency and search", () => {
     panel.dispose();
   });
 
-  it("filters by the kind word the row shows, so an llm loop answers to llm", async () => {
+  it("filters by the kind word the row shows, so an prompt loop answers to llm", async () => {
     const source = new FakeSource();
     source.rows = [
       loopView("lp-abcde", { name: "nightly review", createdAt: 2_000 }),

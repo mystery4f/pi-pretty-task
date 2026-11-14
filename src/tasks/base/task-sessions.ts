@@ -44,7 +44,7 @@ const ID_SUFFIX_LENGTH = 5;
  */
 const ID_PREFIX: Record<TaskKind, string> = {
   process: "bg-",
-  "llm-loop": "lp-",
+  "prompt-loop": "lp-",
   "cmd-loop": "lc-",
   chain: "ch-",
 };

@@ -10,7 +10,7 @@ import { mkdir } from "node:fs/promises";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { sessionTaskDirectory } from "../src/tasks/base/runtime-state.js";
-import type { LlmLoopTask } from "../src/tasks/base/task.js";
+import type { PromptLoopTask } from "../src/tasks/base/task.js";
 import { TaskSessions } from "../src/tasks/base/task-sessions.js";
 import { TaskStore } from "../src/tasks/base/task-store.js";
 import { makeTempDir } from "./support/processes.js";
@@ -29,25 +29,25 @@ describe("task ids", () => {
     const session = await sessions.session({ cwd: directory.path, sessionId: "session-ids" });
 
     const processId = sessions.createId(session, "process");
-    const llmLoopId = sessions.createId(session, "llm-loop");
+    const promptLoopId = sessions.createId(session, "prompt-loop");
     const cmdLoopId = sessions.createId(session, "cmd-loop");
     const chainId = sessions.createId(session, "chain");
 
     expect(processId).toMatch(/^bg-[a-z0-9]{5}$/);
-    expect(llmLoopId).toMatch(/^lp-[a-z0-9]{5}$/);
+    expect(promptLoopId).toMatch(/^lp-[a-z0-9]{5}$/);
     expect(cmdLoopId).toMatch(/^lc-[a-z0-9]{5}$/);
     expect(chainId).toMatch(/^ch-[a-z0-9]{5}$/);
     // Three characters of prefix plus five of randomness: the example `bg-1a2cf`
     // is eight cells.
     expect(processId).toHaveLength(8);
-    expect(llmLoopId).toHaveLength(8);
+    expect(promptLoopId).toHaveLength(8);
     expect(cmdLoopId).toHaveLength(8);
     expect(chainId).toHaveLength(8);
     // One namespace per session: the collision check spans the whole id, so the
     // four prefixes never compete for it, and none of the ids is already taken.
-    expect(new Set([processId, llmLoopId, cmdLoopId, chainId]).size).toBe(4);
+    expect(new Set([processId, promptLoopId, cmdLoopId, chainId]).size).toBe(4);
     expect(session.tasks.has(processId)).toBe(false);
-    expect(session.tasks.has(llmLoopId)).toBe(false);
+    expect(session.tasks.has(promptLoopId)).toBe(false);
     expect(session.tasks.has(cmdLoopId)).toBe(false);
     expect(session.tasks.has(chainId)).toBe(false);
   });
@@ -56,9 +56,9 @@ describe("task ids", () => {
     const directory = await makeTempDir();
     cleanup.push(directory);
     const scope = { cwd: directory.path, sessionId: "session-ids-restored" };
-    const restored: LlmLoopTask = {
+    const restored: PromptLoopTask = {
       id: "lp-aaaaa",
-      kind: "llm-loop",
+      kind: "prompt-loop",
       name: "nightly review",
       status: "running",
       createdAt: 1_700_000_000_000,
@@ -79,7 +79,7 @@ describe("task ids", () => {
     const sessions = new TaskSessions({ randomInt: () => characters.shift() ?? 0 });
     const session = await sessions.session(scope);
 
-    expect(session.tasks.get("lp-aaaaa")?.kind).toBe("llm-loop");
-    expect(sessions.createId(session, "llm-loop")).toBe("lp-bbbbb");
+    expect(session.tasks.get("lp-aaaaa")?.kind).toBe("prompt-loop");
+    expect(sessions.createId(session, "prompt-loop")).toBe("lp-bbbbb");
   });
 });

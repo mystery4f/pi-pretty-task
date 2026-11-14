@@ -21,8 +21,8 @@ import type {
   ChainTask,
   CmdLoopTask,
   FireRecord,
-  LlmLoopTask,
   ProcessTask,
+  PromptLoopTask,
   Task,
   TaskStatus,
 } from "./task.js";
@@ -32,9 +32,9 @@ import type {
  * code could not read any more bumps it.
  *
  * Version 2 added `updatedAt` (ADR-0010). Version 3 split the old `loop` kind
- * into `llm-loop` and reserved `cmd-loop`, so a version 1 or 2 document still
+ * into `prompt-loop` and reserved `cmd-loop`, so a version 1 or 2 document still
  * loads: a record from before recency takes its own `createdAt`, and an old
- * `loop` reads as an llm loop. Version 4 implemented the `cmd-loop` arm with its
+ * `loop` reads as an prompt loop. Version 4 implemented the `cmd-loop` arm with its
  * fire history and added the parent link a fire child carries. Version 5 adds
  * the `chain` arm and the three statuses its steps use (`waiting`, `skipped`,
  * `stopped`), and separates the parent link from the fire link, so a step can
@@ -78,7 +78,7 @@ function isCount(value: unknown): value is number {
 
 /**
  * The fields every loop arm shares. Both arms check them here, so a cmd loop
- * cannot drift from the schedule rules an llm loop already follows.
+ * cannot drift from the schedule rules an prompt loop already follows.
  */
 function hasLoopFields(value: Record<string, unknown>): boolean {
   if (typeof value.schedule !== "string" || value.schedule.trim().length === 0) return false;
@@ -138,13 +138,13 @@ function parseFireHistory(value: unknown): FireRecord[] | undefined {
  * arm is strict here: a loop record without its schedule, or a cmd loop without
  * its command, is corruption, not an older generation to guess at. `legacyKind`
  * is true only for a version 1 or 2 document, where `loop` still names what is
- * now an llm loop.
+ * now an prompt loop.
  */
 function parseTask(value: unknown, legacyKind: boolean): Task | undefined {
   if (!isObject(value)) return undefined;
   // The old kind is translated before the arm checks so the rest of the parser
   // only ever sees the current vocabulary.
-  const kind = value.kind === "loop" && legacyKind ? "llm-loop" : value.kind;
+  const kind = value.kind === "loop" && legacyKind ? "prompt-loop" : value.kind;
   if (typeof value.id !== "string" || value.id.length === 0) return undefined;
   if (typeof value.name !== "string") return undefined;
   if (!isStatus(value.status)) return undefined;
@@ -176,7 +176,7 @@ function parseTask(value: unknown, legacyKind: boolean): Task | undefined {
     return { ...value, updatedAt } as unknown as ProcessTask;
   }
 
-  if (kind === "llm-loop") {
+  if (kind === "prompt-loop") {
     if (!hasLoopFields(value)) return undefined;
     if (typeof value.prompt !== "string" || value.prompt.trim().length === 0) return undefined;
     const iterations = parseIterations(value.iterations);
@@ -329,7 +329,7 @@ export function parseTaskFile(text: string): Task[] | undefined {
   if (!isObject(document)) return undefined;
   // Every earlier version is readable, because each one only added arms, fields
   // and statuses: a version 1 or 2 record takes its own `createdAt` as recency and
-  // an old `loop` reads as an llm loop, and versions 3 and 4 are the shapes before
+  // an old `loop` reads as an prompt loop, and versions 3 and 4 are the shapes before
   // cmd loops and before chains. A newer, unknown version cannot be guessed at,
   // so the earlier generation is the safer answer.
   const version = document.version;
@@ -390,7 +390,7 @@ export interface TaskStoreOptions {
  * step cannot mistake a reused pid for the old command.
  *
  * A loop is deliberately left running: it owns no process of its own, so a
- * restart does not end its schedule. An llm loop keeps its status and next-fire
+ * restart does not end its schedule. An prompt loop keeps its status and next-fire
  * time and resumes when the extension starts pumping again. A cmd loop keeps
  * both too, and its in-flight fire is marked interrupted because the child
  * process died with the old pi process. Its Iterations are different — an
@@ -398,7 +398,7 @@ export interface TaskStoreOptions {
  * (see {@link interruptIterations}).
  */
 function interrupt(record: Task, at: number): Task {
-  if (record.kind === "llm-loop") return interruptIterations(record, at);
+  if (record.kind === "prompt-loop") return interruptIterations(record, at);
   if (record.kind === "cmd-loop") return interruptFires(record, at);
   // A chain is settled after every record has been visited, because its ending
   // depends on the steps it holds (see {@link settleOpenChains}).
@@ -448,7 +448,7 @@ function settleOpenChains(records: readonly Task[], at: number): Task[] {
  * Marking it `interrupted`, and stopping the calls it left running, keeps a
  * reader from seeing work that can never finish.
  */
-function interruptIterations(task: LlmLoopTask, at: number): LlmLoopTask {
+function interruptIterations(task: PromptLoopTask, at: number): PromptLoopTask {
   if (!task.iterations.some((iteration) => iteration.status === "running")) return task;
   const iterations = task.iterations.map((iteration) => {
     if (iteration.status !== "running") return iteration;
