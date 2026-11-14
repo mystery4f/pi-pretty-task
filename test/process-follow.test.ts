@@ -160,8 +160,19 @@ describe("bg_logs following a task", () => {
 
     expect(body(answer.text)).toBe("late\n");
     expect(elapsed).toBeLessThan(10_000);
-    expect(answer.details.finished).toBe(true);
     expect(answer.details.timedOut).toBe(false);
+
+    // The bytes can arrive a moment before the record is marked ended, so the
+    // end is asserted on a follow taken after the task is known to be gone.
+    await waitFor("the task to finish", async () => {
+      const status = (await harness.call("bg_status", { id: task.id })).details as TaskDetails;
+      return status.status !== "running";
+    });
+    const after = followAnswer(
+      await harness.call("bg_logs", { id: task.id, follow: true, timeoutSeconds: 5 }),
+    );
+    expect(after.details.finished).toBe(true);
+    expect(after.details.timedOut).toBe(false);
   });
 
   it("answers an empty delta when nothing new arrives in the window, not an error", async () => {
