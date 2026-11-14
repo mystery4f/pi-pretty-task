@@ -9,21 +9,16 @@
  * @author mystery4f <40482524+mystery4f@users.noreply.github.com>
  */
 
-import {
-  type ExtensionAPI,
-  type ExtensionUIContext,
-  getAgentDir,
-} from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import type { TaskScope } from "./tasks/base/runtime-state.js";
+import { readSettings } from "./tasks/base/settings.js";
 import { TaskSessions } from "./tasks/base/task-sessions.js";
 import { Iterations } from "./tasks/loop/iterations.js";
 import { type LoopFire, LoopTasks } from "./tasks/loop/loop-tasks.js";
 import { loopTaskTools } from "./tasks/loop/tools.js";
 import { LoopWakes } from "./tasks/loop/wake-queue.js";
-import { parseOutputCapBytes } from "./tasks/process/limits.js";
 import { ProcessTasks } from "./tasks/process/process-tasks.js";
-import { resolveShellPolicy } from "./tasks/process/shell.js";
-import { loadTemplates, templateConfigPaths } from "./tasks/process/templates.js";
+import { loadTemplates } from "./tasks/process/templates.js";
 import { processTaskTools } from "./tasks/process/tools.js";
 import { LOOP_WAKE_CUSTOM_TYPE, renderLoopWake, sendLoopWake } from "./ui/loop-wake.js";
 import {
@@ -38,7 +33,7 @@ export interface ExtensionOptions {
   readonly now?: () => number;
   /** Pump period in milliseconds; `0` disables the timer so tests drive the pump. */
   readonly pumpIntervalMs?: number;
-  /** Where the configuration is read from; defaults to `process.env`. */
+  /** The environment the configuration is read from; defaults to `process.env`. */
   readonly env?: NodeJS.ProcessEnv;
   /**
    * Tool calls one Iteration keeps; defaults to ITERATION_CALL_LIMIT. Lowering it
@@ -49,7 +44,7 @@ export interface ExtensionOptions {
   readonly iterationHistoryLimit?: number;
   /** Project root holding `.pi/pretty-task.json`; defaults to `process.cwd()`. */
   readonly projectDir?: string;
-  /** Agent settings directory; defaults to pi's agent directory. */
+  /** Agent settings directory; defaults to `PI_CODING_AGENT_DIR`, then pi's own default. */
   readonly agentDir?: string;
   /**
    * Receives a configuration problem as one line, without the `pi-pretty-task:`
@@ -102,17 +97,15 @@ export function createExtension(
   // Configuration is read first, before anything is registered: a value that is
   // not usable has to fail the load with a message that names the key, because a
   // limit that silently becomes `NaN` would end every task on its first byte.
-  const env = options.env ?? process.env;
-  const outputCapBytes = parseOutputCapBytes(env);
-  // The shell is settled here for the same reason: a selector that names a shell
-  // this platform does not have must fail the load, not the first `bg_run`.
-  const shellPolicy = resolveShellPolicy({ env });
+  const settings = readSettings({
+    env: options.env,
+    projectDir: options.projectDir,
+    agentDir: options.agentDir,
+  });
   // Templates are configuration too, but a bad file only costs that file's
   // names: say what is wrong, keep the extension loaded, and let the other file
   // still supply templates.
-  const templates = loadTemplates(
-    templateConfigPaths(options.projectDir ?? process.cwd(), options.agentDir ?? getAgentDir()),
-  );
+  const templates = loadTemplates(settings.templatePaths);
   const reportProblem =
     options.reportProblem ??
     ((message: string) => {
@@ -154,8 +147,8 @@ export function createExtension(
   const processTasks = new ProcessTasks({
     sessions,
     now,
-    outputCapBytes,
-    shellPolicy,
+    outputCapBytes: settings.outputCapBytes,
+    shellPolicy: settings.shellPolicy,
     // The store does not await the announcement; a notice outlives the task.
     onFinish: (view) => {
       void notifyTaskFinished(pi, view);

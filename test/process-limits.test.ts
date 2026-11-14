@@ -13,14 +13,16 @@ import { stat } from "node:fs/promises";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
-  DEFAULT_FOLLOW_SECONDS,
   DEFAULT_OUTPUT_CAP_BYTES,
+  OUTPUT_CAP_ENV,
+  parseOutputCapBytes,
+} from "../src/tasks/base/settings.js";
+import {
+  DEFAULT_FOLLOW_SECONDS,
   DEFAULT_WAIT_SECONDS,
   MAX_FOLLOW_SECONDS,
   MAX_WAIT_SECONDS,
-  OUTPUT_CAP_ENV,
   parseFollowSeconds,
-  parseOutputCapBytes,
   parseWaitSeconds,
 } from "../src/tasks/process/limits.js";
 import { createHarness, type Harness, resultText } from "./support/extension-harness.js";
