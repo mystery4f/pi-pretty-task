@@ -165,8 +165,9 @@ describe("command loops", () => {
     expect(status).toContain("name: watcher #1");
     expect(status).toContain("kind: process");
     expect(status).toContain("status: running");
-    // A fire is a task of the session: the listing answers for it too (ADR-0014).
-    expect(resultText(await task.harness.call("bg_status", {}))).toContain(running.taskId);
+    // A fire is a child record, not a row (ADR-0014): the listing shows roots, so
+    // the fire answers by its own id above and nowhere in the list.
+    expect(resultText(await task.harness.call("bg_status", {}))).not.toContain(running.taskId);
 
     await waitFor("the first output line", async () => {
       const logs = resultText(await task.harness.call("bg_logs", { id: running.taskId }));

@@ -12,6 +12,7 @@ import { Value } from "typebox/value";
 import { afterEach, describe, expect, it } from "vitest";
 import { sessionTaskDirectory, taskRecordPath } from "../src/tasks/base/runtime-state.js";
 import { TaskSessions } from "../src/tasks/base/task-sessions.js";
+import { ChainTasks } from "../src/tasks/chain/chain-tasks.js";
 import { ProcessTasks } from "../src/tasks/process/process-tasks.js";
 import { processTaskTools } from "../src/tasks/process/tools.js";
 import { createHarness, type Harness, resultText } from "./support/extension-harness.js";
@@ -254,7 +255,10 @@ describe("bg_run's directory and environment", () => {
   });
 
   it("accepts env only as string values, at the schema seam", () => {
-    const run = processTaskTools(new ProcessTasks()).find((tool) => tool.name === "bg_run");
+    const processes = new ProcessTasks();
+    const run = processTaskTools(processes, new ChainTasks({ processes: () => processes })).find(
+      (tool) => tool.name === "bg_run",
+    );
     if (run === undefined) throw new Error("bg_run is not registered");
     const accepts = (env: unknown): boolean =>
       Value.Check(run.parameters, { command: "echo hi", env });
