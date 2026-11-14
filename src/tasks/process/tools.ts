@@ -21,7 +21,10 @@ import { parseTimeoutSeconds } from "./limits.js";
 import type { ProcessTasks, ProcessTaskView, TaskScope } from "./process-tasks.js";
 
 const RunParameters = Type.Object({
-  command: Type.String({ description: "Shell command to run in the background." }),
+  command: Type.String({
+    description:
+      "Shell command to run in the background. Windows runs it through `cmd.exe /d /s /c` — cmd syntax, not POSIX sh; POSIX runs it through `sh -c`. Output is stored as raw bytes.",
+  }),
   name: Type.Optional(
     Type.String({ description: "Short label for the task; defaults to the command itself." }),
   ),

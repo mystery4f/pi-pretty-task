@@ -2,6 +2,19 @@
 
 本文档说明 v0.1 的全部配置面：一个经由环境变量给出的输出字节上限，以及 `bg_run` 每次可以自带的运行超时。两者都以“终止原因”收尾，见 `GLOSSARY.md` 的 Process task 条目。
 
+## 命令在哪个 shell 里跑
+
+`bg_run` 的 `command` 不是一条跨平台的“shell 脚本”，它交给当前平台的默认 shell：
+
+| 平台 | 实际调用 | 该写哪种语法 |
+|---|---|---|
+| Windows | `cmd.exe /d /s /c "<command>"`（`ComSpec` 指向别的 shell 时用它） | cmd：`for /L %i in (1,1,5) do @echo tick %i` |
+| POSIX | `sh -c "<command>"`（`-c`，非登录 shell） | sh：`for i in 1 2 3 4 5; do echo "tick $i"; sleep 2; done` |
+
+拿 POSIX 语法喂 Windows 会得到 `此时不应有 i` 这类 cmd 报错，状态 `failed`、退出码 1——这不是任务失败，是命令写错了方言。v0.1 不提供 shell 选择参数；需要 PowerShell 或 bash 时把解释器写进命令里，例如 `powershell -NoProfile -Command "..."` 或 `bash -lc "..."`（后者要求 PATH 上有 bash）。
+
+输出按字节原样追加，不做转码：Windows 控制台程序按系统代码页（中文环境通常是 GBK）写出中文报错，读回来就是乱码。要 UTF-8，开局 `chcp 65001` 或让命令自己输出 UTF-8。
+
 ## 输出字节上限
 
 | 项 | 值 |

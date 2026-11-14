@@ -494,7 +494,8 @@ describe("loop tasks in the list", () => {
     expect(drawn().indexOf("review loop")).toBeLessThan(drawn().indexOf("nightly build"));
     expect(loopRow).toContain("loop");
     expect(loopRow).toContain("2+3");
-    expect(loopRow).toContain(formatClockTime(lastFireAt));
+    // The row carries the countdown; the last fire's wall-clock time lives in the detail.
+    expect(loopRow).toContain("4.0s");
     expect(loopRow).not.toContain("KiB");
     expect(processRow).toContain("1.5 KiB");
     expect(processRow).not.toContain("iterations");

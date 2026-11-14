@@ -8,7 +8,6 @@
  */
 
 import { afterEach, describe, expect, it } from "vitest";
-import { formatClockTime } from "../src/tasks/base/format.js";
 import { STATUS_LINE_KEY, statusLineText, TASKS_COMMAND } from "../src/ui/tasks-command.js";
 import { TasksPanel } from "../src/ui/tasks-panel.js";
 import { createHarness, type Harness, resultText } from "./support/extension-harness.js";
@@ -231,13 +230,12 @@ describe("/tasks command", () => {
 
     // A 10s loop run five times: five iterations, one command each.
     for (let fire = 1; fire <= 5; fire += 1) await fireLoop(harness, clock, fire);
-    const lastFireAt = clock.now;
-
     const { panel, closed } = await openPanel(harness);
     const list = panel.render(100).join("\n");
     expect(list).toContain("review loop");
     expect(list).toContain(created.id);
-    expect(list).toContain(formatClockTime(lastFireAt));
+    // The row shows the countdown; the detail carries the wall-clock times.
+    expect(list).toContain("10.0s");
 
     panel.handleInput("\r");
     await panel.settle();

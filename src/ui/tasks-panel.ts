@@ -108,6 +108,8 @@ export class TasksPanel implements Component {
   private readonly timer: ReturnType<typeof setInterval> | undefined;
 
   private mode: PanelMode = "list";
+  /** Width of the frame being drawn; field values are cut against it. */
+  private renderWidth = 80;
   private rows: readonly PanelTaskView[] = [];
   private selectedId: string | undefined;
   private listTop = 0;
@@ -192,6 +194,9 @@ export class TasksPanel implements Component {
   }
 
   render(width: number): string[] {
+    // Field values are cut against the frame they sit in, so the frame never has to
+    // re-measure text that already carries colour.
+    this.renderWidth = width;
     if (this.mode === "iteration") return this.renderIterationDetail(width);
     return this.mode === "detail" ? this.renderDetail(width) : this.renderList(width);
   }
@@ -545,68 +550,121 @@ export class TasksPanel implements Component {
 
   // ---- drawing -------------------------------------------------------------
 
+  /**
+   * The box the whole panel lives in: a border, a tinted title band carrying the
+   * counts, the body, then the keys. It mirrors the panel this plugin replaces so
+   * the eye lands in the same place; colours still come from theme tokens.
+   */
+  private frame(
+    title: string,
+    subtitle: string,
+    body: string[],
+    footer: string,
+    width: number,
+  ): string[] {
+    const theme = this.theme;
+    const inner = Math.max(1, width - 2);
+    const edge = (glyph: string): string => theme.fg("border", glyph);
+    // The frame pads but never cuts: every line handed to it was already fitted by the
+    // caller (list cells pad themselves, `field` cuts its value to the frame). Cutting
+    // here as well would double-truncate text that merely carries colour.
+    const padded = (text: string, room: number): string =>
+      text + " ".repeat(Math.max(0, room - visibleWidth(text)));
+    const band = (text: string): string =>
+      theme.bg("selectedBg", theme.fg("accent", padded(text, inner)));
+    const row = (content = ""): string => `${edge("│")}${padded(content, inner)}${edge("│")}`;
+
+    const lines = [
+      edge(`╭${"─".repeat(inner)}╮`),
+      row(band(` ${title}`)),
+      row(band(` ${subtitle}`)),
+      row(),
+    ];
+    for (const line of body) lines.push(row(line));
+    lines.push(row(), row(theme.fg("dim", ` ${footer}`)));
+    lines.push(edge(`╰${"─".repeat(inner)}╯`));
+    return lines;
+  }
+
+  /** Counts for the title band: what is running, how many loops, how many finished. */
+  private listSubtitle(): string {
+    const running = this.rows.filter((row) => row.task.status === "running").length;
+    const paused = this.rows.filter((row) => row.task.status === "paused").length;
+    const loops = this.rows.filter((row) => row.task.kind === "loop").length;
+    const finished = this.rows.length - running - paused;
+    const parts = [`${String(running)} running`];
+    if (loops > 0) parts.push(`${String(loops)} loop${loops === 1 ? "" : "s"}`);
+    if (finished > 0) parts.push(`${String(finished)} finished`);
+    if (paused > 0) parts.push(`${String(paused)} paused`);
+    if (this.onlyLoops) parts.push("loops only");
+    parts.push("newest first");
+    return parts.join(" · ");
+  }
+
   private renderList(width: number): string[] {
     const theme = this.theme;
-    const lines: string[] = [
-      `${theme.bold("Tasks")} ${theme.fg("muted", `· ${String(this.rows.length)} · newest first`)}`,
-    ];
+    const inner = Math.max(1, width - 2);
+    const body: string[] = [];
 
     if (this.rows.length === 0) {
-      lines.push("");
-      lines.push(this.notice ?? "No tasks yet — run a command with bg_run and it appears here.");
-      lines.push(theme.fg("dim", "x closes"));
-      return lines;
+      body.push(
+        "",
+        theme.fg("dim", "  No tasks yet — run a command with bg_run and it appears here."),
+      );
+      return this.frame("tasks", this.listSubtitle(), body, "x close", width);
     }
 
-    lines.push(theme.fg("dim", this.listHeader(width)));
     const visible = this.rows.slice(this.listTop, this.listTop + LIST_VISIBLE_ROWS);
     visible.forEach((row, offset) => {
-      lines.push(this.listRow(row, this.listTop + offset === this.selectedIndex(), width));
+      body.push(this.listRow(row, this.listTop + offset === this.selectedIndex(), inner));
     });
-    if (this.notice !== undefined) lines.push(theme.fg("muted", this.notice));
-    lines.push(
-      theme.fg("dim", "↑/↓ select · Enter details · k stop · a stop all · l loops · x close"),
+    if (this.rows.length > LIST_VISIBLE_ROWS) {
+      const first = this.listTop + 1;
+      const last = Math.min(this.rows.length, this.listTop + LIST_VISIBLE_ROWS);
+      body.push(
+        theme.fg(
+          "dim",
+          `  showing ${String(first)}-${String(last)} of ${String(this.rows.length)}`,
+        ),
+      );
+    }
+    if (this.notice !== undefined) body.push(theme.fg("warning", `  ${this.notice}`));
+    return this.frame(
+      "tasks",
+      this.listSubtitle(),
+      body,
+      "↑/↓ select · Enter details · k stop · a stop all · l loops · x close",
+      width,
     );
-    return lines;
   }
 
   private selectedIndex(): number {
     return this.rows.findIndex((row) => row.task.id === this.selectedId);
   }
 
-  private listHeader(width: number): string {
-    const columns = listColumns(width);
-    const cells = [
-      " ",
-      ` ${pad("kind", 8)}`,
-      ` ${pad("name", nameWidth(width))}`,
-      ` ${pad("id", 10)}`,
-      ` ${pad("status", 12)}`,
-      ` ${padStart("elapsed", 9)}`,
-      ` ${padStart("size", 10)}`,
-    ];
-    if (columns.iters) cells.push(` ${padStart("iters", 6)}`);
-    if (columns.last) cells.push(` ${padStart("last", 9)}`);
-    return cells.join("");
-  }
-
+  /**
+   * One list row, in the shape of a process listing: pointer, live dot, name, id,
+   * status, then the numbers. Every cell is padded before it is coloured, so the
+   * border stays straight whatever the theme does with escapes.
+   */
   private listRow(row: PanelTaskView, selected: boolean, width: number): string {
     const theme = this.theme;
-    const marker = selected ? theme.fg("accent", ">") : " ";
-    const name = truncateToWidth(row.task.name, nameWidth(width), "…", false);
-    const columns = listColumns(width);
-    const cells = [
-      marker,
-      ` ${pad(row.task.kind, 8)}`,
-      ` ${pad(name, nameWidth(width))}`,
-      ` ${pad(row.task.id, 10)}`,
-      ` ${theme.fg(STATUS_COLOUR[row.task.status], pad(row.task.status, 12))}`,
-      ` ${padStart(formatDuration(row.elapsedMs), 9)}`,
-      ` ${padStart(formatSize(row), 10)}`,
-    ];
-    if (columns.iters) cells.push(` ${padStart(iterationCountText(row.task), 6)}`);
-    if (columns.last) cells.push(` ${padStart(lastFireText(row.task), 9)}`);
-    return cells.join("");
+    const task = row.task;
+    const pointer = selected ? theme.fg("accent", "›") : " ";
+    const dot = theme.fg(dotColour(task), "●");
+    const id = theme.fg("dim", pad(task.id, 10));
+    const kind = theme.fg("dim", pad(task.kind, 8));
+    const separator = theme.fg("dim", " · ");
+    const status = theme.fg(STATUS_COLOUR[task.status], pad(task.status, 11));
+
+    const exitRoom = 8;
+    const rightRoom = 18;
+    const nameRoom = Math.max(4, width - (5 + 10 + 1 + 8 + 3 + 11 + exitRoom + rightRoom));
+    const name = theme.fg(STATUS_COLOUR[task.status], pad(task.name, nameRoom));
+    const exit = theme.fg("dim", pad(exitText(task), exitRoom));
+    const right = theme.fg("dim", padStart(rightText(row), rightRoom));
+
+    return ` ${pointer} ${dot} ${name} ${id} ${kind}${separator}${status}${exit}${right}`;
   }
 
   private renderDetail(width: number): string[] {
@@ -623,44 +681,56 @@ export class TasksPanel implements Component {
     if (row === undefined || row.task.kind !== "process") return this.renderList(width);
     const task = row.task;
     const colour = STATUS_COLOUR[task.status];
-    const lines: string[] = [
-      `${theme.bold(task.name)} ${theme.fg("muted", `(${task.id})`)}`,
-      "",
+    const body: string[] = [
       this.field("status", theme.fg(colour, task.status)),
-      this.field("kind", task.kind),
       this.field("elapsed", formatDuration(row.elapsedMs)),
       this.field("output", formatSize(row)),
     ];
-    // Only a process task carries the process facts; a loop task has none of them.
-    if (task.kind === "process") {
-      if (task.pid !== undefined) lines.push(this.field("pid", String(task.pid)));
-      lines.push(this.field("command", task.command));
-      lines.push(this.field("output file", task.outputPath));
-      if (task.cwd !== undefined) lines.push(this.field("cwd", task.cwd));
-      if (task.exitCode !== undefined) {
-        lines.push(this.field("exit code", theme.fg(colour, String(task.exitCode))));
-      }
-      if (task.killReason !== undefined) lines.push(this.field("kill reason", task.killReason));
+    if (task.pid !== undefined) body.push(this.field("pid", String(task.pid)));
+    body.push(this.field("command", singleLine(task.command, Math.max(1, width - 14))));
+    body.push(this.field("output file", task.outputPath));
+    if (task.cwd !== undefined) body.push(this.field("cwd", task.cwd));
+    if (task.exitCode !== undefined) {
+      body.push(this.field("exit code", theme.fg(colour, String(task.exitCode))));
     }
-    if (task.error !== undefined) lines.push(this.field("error", theme.fg(colour, task.error)));
+    if (task.killReason !== undefined) body.push(this.field("kill reason", task.killReason));
+    if (task.error !== undefined) body.push(this.field("error", theme.fg(colour, task.error)));
 
-    lines.push("");
-    lines.push(theme.fg("muted", `output · ${this.position()}`));
+    body.push(theme.fg("muted", `output · ${this.position()}`));
+    body.push(...this.outputBox(width - 2));
 
+    if (this.notice !== undefined) body.push(theme.fg("warning", `  ${this.notice}`));
+    const live = task.status === "running" ? "live tail refreshes every second" : "final output";
+    return this.frame(
+      `task: ${task.name}`,
+      `${task.id} · ${task.status} · ${live}`,
+      body,
+      "↑/↓ scroll · r follow · ← list · k stop · x close",
+      width,
+    );
+  }
+
+  /** The output tail, inside its own thin border so it reads as a window, not a field. */
+  private outputBox(width: number): string[] {
+    const theme = this.theme;
+    const inner = Math.max(1, width - 2);
+    const edge = (glyph: string): string => theme.fg("borderMuted", glyph);
+    const row = (content = ""): string => {
+      const cut =
+        visibleWidth(content) > inner ? truncateToWidth(content, inner, "…", false) : content;
+      return `${edge("│")}${cut}${" ".repeat(Math.max(0, inner - visibleWidth(cut)))}${edge("│")}`;
+    };
+    const lines = [edge(`╭${"─".repeat(inner)}╮`)];
     if (this.detailError !== undefined) {
-      lines.push(theme.fg("error", `  output unavailable: ${this.detailError}`));
+      lines.push(row(theme.fg("error", ` output unavailable: ${this.detailError}`)));
     } else if (this.detailLines.length === 0) {
-      lines.push(theme.fg("dim", "  no output yet"));
+      lines.push(row(theme.fg("dim", " no output yet")));
     } else {
       const [from, to] = this.window();
-      for (const line of this.detailLines.slice(from, to)) {
-        lines.push(`  ${truncateToWidth(line, Math.max(1, width - 2), "…", false)}`);
-      }
-      if (this.detailTruncated) lines.push(theme.fg("dim", "  … older output left out"));
+      for (const line of this.detailLines.slice(from, to)) lines.push(row(` ${line}`));
+      if (this.detailTruncated) lines.push(row(theme.fg("dim", " … older output left out")));
     }
-
-    if (this.notice !== undefined) lines.push(theme.fg("muted", this.notice));
-    lines.push(theme.fg("dim", "↑/↓ scroll · r follow · ← list · k stop · x close"));
+    lines.push(edge(`╰${"─".repeat(inner)}╯`));
     return lines;
   }
 
@@ -670,9 +740,7 @@ export class TasksPanel implements Component {
     const task = row.task;
     if (task.kind !== "loop") return this.renderList(width);
     const colour = STATUS_COLOUR[task.status];
-    const lines: string[] = [
-      `${theme.bold(task.name)} ${theme.fg("muted", `(${task.id})`)}`,
-      "",
+    const body: string[] = [
       this.field("status", theme.fg(colour, task.status)),
       this.field("kind", task.kind),
       this.field("elapsed", formatDuration(row.elapsedMs)),
@@ -684,17 +752,19 @@ export class TasksPanel implements Component {
         task.lastFireAt === undefined ? "—" : formatClockTime(task.lastFireAt),
       ),
     ];
-    if (task.expiresAt !== undefined)
-      lines.push(this.field("expires", formatClockTime(task.expiresAt)));
-    if (task.endedAt !== undefined) lines.push(this.field("ended", formatClockTime(task.endedAt)));
-    if (task.error !== undefined) lines.push(this.field("error", theme.fg(colour, task.error)));
-    lines.push(this.field("prompt", singleLine(task.prompt, Math.max(1, width - 10))));
-    lines.push("");
-    lines.push(theme.fg("muted", iterationsText(task)));
+    if (task.expiresAt !== undefined) {
+      body.push(this.field("expires", formatClockTime(task.expiresAt)));
+    }
+    if (task.endedAt !== undefined) {
+      body.push(this.field("ended", formatClockTime(task.endedAt)));
+    }
+    if (task.error !== undefined) body.push(this.field("error", theme.fg(colour, task.error)));
+    body.push(this.field("prompt", singleLine(task.prompt, Math.max(1, width - 14))));
+    body.push("", theme.fg("muted", iterationsText(task)));
 
     const newestFirst = [...task.iterations].reverse();
     if (newestFirst.length === 0) {
-      lines.push(theme.fg("dim", "  no iteration recorded yet"));
+      body.push(theme.fg("dim", "  no iteration recorded yet"));
     } else {
       const selected = this.currentIteration(task);
       const top = Math.min(
@@ -702,19 +772,24 @@ export class TasksPanel implements Component {
         Math.max(0, newestFirst.length - LIST_VISIBLE_ROWS),
       );
       const visible = newestFirst.slice(top, top + LIST_VISIBLE_ROWS);
-      if (top > 0) lines.push(theme.fg("dim", `  … ${String(top)} newer above`));
+      if (top > 0) body.push(theme.fg("dim", `  … ${String(top)} newer above`));
       for (const iteration of visible) {
-        const marker = iteration.fire === selected?.fire ? theme.fg("accent", ">") : " ";
+        const marker = iteration.fire === selected?.fire ? theme.fg("accent", "›") : " ";
         const text = iterationLine(iteration);
-        lines.push(`${marker} ${truncateToWidth(text, Math.max(1, width - 2), "…", false)}`);
+        body.push(`${marker} ${truncateToWidth(text, Math.max(1, width - 4), "…", false)}`);
       }
       const below = newestFirst.length - top - visible.length;
-      if (below > 0) lines.push(theme.fg("dim", `  … ${String(below)} older below`));
+      if (below > 0) body.push(theme.fg("dim", `  … ${String(below)} older below`));
     }
 
-    if (this.notice !== undefined) lines.push(theme.fg("muted", this.notice));
-    lines.push(theme.fg("dim", "↑/↓ select · Enter iteration · ← list · k stop · x close"));
-    return lines;
+    if (this.notice !== undefined) body.push(theme.fg("warning", `  ${this.notice}`));
+    return this.frame(
+      `loop: ${task.name}`,
+      `${task.id} · ${task.status} · ${task.schedule}`,
+      body,
+      "↑/↓ select · Enter iteration · ← list · k stop · x close",
+      width,
+    );
   }
 
   /** An iteration detail: the tool calls that turn made, oldest first; `←` goes back. */
@@ -726,36 +801,30 @@ export class TasksPanel implements Component {
     const iteration = this.currentIteration(task);
     if (iteration === undefined) return this.renderLoopDetail(row, width);
 
-    const lines: string[] = [
-      `${theme.bold(`fire ${String(iteration.fire)}`)} ${theme.fg(
-        "muted",
-        `(${task.name} · ${task.id})`,
-      )}`,
-      "",
+    const body: string[] = [
       this.field("status", theme.fg(ITERATION_COLOUR[iteration.status], iteration.status)),
       this.field("started", formatClockTime(iteration.startedAt)),
     ];
     if (iteration.endedAt !== undefined) {
-      lines.push(this.field("took", formatDuration(iteration.endedAt - iteration.startedAt)));
+      body.push(this.field("took", formatDuration(iteration.endedAt - iteration.startedAt)));
     }
-    lines.push(this.field("calls", callsText(iteration)));
-    lines.push("");
-    lines.push(theme.fg("muted", callsHeading(iteration, this.callTop)));
+    body.push(this.field("calls", callsText(iteration)));
+    body.push("", theme.fg("muted", callsHeading(iteration, this.callTop)));
 
     const top = callTopFor(iteration, this.callTop);
     const visible = iteration.calls.slice(top, top + DETAIL_OUTPUT_LINES);
     if (visible.length === 0) {
-      lines.push(theme.fg("dim", "  no tool call in this turn"));
+      body.push(theme.fg("dim", "  no tool call in this turn"));
     }
     visible.forEach((call, offset) => {
-      lines.push(this.callLine(call, top + offset, width));
+      body.push(this.callLine(call, top + offset, width - 4));
       if (call.error !== undefined) {
-        lines.push(theme.fg(STATUS_COLOUR.failed, `     error: ${call.error}`));
+        body.push(theme.fg(STATUS_COLOUR.failed, `     error: ${call.error}`));
       }
     });
     // The cap drops the oldest calls first; say so where they would have been.
     if (iteration.droppedCalls > 0) {
-      lines.push(
+      body.push(
         theme.fg(
           STATUS_COLOUR.interrupted,
           `  … +${String(iteration.droppedCalls)} earlier calls dropped`,
@@ -763,9 +832,14 @@ export class TasksPanel implements Component {
       );
     }
 
-    if (this.notice !== undefined) lines.push(theme.fg("muted", this.notice));
-    lines.push(theme.fg("dim", "↑/↓ scroll · ← loop · k stop · x close"));
-    return lines;
+    if (this.notice !== undefined) body.push(theme.fg("warning", `  ${this.notice}`));
+    return this.frame(
+      `fire ${String(iteration.fire)}`,
+      `${task.name} · ${task.id} · ${iteration.status}`,
+      body,
+      "↑/↓ scroll · ← loop · k stop · x close",
+      width,
+    );
   }
 
   /** One call row: its subject (a command stands out), then its result or error. */
@@ -796,7 +870,10 @@ export class TasksPanel implements Component {
   }
 
   private field(label: string, value: string): string {
-    return `${this.theme.fg("muted", pad(label, 10))}${value}`;
+    // Cut here, once, against the frame: the border and the label take their share first.
+    const room = Math.max(8, this.renderWidth - 2 - 10 - 2);
+    const text = visibleWidth(value) > room ? truncateToWidth(value, room, "…", false) : value;
+    return `${this.theme.fg("muted", pad(label, 10))}${text}`;
   }
 }
 
@@ -805,32 +882,26 @@ function formatSize(row: PanelTaskView): string {
   return row.task.kind === "process" ? formatBytes(row.outputBytes) : "—";
 }
 
-/** Columns the fixed list fields take, marker and gaps included. */
-const FIXED_COLUMNS = 2 + 9 + 11 + 13 + 10 + 11 + 7 + 10;
-
-/** `last` and `iters` are 10 and 7 cells wide; a narrow terminal loses them first. */
-const LAST_COLUMN = 10;
-const ITERS_COLUMN = 7;
-
-/** Which optional columns a terminal this wide still fits, and what they leave the name. */
-function listColumns(width: number): { fixed: number; last: boolean; iters: boolean } {
-  const floor = 4;
-  if (width >= FIXED_COLUMNS + floor) {
-    return { fixed: FIXED_COLUMNS, last: true, iters: true };
-  }
-  const withoutLast = FIXED_COLUMNS - LAST_COLUMN;
-  if (width >= withoutLast + floor) {
-    return { fixed: withoutLast, last: false, iters: true };
-  }
-  // Below this the row keeps marker, kind, name, id, status, elapsed and size only.
-  return { fixed: FIXED_COLUMNS - LAST_COLUMN - ITERS_COLUMN, last: false, iters: false };
+/** The live dot: running is loud, a stopped task is a hollow ring, paused is a warning. */
+function dotColour(task: Task): ThemeColor {
+  if (task.status === "running") return STATUS_COLOUR.running;
+  if (task.status === "paused") return STATUS_COLOUR.paused;
+  return task.status === "completed" ? "dim" : STATUS_COLOUR[task.status];
 }
 
-/** Space a task name may use: whatever the fixed columns leave, with a floor. */
-function nameWidth(width: number): number {
-  // The floor is deliberately small: a narrow terminal must lose the name first,
-  // not wrap the row (scope-v1 keeps terminal size as the panel's known risk).
-  return Math.max(4, width - listColumns(width).fixed);
+/** Exit column: a process has a code, a loop has fires instead. */
+function exitText(task: Task): string {
+  if (task.kind === "loop") return "";
+  return task.exitCode === undefined ? "" : `exit ${String(task.exitCode)}`;
+}
+
+/** Right-hand numbers: a process reports runtime and output size, a loop its fires and schedule. */
+function rightText(row: PanelTaskView): string {
+  const task = row.task;
+  const elapsed = formatDuration(row.elapsedMs);
+  if (task.kind === "process") return `${elapsed} ${formatSize(row)}`;
+  const next = row.untilNextFireMs === undefined ? "" : ` · ${formatDuration(row.untilNextFireMs)}`;
+  return `${elapsed} ${iterationCountText(task)}${next}`;
 }
 
 function pad(text: string, width: number): string {
@@ -878,12 +949,6 @@ function iterationCountText(task: Task): string {
   const dropped = task.droppedIterations ?? 0;
   const kept = String(task.iterations.length);
   return dropped === 0 ? kept : `${kept}+${String(dropped)}`;
-}
-
-/** The last-fire column: wall-clock time, or a dash before the first fire. */
-function lastFireText(task: Task): string {
-  if (task.kind !== "loop" || task.lastFireAt === undefined) return "—";
-  return formatClockTime(task.lastFireAt);
 }
 
 function firesText(task: LoopTask): string {
