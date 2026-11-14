@@ -6,11 +6,13 @@
  * @author mystery4f <40482524+mystery4f@users.noreply.github.com>
  */
 
-import { mkdir, readFile, realpath, writeFile } from "node:fs/promises";
+import { mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { Value } from "typebox/value";
 import { afterEach, describe, expect, it } from "vitest";
 import { sessionTaskDirectory, taskRecordPath } from "../src/tasks/base/runtime-state.js";
+import { TaskSessions } from "../src/tasks/base/task-sessions.js";
+import { ChainTasks } from "../src/tasks/chain/chain-tasks.js";
 import { ProcessTasks } from "../src/tasks/process/process-tasks.js";
 import { processTaskTools } from "../src/tasks/process/tools.js";
 import { createHarness, type Harness, resultText } from "./support/extension-harness.js";
@@ -253,7 +255,10 @@ describe("bg_run's directory and environment", () => {
   });
 
   it("accepts env only as string values, at the schema seam", () => {
-    const run = processTaskTools(new ProcessTasks()).find((tool) => tool.name === "bg_run");
+    const processes = new ProcessTasks();
+    const run = processTaskTools(processes, new ChainTasks({ processes: () => processes })).find(
+      (tool) => tool.name === "bg_run",
+    );
     if (run === undefined) throw new Error("bg_run is not registered");
     const accepts = (env: unknown): boolean =>
       Value.Check(run.parameters, { command: "echo hi", env });
@@ -721,5 +726,130 @@ describe("bg_kill", () => {
     const answer = await harness.call("bg_kill", { id: "nope00" });
 
     expect(resultText(answer)).toContain("No background task with id nope00");
+  });
+});
+
+describe("queued steps", () => {
+  it("queues a step as a waiting record that belongs to its chain and to no row", async () => {
+    const dir = await makeTempDir();
+    cleanup.push(dir.dispose);
+    const marker = join(dir.path, "ran.txt");
+    const command = await writeScript(
+      dir.path,
+      "queued.js",
+      `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "ran");\n`,
+    );
+    const tasks = new ProcessTasks();
+    const scope = { cwd: dir.path, sessionId: "session-queue" };
+
+    const step = await tasks.queueStep({
+      ...scope,
+      command,
+      name: "step one",
+      parentId: "ch00001",
+    });
+
+    expect(step.id).toMatch(/^bg-[a-z0-9]{5}$/);
+    expect(step.kind).toBe("process");
+    expect(step.status).toBe("waiting");
+    expect(step.parentId).toBe("ch00001");
+    expect(step.pid).toBeUndefined();
+    expect(step.endedAt).toBeUndefined();
+    // Nothing was spawned: queuing is a promise about the future, not a start.
+    await expect(stat(marker)).rejects.toThrow();
+    // A step is a record, not a row: the processes list holds roots only (ADR-0014).
+    expect(await tasks.list(scope)).toHaveLength(0);
+    // It is still a task in its own right: its id answers, with its status.
+    expect((await tasks.get(scope, step.id))?.task.status).toBe("waiting");
+
+    const saved = JSON.parse(
+      await readFile(taskRecordPath(sessionTaskDirectory(scope.cwd, scope.sessionId)), "utf8"),
+    ) as { tasks: Array<Record<string, unknown>> };
+    expect(saved.tasks.find((task) => task.id === step.id)).toMatchObject({
+      status: "waiting",
+      parentId: "ch00001",
+      command,
+    });
+  });
+
+  it("launches a queued step once, booking its end like a task the user started", async () => {
+    const dir = await makeTempDir();
+    cleanup.push(dir.dispose);
+    const command = await writeScript(dir.path, "step.js", "console.log('step ran');\n");
+    const sessions = new TaskSessions();
+    const finished: string[] = [];
+    const tasks = new ProcessTasks({
+      sessions,
+      onFinish: (view) => finished.push(`${view.task.status}:${view.task.exitCode ?? "none"}`),
+    });
+    const scope = { cwd: dir.path, sessionId: "session-launch" };
+    const shared = await sessions.session(scope);
+    const step = await tasks.queueStep({
+      ...scope,
+      command,
+      name: "step two",
+      parentId: "ch00001",
+    });
+
+    const launched = await tasks.launch(shared, step.id);
+    expect(launched?.status).toBe("running");
+    expect(launched?.pid).toBeGreaterThan(0);
+    // The second launch finds a step that is no longer waiting, so it does nothing.
+    expect(await tasks.launch(shared, step.id)).toBeUndefined();
+
+    const ended = await tasks.wait(scope, step.id, 15_000);
+    expect(ended?.waited).toBe(true);
+    expect(ended?.view.task.status).toBe("completed");
+    expect(ended?.view.task.exitCode).toBe(0);
+    // The notice follows the disk write, so it lands a tick after the end.
+    await waitFor("the completion notice", () => finished.length === 1);
+    expect(finished).toEqual(["completed:0"]);
+
+    const logs = await tasks.logs(scope, step.id, { lines: 10 });
+    expect(logs?.tail.text).toContain("step ran");
+  });
+
+  it("ends a step failed when its process cannot start, so nothing waits forever", async () => {
+    const dir = await makeTempDir();
+    const work = await makeTempDir();
+    cleanup.push(dir.dispose, work.dispose);
+    const command = await writeScript(dir.path, "noop.js", "");
+    const sessions = new TaskSessions();
+    const tasks = new ProcessTasks({ sessions });
+    const scope = { cwd: dir.path, sessionId: "session-launch-fail" };
+    const shared = await sessions.session(scope);
+    const step = await tasks.queueStep({
+      ...scope,
+      command,
+      workingDirectory: work.path,
+      parentId: "ch00001",
+    });
+    // The directory a step was queued in may be gone by the time its turn comes.
+    await work.dispose();
+
+    // The launch itself may already know: a spawn that cannot even start ends the
+    // record before this promise settles, and either way the step ends.
+    expect(await tasks.launch(shared, step.id)).toBeDefined();
+
+    const ended = await tasks.wait(scope, step.id, 15_000);
+    expect(ended?.view.task.status).toBe("failed");
+    expect(ended?.view.task.error).toBeTruthy();
+  });
+
+  it("rejects a step whose working directory cannot be used, before any record exists", async () => {
+    const dir = await makeTempDir();
+    cleanup.push(dir.dispose);
+    const tasks = new ProcessTasks();
+    const scope = { cwd: dir.path, sessionId: "session-queue-bad-cwd" };
+
+    await expect(
+      tasks.queueStep({
+        ...scope,
+        command: "node --version",
+        workingDirectory: join(dir.path, "missing"),
+        parentId: "ch00001",
+      }),
+    ).rejects.toThrow(/does not exist/);
+    expect(await tasks.list(scope)).toHaveLength(0);
   });
 });

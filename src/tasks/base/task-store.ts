@@ -18,6 +18,7 @@ import type {
 } from "../loop/iteration.js";
 import { previousTaskRecordPath, taskRecordPath } from "./runtime-state.js";
 import type {
+  ChainTask,
   CmdLoopTask,
   FireRecord,
   LlmLoopTask,
@@ -33,11 +34,15 @@ import type {
  * Version 2 added `updatedAt` (ADR-0010). Version 3 split the old `loop` kind
  * into `llm-loop` and reserved `cmd-loop`, so a version 1 or 2 document still
  * loads: a record from before recency takes its own `createdAt`, and an old
- * `loop` reads as an llm loop. Version 4 implements the `cmd-loop` arm with its
- * fire history and adds the parent link a fire child carries: a version 3 reader
- * knows neither, so it falls back instead of guessing. Saving writes version 4.
+ * `loop` reads as an llm loop. Version 4 implemented the `cmd-loop` arm with its
+ * fire history and added the parent link a fire child carries. Version 5 adds
+ * the `chain` arm and the three statuses its steps use (`waiting`, `skipped`,
+ * `stopped`), and separates the parent link from the fire link, so a step can
+ * name its chain without claiming to be a fire. Every older version still loads
+ * — each one only added arms, fields and statuses, so nothing a reader knew
+ * before is spelled differently now — and saving writes version 5.
  */
-export const TASK_FILE_VERSION = 4;
+export const TASK_FILE_VERSION = 5;
 
 /** One session's task records as they are stored. */
 export interface TaskFile {
@@ -46,6 +51,10 @@ export interface TaskFile {
 }
 
 const TASK_STATUSES: readonly TaskStatus[] = [
+  // The three a chain's steps reach without ever running (ADR-0013).
+  "waiting",
+  "stopped",
+  "skipped",
   "running",
   "paused",
   "completed",
@@ -156,9 +165,10 @@ function parseTask(value: unknown, legacyKind: boolean): Task | undefined {
       if (typeof value.exitCode !== "number") return undefined;
     }
     if (value.error !== undefined && typeof value.error !== "string") return undefined;
-    // A fire child carries its loop and its fire number together: one without
-    // the other cannot be rendered or attributed (ADR-0016).
-    if ((value.parentId === undefined) !== (value.fire === undefined)) return undefined;
+    // A child always names its parent, and only a fire child also carries the
+    // fire number: a chain step points at its chain and was never a fire
+    // (ADR-0013, ADR-0016).
+    if (value.fire !== undefined && value.parentId === undefined) return undefined;
     if (value.parentId !== undefined) {
       if (typeof value.parentId !== "string" || value.parentId.length === 0) return undefined;
     }
@@ -210,6 +220,20 @@ function parseTask(value: unknown, legacyKind: boolean): Task | undefined {
     }
     if (value.lastOutputBytes !== undefined && !isCount(value.lastOutputBytes)) return undefined;
     return { ...value, kind, updatedAt, fireHistory } as unknown as Task;
+  }
+
+  if (kind === "chain") {
+    if (!Array.isArray(value.steps)) return undefined;
+    const steps: string[] = [];
+    for (const step of value.steps) {
+      // Ids only: a step is a record of its own, never a copy inside the chain.
+      if (typeof step !== "string" || step.length === 0) return undefined;
+      steps.push(step);
+    }
+    // The cursor names a slot in the queue: steps.length means the queue ran out.
+    if (!isCount(value.cursor) || value.cursor > steps.length) return undefined;
+    if (value.error !== undefined && typeof value.error !== "string") return undefined;
+    return { ...value, kind, updatedAt, steps, cursor: value.cursor } as unknown as ChainTask;
   }
 
   return undefined;
@@ -303,13 +327,13 @@ export function parseTaskFile(text: string): Task[] | undefined {
     return undefined;
   }
   if (!isObject(document)) return undefined;
-  // Versions 1 and 2 are readable because the only changes since are additive:
-  // `updatedAt` is filled from `createdAt`, and the old `loop` kind is read as
-  // `llm-loop`. Version 3 is the shape before cmd loops and reads unchanged. A
-  // newer, unknown version cannot be guessed at, so the earlier generation is
-  // the safer answer.
+  // Every earlier version is readable, because each one only added arms, fields
+  // and statuses: a version 1 or 2 record takes its own `createdAt` as recency and
+  // an old `loop` reads as an llm loop, and versions 3 and 4 are the shapes before
+  // cmd loops and before chains. A newer, unknown version cannot be guessed at,
+  // so the earlier generation is the safer answer.
   const version = document.version;
-  if (version !== 1 && version !== 2 && version !== 3 && version !== TASK_FILE_VERSION) {
+  if (!isCount(version) || version < 1 || version > TASK_FILE_VERSION) {
     return undefined;
   }
   if (!Array.isArray(document.tasks)) return undefined;
@@ -376,12 +400,46 @@ export interface TaskStoreOptions {
 function interrupt(record: Task, at: number): Task {
   if (record.kind === "llm-loop") return interruptIterations(record, at);
   if (record.kind === "cmd-loop") return interruptFires(record, at);
+  // A chain is settled after every record has been visited, because its ending
+  // depends on the steps it holds (see {@link settleOpenChains}).
+  if (record.kind === "chain") return record;
   if (record.status !== "running") return record;
   // A restart that ends a record is a state change like any other, so the
   // recency moves with the ending (ADR-0010).
   const interrupted: ProcessTask = { ...record, status: "interrupted", endedAt: at, updatedAt: at };
   delete interrupted.pid;
   return interrupted;
+}
+
+/**
+ * A chain left running at load ends `interrupted`. The step it had started is
+ * already `interrupted` — its process died with the old pi process — so the
+ * queue can never move on, and pretending it is still running would leave a
+ * reader waiting for a turn nothing will take (ADR-0013).
+ *
+ * The steps still `waiting` behind the cursor are `stopped`, the same word a
+ * user's stop leaves on them: they will never be started. Steps that already
+ * ran keep their own endings.
+ */
+function settleOpenChains(records: readonly Task[], at: number): Task[] {
+  const chains = records.filter(
+    (record): record is ChainTask => record.kind === "chain" && record.status === "running",
+  );
+  if (chains.length === 0) return [...records];
+
+  const byId = new Map(records.map((record) => [record.id, record]));
+  for (const chain of chains) {
+    chain.status = "interrupted";
+    chain.endedAt = at;
+    chain.updatedAt = at;
+    for (const id of chain.steps) {
+      const step = byId.get(id);
+      if (step === undefined || step.kind !== "process" || step.status !== "waiting") continue;
+      step.status = "stopped";
+      step.updatedAt = at;
+    }
+  }
+  return [...byId.values()];
 }
 
 /**
@@ -466,13 +524,19 @@ export class TaskStore {
     const current = await this.readGeneration(taskRecordPath(this.directory));
     if (current !== undefined) {
       this.lastGeneration = current.text;
-      return current.records.map((record) => interrupt(record, at));
+      return settleOpenChains(
+        current.records.map((record) => interrupt(record, at)),
+        at,
+      );
     }
 
     const previous = await this.readGeneration(previousTaskRecordPath(this.directory));
     if (previous !== undefined) {
       this.lastGeneration = previous.text;
-      return previous.records.map((record) => interrupt(record, at));
+      return settleOpenChains(
+        previous.records.map((record) => interrupt(record, at)),
+        at,
+      );
     }
 
     this.lastGeneration = undefined;

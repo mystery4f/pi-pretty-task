@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { previousTaskRecordPath, taskRecordPath } from "../src/tasks/base/runtime-state.js";
-import type { CmdLoopTask, LlmLoopTask, ProcessTask } from "../src/tasks/base/task.js";
+import type { ChainTask, CmdLoopTask, LlmLoopTask, ProcessTask } from "../src/tasks/base/task.js";
 import { TaskStore } from "../src/tasks/base/task-store.js";
 import { makeTempDir } from "./support/processes.js";
 
@@ -127,6 +127,24 @@ function cmdLoopRecord(overrides: Partial<CmdLoopTask> = {}): CmdLoopTask {
   };
 }
 
+/**
+ * A chain: a queue of step ids with a cursor, no command of its own and no
+ * output file — its output is each step's (ADR-0013).
+ */
+function chainRecord(overrides: Partial<ChainTask> = {}): ChainTask {
+  return {
+    id: "ch34ef",
+    kind: "chain",
+    name: "build",
+    status: "running",
+    createdAt: 1_700_000_000_000,
+    updatedAt: 1_700_000_001_000,
+    steps: ["bg34ef", "bg35ef"],
+    cursor: 1,
+    ...overrides,
+  };
+}
+
 describe("the task record file", () => {
   it("holds process and loop records side by side under one schema", async () => {
     const directory = await stateDirectory();
@@ -167,7 +185,7 @@ describe("the task record file", () => {
     const saved = JSON.parse(await readFile(taskRecordPath(directory), "utf8")) as {
       version: number;
     };
-    expect(saved.version).toBe(4);
+    expect(saved.version).toBe(5);
   });
 
   it("reads a version 2 loop as an llm loop and keeps its schedule across the upgrade", async () => {
@@ -208,7 +226,7 @@ describe("the task record file", () => {
     const saved = JSON.parse(await readFile(taskRecordPath(directory), "utf8")) as {
       version: number;
     };
-    expect(saved.version).toBe(4);
+    expect(saved.version).toBe(5);
 
     const reloaded = await new TaskStore(directory).load();
     expect(reloaded).toEqual(loaded);
@@ -395,5 +413,87 @@ describe("the task record file", () => {
       durationMs: 19_000,
       taskId: "bg13cd",
     });
+  });
+
+  it("round-trips a chain with its steps in queue order and its cursor", async () => {
+    const directory = await stateDirectory();
+    // A step carries a parent and no fire: the two links are independent, because
+    // a chain step belongs to a chain and never to a loop's fire (ADR-0013).
+    const steps = [
+      processTask({ id: "bg34ef", name: "build", parentId: "ch34ef" }),
+      processTask({ id: "bg35ef", name: "test", parentId: "ch34ef" }),
+    ];
+    const chain = chainRecord({
+      status: "completed",
+      endedAt: 1_700_000_004_000,
+      updatedAt: 1_700_000_004_000,
+      cursor: 2,
+    });
+    const records = [...steps, chain];
+
+    await new TaskStore(directory).save(records);
+    const loaded = await new TaskStore(directory).load();
+
+    expect(loaded).toEqual(records);
+    const stored = loaded[2];
+    if (stored?.kind !== "chain") throw new Error("the chain record did not load as a chain");
+    expect(stored.steps).toEqual(["bg34ef", "bg35ef"]);
+    expect(stored.cursor).toBe(2);
+  });
+
+  it("reads a version 4 document, the shape before chains, and writes the chain-aware version", async () => {
+    const directory = await stateDirectory();
+    const records = [processTask(), loopRecord(), cmdLoopRecord()];
+    await writeFile(
+      taskRecordPath(directory),
+      JSON.stringify({ version: 4, tasks: records }),
+      "utf8",
+    );
+
+    const loaded = await new TaskStore(directory).load();
+    expect(loaded).toEqual(records);
+
+    await new TaskStore(directory).save(loaded);
+    const saved = JSON.parse(await readFile(taskRecordPath(directory), "utf8")) as {
+      version: number;
+    };
+    expect(saved.version).toBe(5);
+  });
+
+  it("ends a chain a restart left running as interrupted, and stops the steps still waiting", async () => {
+    const directory = await stateDirectory();
+    const done = processTask({ id: "bg34ef", name: "build", parentId: "ch34ef" });
+    const running = processTask({
+      id: "bg35ef",
+      name: "test",
+      status: "running",
+      pid: 4242,
+      parentId: "ch34ef",
+    });
+    const waiting = processTask({
+      id: "bg36ef",
+      name: "deploy",
+      status: "waiting",
+      parentId: "ch34ef",
+    });
+    delete waiting.endedAt;
+    const chain = chainRecord({ cursor: 1, steps: ["bg34ef", "bg35ef", "bg36ef"] });
+    delete chain.endedAt;
+    await new TaskStore(directory).save([done, running, waiting, chain]);
+
+    const loaded = await new TaskStore(directory, { now: () => 1_700_000_009_000 }).load();
+
+    // Nothing will launch the rest of the queue: the process that was running the
+    // chain died with the step it had started.
+    expect(loaded.find((record) => record.id === "ch34ef")).toMatchObject({
+      status: "interrupted",
+      endedAt: 1_700_000_009_000,
+      cursor: 1,
+    });
+    expect(loaded.find((record) => record.id === "bg35ef")).toMatchObject({
+      status: "interrupted",
+    });
+    expect(loaded.find((record) => record.id === "bg36ef")).toMatchObject({ status: "stopped" });
+    expect(loaded.find((record) => record.id === "bg34ef")).toEqual(done);
   });
 });

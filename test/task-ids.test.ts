@@ -31,21 +31,25 @@ describe("task ids", () => {
     const processId = sessions.createId(session, "process");
     const llmLoopId = sessions.createId(session, "llm-loop");
     const cmdLoopId = sessions.createId(session, "cmd-loop");
+    const chainId = sessions.createId(session, "chain");
 
     expect(processId).toMatch(/^bg-[a-z0-9]{5}$/);
     expect(llmLoopId).toMatch(/^lp-[a-z0-9]{5}$/);
     expect(cmdLoopId).toMatch(/^lc-[a-z0-9]{5}$/);
+    expect(chainId).toMatch(/^ch-[a-z0-9]{5}$/);
     // Three characters of prefix plus five of randomness: the example `bg-1a2cf`
     // is eight cells.
     expect(processId).toHaveLength(8);
     expect(llmLoopId).toHaveLength(8);
     expect(cmdLoopId).toHaveLength(8);
+    expect(chainId).toHaveLength(8);
     // One namespace per session: the collision check spans the whole id, so the
-    // three prefixes never compete for it, and none of the ids is already taken.
-    expect(new Set([processId, llmLoopId, cmdLoopId]).size).toBe(3);
+    // four prefixes never compete for it, and none of the ids is already taken.
+    expect(new Set([processId, llmLoopId, cmdLoopId, chainId]).size).toBe(4);
     expect(session.tasks.has(processId)).toBe(false);
     expect(session.tasks.has(llmLoopId)).toBe(false);
     expect(session.tasks.has(cmdLoopId)).toBe(false);
+    expect(session.tasks.has(chainId)).toBe(false);
   });
 
   it("treats an id restored from disk as taken instead of reissuing it", async () => {

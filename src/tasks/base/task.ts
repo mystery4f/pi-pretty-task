@@ -1,20 +1,40 @@
 /**
  * The Task record: the supertype of every tracked unit of work (ADR-0005).
  *
- * A Task carries what both kinds share — id, name, status and timeline. The
+ * A Task carries what the kinds share — id, name, status and timeline. The
  * `kind` discriminator selects the arm, so fields that only mean something for
  * one kind live on that arm instead of being optional on a single flat object.
- * The `process`, `llm-loop` and `cmd-loop` arms are the three implemented kinds,
- * and all of them live in this one union so the store and the panel can carry
- * them together (ADR-0005).
+ * The `process`, `llm-loop`, `cmd-loop` and `chain` arms are the four implemented
+ * kinds, and all of them live in this one union so the store and the panel can
+ * carry them together (ADR-0005).
  *
  * @author mystery4f <40482524+mystery4f@users.noreply.github.com>
  */
 
 import type { Iteration } from "../loop/iteration.js";
 
-/** Lifecycle of a task, shared by both kinds. */
-export type TaskStatus = "running" | "paused" | "completed" | "failed" | "killed" | "interrupted";
+/**
+ * Lifecycle of a task, shared by every kind.
+ *
+ * `waiting`, `skipped` and `stopped` exist for a chain's steps, which are queued
+ * before they run and can end without ever being started (ADR-0013): a step
+ * waits its turn, is skipped when the step ahead of it failed, and is stopped
+ * when the user stops the chain.
+ */
+export type TaskStatus =
+  /** Queued but not started: a chain step whose turn has not come yet. */
+  | "waiting"
+  | "running"
+  | "paused"
+  /** Ended at exit 0, or a chain whose queue ran out. */
+  | "completed"
+  | "failed"
+  /** Ended without running: a queued step the user's stop settled (never started). */
+  | "stopped"
+  /** Never ran, because the step ahead of it did not succeed. */
+  | "skipped"
+  | "killed"
+  | "interrupted";
 
 /**
  * Why a running task was stopped, in the glossary's four words: the user asked,
@@ -25,7 +45,7 @@ export type TaskStatus = "running" | "paused" | "completed" | "failed" | "killed
 export type KillReason = "user" | "timeout" | "output_cap" | "shutdown";
 
 /** Which kind of work a task represents. */
-export type TaskKind = "process" | "llm-loop" | "cmd-loop";
+export type TaskKind = "process" | "llm-loop" | "cmd-loop" | "chain";
 
 /** Fields every task carries, whatever its kind. */
 export interface TaskBase {
@@ -69,9 +89,15 @@ export interface ProcessTask extends TaskBase {
   error?: string;
   /** Present exactly when the task was killed, naming who asked for the kill. */
   killReason?: KillReason;
-  /** The cmd loop that started this process, when a fire started it (ADR-0014). */
-  readonly parentId?: string;
-  /** One-based fire number of the owning loop; present exactly with `parentId`. */
+  /**
+   * The record this process belongs to, when it is a child rather than a row of
+   * its own (ADR-0014): the cmd loop when a fire started it, or the chain when
+   * it is one of its steps (ADR-0013). Mutable on purpose — a queued step is
+   * adopted into a chain while it may still be running, and replacing the
+   * record would lose the process the supervisor is watching.
+   */
+  parentId?: string;
+  /** One-based fire number of the owning loop; present exactly with a loop's `parentId`. */
   readonly fire?: number;
 }
 
@@ -183,8 +209,43 @@ export interface CmdLoopTask extends LoopBase {
   lastOutputBytes?: number;
 }
 
+/**
+ * A chain: a queue of process steps that run one at a time, in order (ADR-0013).
+ *
+ * It is a Task, not a separate record type, so it is stored, listed and stopped
+ * through the same seams as everything else. It holds ids rather than copies:
+ * each step is an ordinary process task with `parentId` pointing back here, so
+ * its output, status and exit code stay readable through `bg_status`, `bg_logs`
+ * and `bg_wait` (ADR-0014). A chain owns no command and no output file — the
+ * steps hold both.
+ */
+export interface ChainTask extends TaskBase {
+  readonly kind: "chain";
+  /**
+   * The queue, in run order, as task ids. Only `process` steps are queued: a
+   * loop brings its own clock, and two clocks behind one queue cannot be
+   * ordered (ADR-0013). Ids, never copies, so a step's record stays the one
+   * source of its output.
+   */
+  steps: string[];
+  /**
+   * The slot the chain is working on: the step that is running, or the step
+   * that will run when the current one ends. Equal to `steps.length` once the
+   * queue has run out, which is what makes a finished chain `completed`.
+   */
+  cursor: number;
+  /** Why the chain failed, when a step of it did. */
+  error?: string;
+  /**
+   * Present exactly when the chain was killed, naming who asked. A chain the user
+   * stops is ended the way a killed process is — its own steps say where it stopped
+   * (`stopped`) and what it had already got through.
+   */
+  killReason?: KillReason;
+}
+
 /** How many fires a cmd loop keeps; older ones are counted but no longer listed. */
 export const FIRE_HISTORY_LIMIT = 50;
 
-/** One tracked unit of work: a process task or a loop, never a second list. */
-export type Task = ProcessTask | LlmLoopTask | CmdLoopTask;
+/** One tracked unit of work: a process task, a loop or a chain, never a second list. */
+export type Task = ProcessTask | LlmLoopTask | CmdLoopTask | ChainTask;

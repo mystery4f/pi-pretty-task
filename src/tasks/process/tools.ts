@@ -24,6 +24,7 @@ import {
   searchOutputFile,
 } from "../base/search.js";
 import type { ProcessTask } from "../base/task.js";
+import type { ChainTasks, ChainTaskView, QueuedStep } from "../chain/chain-tasks.js";
 
 import { parseFollowSeconds, parseTimeoutSeconds, parseWaitSeconds } from "./limits.js";
 import type { ProcessTasks, ProcessTaskView, TaskScope } from "./process-tasks.js";
@@ -75,11 +76,20 @@ const RunParameters = Type.Object({
         "Environment variables for this command only, merged over the extension's environment for the child. An empty string blanks a variable. Neither names nor values are written to the task record or printed by any tool.",
     }),
   ),
+  after: Type.Optional(
+    Type.String({
+      description:
+        "Queue this command behind a task instead of starting it now. Pass a task id to put it behind that task, or a chain id (`ch-…`) to add it to that queue, even while it runs. The step is recorded at once as `waiting` and starts only after the step ahead ended with exit 0; a step that fails leaves the ones behind it `skipped`. Only process tasks and chains can be queued behind.",
+    }),
+  ),
 });
 
 const StatusParameters = Type.Object({
   id: Type.Optional(
-    Type.String({ description: "Task id to describe. Omit it to list every task of the session." }),
+    Type.String({
+      description:
+        "Task or chain id to describe. Omit it to list the session's roots: its chains and the tasks that belong to no chain. A step or a loop fire answers by its own id, but is not a row of that list.",
+    }),
   ),
   full: Type.Optional(
     Type.Boolean({ description: "Show the untruncated record, including the whole command." }),
@@ -109,7 +119,10 @@ const LogsParameters = Type.Object({
 });
 
 const KillParameters = Type.Object({
-  id: Type.String({ description: "Task id to stop, with everything its command started." }),
+  id: Type.String({
+    description:
+      "Task or chain id to stop, with everything its command started. Stopping a chain stops the step at its cursor and marks the steps behind it `stopped`, so they never run.",
+  }),
 });
 
 const WaitParameters = Type.Object({
@@ -209,6 +222,7 @@ export function describeTask(view: ProcessTaskView, options: { full?: boolean } 
 }
 
 /** What a tool reports about one task, in a shape the caller can inspect. */
+/** What a tool reports about one task, in a shape the caller can inspect. */
 function taskDetails(view: ProcessTaskView) {
   return {
     id: view.task.id,
@@ -219,10 +233,69 @@ function taskDetails(view: ProcessTaskView) {
     outputBytes: view.outputBytes,
     pid: view.task.pid,
     exitCode: view.task.exitCode,
+    parentId: view.task.parentId,
     command: view.task.command,
     cwd: view.task.cwd,
     outputPath: view.task.outputPath,
     killReason: view.task.killReason,
+    error: view.task.error,
+  };
+}
+
+/** One step of a chain as a single row: its own record, condensed to what matters. */
+function stepLine(step: ProcessTaskView, current: boolean): string {
+  const { task } = step;
+  const parts = [`${task.id} (${task.name})`, task.status];
+  if (task.exitCode !== undefined && task.exitCode !== null)
+    parts.push(`exit ${String(task.exitCode)}`);
+  if (task.killReason !== undefined) parts.push(`kill reason ${task.killReason}`);
+  if (task.error !== undefined) parts.push(task.error);
+  return `${current ? "→ " : "  "}${parts.join(" · ")}`;
+}
+
+/**
+ * A chain as a labelled block, its steps read from their own records: the queue
+ * holds ids, so the only honest way to show a step's outcome is to ask the step
+ * (ADR-0013). The cursor marks the step whose turn it is.
+ */
+export function describeChain(
+  view: ChainTaskView,
+  steps: readonly (ProcessTaskView | undefined)[],
+): string {
+  const { task } = view;
+  const lines = [
+    `name: ${task.name}`,
+    `id: ${task.id}`,
+    `kind: chain`,
+    `status: ${task.status}`,
+    `elapsed: ${formatDuration(view.elapsedMs)}`,
+    `steps: ${String(task.steps.length)} · cursor ${String(Math.min(task.cursor, task.steps.length))}/${String(task.steps.length)}`,
+  ];
+  if (task.error !== undefined) lines.push(`error: ${task.error}`);
+  if (task.killReason !== undefined) lines.push(`kill reason: ${task.killReason}`);
+  steps.forEach((step, index) => {
+    lines.push(
+      step === undefined
+        ? `  ${task.steps[index] ?? ""} (missing from this session)`
+        : stepLine(step, index === task.cursor && task.status === "running"),
+    );
+  });
+  return lines.join("\n");
+}
+
+/** What a tool reports about one chain: the queue, plus each step's own record. */
+function chainDetails(view: ChainTaskView, steps: readonly (ProcessTaskView | undefined)[]) {
+  return {
+    id: view.task.id,
+    name: view.task.name,
+    kind: view.task.kind,
+    status: view.task.status,
+    elapsedMs: view.elapsedMs,
+    cursor: view.task.cursor,
+    steps: view.task.steps,
+    error: view.task.error,
+    killReason: view.task.killReason,
+    stepRecords: steps.map((step) => (step === undefined ? undefined : taskDetails(step))),
   };
 }
 
@@ -242,7 +315,7 @@ const RELOAD_NOTE =
  */
 function runDescription(templates: ReadonlyMap<string, CommandTemplate>): string {
   const base =
-    "Run a shell command in the background and return a task id at once, without waiting for the command to finish. stdout and stderr are captured together in one output file.";
+    "Run a shell command in the background and return a task id at once, without waiting for the command to finish. stdout and stderr are captured together in one output file. With `after`, it queues behind a task or chain instead.";
   const names = [...templates.keys()].sort();
   if (names.length === 0) {
     return `${base} No command templates are configured, so \`template\` is rejected. ${RELOAD_NOTE}`;
@@ -294,10 +367,30 @@ function commandHint(command: string): string {
 }
 
 /** The process-task tools, bound to one store and this session's templates. */
+/** The process-task tools, bound to one store, this session's templates and the queue. */
 export function processTaskTools(
   tasks: ProcessTasks,
+  chains: ChainTasks,
   templates: ReadonlyMap<string, CommandTemplate> = new Map(),
 ): ToolDefinition[] {
+  /** A chain's steps, read through the process store: the queue holds ids, not copies. */
+  const stepViews = async (
+    scope: TaskScope,
+    ids: readonly string[],
+  ): Promise<Array<ProcessTaskView | undefined>> =>
+    Promise.all(ids.map((id) => tasks.get(scope, id)));
+
+  /**
+   * What to say when output is asked of a chain. A chain spawns nothing, so the
+   * honest answer is which step the question should have named.
+   */
+  const chainOutputHint = (id: string, view: ChainTaskView): string => {
+    const current = view.task.steps[view.task.cursor];
+    return current === undefined
+      ? `Task ${id} is a chain and writes no output of its own: every step has its own. A chain spawns nothing, so read a step's output by its id.`
+      : `Task ${id} is a chain and writes no output of its own: every step has its own. Its current step is ${current}; read that with its own id, or bg_status id=${id} for the queue.`;
+  };
+
   const run: ToolDefinition<typeof RunParameters> = {
     name: "bg_run",
     label: "Run in background",
@@ -343,6 +436,59 @@ export function processTaskTools(
         }
       }
       let task: ProcessTask;
+      if (params.after !== undefined) {
+        // Queueing is the same call with a place to stand in a line: nothing is
+        // spawned, the step is a record from the start, and its chain decides when
+        // its turn comes (ADR-0013).
+        const anchor = params.after.trim();
+        if (anchor.length === 0) {
+          return text(
+            "Pass the id of the task or chain to queue behind; bg_status lists the ids of this session. The task was not started.",
+          );
+        }
+        let queued: QueuedStep;
+        try {
+          queued = await chains.enqueue(scopeOf(ctx), anchor, {
+            command,
+            ...(params.name === undefined ? {} : { name: params.name }),
+            ...(timeoutMs === undefined ? {} : { timeoutMs }),
+            ...(params.shell === undefined ? {} : { shell: params.shell }),
+            ...(workingDirectory === undefined ? {} : { workingDirectory }),
+            ...(params.env === undefined ? {} : { env: params.env }),
+          });
+        } catch (error) {
+          // A task of another kind, a chain that already ended, or an unknown id:
+          // the store refuses before any record is written.
+          const reason = error instanceof Error ? error.message : String(error);
+          return text(`${reason} The task was not started.`);
+        }
+        const view = (await tasks.get(scopeOf(ctx), queued.step.id)) ?? {
+          task: queued.step,
+          elapsedMs: 0,
+          outputBytes: queued.step.outputBytes,
+        };
+        const position = queued.chain.steps.indexOf(queued.step.id) + 1;
+        const where = `step ${String(position)} of ${String(queued.chain.steps.length)} in ${queued.chain.id} (${queued.chain.name})`;
+        const headline =
+          view.task.status === "waiting"
+            ? `Queued ${queued.step.id} (${queued.step.name}) as ${where}; it starts when the step ahead ends with exit 0.`
+            : `Queued ${queued.step.id} (${queued.step.name}) as ${where}; it is already ${view.task.status}.`;
+        return {
+          content: [
+            {
+              type: "text",
+              text: [
+                headline,
+                "",
+                describeTask(view),
+                "",
+                `Watch the queue with bg_status id=${queued.chain.id}; read this step with bg_logs id=${queued.step.id}.`,
+              ].join("\n"),
+            },
+          ],
+          details: { ...taskDetails(view), chainId: queued.chain.id, position },
+        };
+      }
       try {
         task = await tasks.start({
           ...scopeOf(ctx),
@@ -396,17 +542,27 @@ export function processTaskTools(
 
       if (wantedId !== undefined && wantedId.length > 0) {
         const view = await tasks.get(scope, wantedId);
-        if (view === undefined) {
+        if (view !== undefined) {
+          return {
+            content: [{ type: "text", text: describeTask(view, { full }) }],
+            details: taskDetails(view),
+          };
+        }
+        // A chain is a task of this session too. Asking for it shows the queue with
+        // each step's own record, which is the only place a step's outcome lives.
+        const chain = await chains.get(scope, wantedId);
+        if (chain === undefined) {
           return text(`No background task with id ${wantedId} in this session.`);
         }
+        const steps = await stepViews(scope, chain.task.steps);
         return {
-          content: [{ type: "text", text: describeTask(view, { full }) }],
-          details: taskDetails(view),
+          content: [{ type: "text", text: describeChain(chain, steps) }],
+          details: chainDetails(chain, steps),
         };
       }
 
-      const all = await tasks.list(scope);
-      if (all.length === 0) {
+      const [roots, queues] = await Promise.all([tasks.list(scope), chains.list(scope)]);
+      if (roots.length === 0 && queues.length === 0) {
         return {
           content: [
             {
@@ -417,14 +573,19 @@ export function processTaskTools(
           details: { tasks: [] },
         };
       }
+      // A step and a fire are records, not rows (ADR-0014): they appear inside the
+      // queue that owns them, never beside it.
+      const blocks: string[] = [];
+      const chainRows: unknown[] = [];
+      for (const chain of queues) {
+        const steps = await stepViews(scope, chain.task.steps);
+        blocks.push(describeChain(chain, steps));
+        chainRows.push(chainDetails(chain, steps));
+      }
+      for (const view of roots) blocks.push(describeTask(view, { full }));
       return {
-        content: [
-          {
-            type: "text",
-            text: all.map((view) => describeTask(view, { full })).join("\n\n"),
-          },
-        ],
-        details: { tasks: all.map((view) => taskDetails(view)) },
+        content: [{ type: "text", text: blocks.join("\n\n") }],
+        details: { tasks: [...chainRows, ...roots.map((view) => taskDetails(view))] },
       };
     },
   };
@@ -440,7 +601,12 @@ export function processTaskTools(
         const windowMs = parseFollowSeconds(params.timeoutSeconds);
         const followed = await tasks.follow(scopeOf(ctx), params.id.trim(), windowMs);
         if (followed === undefined) {
-          return text(`No background task with id ${params.id} in this session.`);
+          const chain = await chains.get(scopeOf(ctx), params.id.trim());
+          return text(
+            chain === undefined
+              ? `No background task with id ${params.id} in this session.`
+              : chainOutputHint(chain.task.id, chain),
+          );
         }
 
         const { view } = followed;
@@ -481,7 +647,12 @@ export function processTaskTools(
         ...(full ? { maxBytes: FULL_MAX_BYTES } : {}),
       });
       if (found === undefined) {
-        return text(`No background task with id ${params.id} in this session.`);
+        const chain = await chains.get(scopeOf(ctx), params.id.trim());
+        return text(
+          chain === undefined
+            ? `No background task with id ${params.id} in this session.`
+            : chainOutputHint(chain.task.id, chain),
+        );
       }
 
       const { view, tail } = found;
@@ -534,7 +705,13 @@ export function processTaskTools(
 
       const result = await tasks.wait(scopeOf(ctx), id, timeoutMs);
       if (result === undefined) {
-        return text(`No background task with id ${id} in this session.`);
+        // Waiting on a chain would wait on the wrong thing: its steps come and go.
+        const chain = await chains.get(scopeOf(ctx), id);
+        return text(
+          chain === undefined
+            ? `No background task with id ${id} in this session.`
+            : `Task ${id} is a chain; wait for its step instead. bg_status id=${id} names the step at the cursor.`,
+        );
       }
 
       const { view, waited } = result;
@@ -566,7 +743,12 @@ export function processTaskTools(
 
       const view = await tasks.get(scopeOf(ctx), id);
       if (view === undefined) {
-        return text(`No background task with id ${id} in this session.`);
+        const chain = await chains.get(scopeOf(ctx), id);
+        return text(
+          chain === undefined
+            ? `No background task with id ${id} in this session.`
+            : chainOutputHint(chain.task.id, chain),
+        );
       }
 
       const ignoreCase = params.ignoreCase !== false;
@@ -642,7 +824,35 @@ export function processTaskTools(
         return text("Pass the id of the task to stop; bg_status lists the ids of this session.");
       }
 
-      const result = await tasks.stop(scopeOf(ctx), id);
+      const scope = scopeOf(ctx);
+      // A chain is stopped as a queue, not as a process: the step at the cursor is
+      // killed and the ones behind it are told they will never run (ADR-0013).
+      const chain = await chains.get(scope, id);
+      if (chain !== undefined) {
+        const stopped = await chains.stop(scope, id);
+        if (stopped === undefined) {
+          return text(`No background task with id ${id} in this session.`);
+        }
+        const steps = await stepViews(scope, stopped.view.task.steps);
+        const headline =
+          stopped.outcome === "stopped"
+            ? `Stopped chain ${id} (${stopped.view.task.name})${stopped.step === undefined ? "" : `; its running step ${stopped.step.task.id} was stopped`} and the steps behind it will not run.`
+            : `Chain ${id} had already finished (${stopped.view.task.status}); nothing was signalled.`;
+        return {
+          content: [
+            {
+              type: "text",
+              text: [headline, "", describeChain(stopped.view, steps)].join("\n"),
+            },
+          ],
+          details: {
+            ...chainDetails(stopped.view, steps),
+            stopOutcome: stopped.outcome,
+          },
+        };
+      }
+
+      const result = await tasks.stop(scope, id);
       if (result === undefined) {
         return text(`No background task with id ${id} in this session.`);
       }

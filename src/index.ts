@@ -15,6 +15,7 @@ import { pruneSessions } from "./tasks/base/retention.js";
 import type { TaskScope } from "./tasks/base/runtime-state.js";
 import { readSettings } from "./tasks/base/settings.js";
 import { TaskSessions } from "./tasks/base/task-sessions.js";
+import { ChainTasks } from "./tasks/chain/chain-tasks.js";
 import { Iterations } from "./tasks/loop/iterations.js";
 import { type LoopFire, LoopTasks } from "./tasks/loop/loop-tasks.js";
 import { loopTaskTools } from "./tasks/loop/tools.js";
@@ -66,6 +67,8 @@ export interface ExtensionOptions {
 export interface ExtensionController {
   readonly loops: LoopTasks;
   readonly processTasks: ProcessTasks;
+  /** The queues that run process tasks one at a time (ADR-0013). */
+  readonly chainTasks: ChainTasks;
   /** The wakes a fire produced that pi has not been given yet (ADR-0009). */
   readonly wakes: LoopWakes;
   /** Handle every loop due at `at` in this extension's loaded sessions. */
@@ -230,6 +233,13 @@ export function createExtension(
       publishTaskFinished(pi.events, view);
       if (view.task.parentId === undefined) {
         void notifyTaskFinished(pi, view);
+      } else if (view.task.fire === undefined) {
+        // A chain's step ended: the queue reads the step's own record and starts the
+        // next one, or fails the chain and skips what was left (ADR-0013). The step
+        // itself stays silent; the chain speaks for it when the queue ends.
+        void chainTasks.advance(view).catch((error: unknown) => {
+          process.stderr.write(`pi-pretty-task: chain advance failed: ${String(error)}\n`);
+        });
       } else {
         // A fire ended: its outcome lands on the owning loop, and only a failed
         // fire may speak (ADR-0014) — a healthy fire adds nothing to the transcript.
@@ -244,6 +254,22 @@ export function createExtension(
     },
   });
 
+  /**
+   * The queues that run process tasks in order (ADR-0013). A step is an ordinary
+   * task, so the process store reports every step end here; the chain reads the
+   * step's own record — never a copy — and starts the next one.
+   */
+  const chainTasks = new ChainTasks({
+    sessions,
+    now,
+    processes: () => processTasks,
+    onFinish: (view) => {
+      // A chain's ending is coarser than its steps': the steps already had theirs,
+      // and the queue adds one line when the whole run is over.
+      terminal.finished(view.task.name, view.task.status);
+      publishStatusLine();
+    },
+  });
   /**
    * Close one fire on its loop. The child record is the truth for exit code,
    * duration and bytes; the loop keeps the history row and the failure backoff.
@@ -269,7 +295,8 @@ export function createExtension(
     // The child is already named `loop #N`, which is the alias the notice shows.
     await notifyTaskFinished(pi, view);
   }
-  for (const tool of processTaskTools(processTasks, templates.templates)) pi.registerTool(tool);
+  for (const tool of processTaskTools(processTasks, chainTasks, templates.templates))
+    pi.registerTool(tool);
   for (const tool of loopTaskTools(loops)) pi.registerTool(tool);
   pi.registerMessageRenderer(TASK_FINISHED_CUSTOM_TYPE, renderTaskFinished);
   pi.registerMessageRenderer(LOOP_WAKE_CUSTOM_TYPE, renderLoopWake);
@@ -423,6 +450,7 @@ export function createExtension(
   return {
     loops,
     processTasks,
+    chainTasks,
     wakes,
     // A pump that lands while the agent is idle delivers in the same call, so a
     // test or an idle timer sees the wake; while busy it only queues.
