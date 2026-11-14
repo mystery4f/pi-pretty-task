@@ -224,6 +224,7 @@ export function createExtension(
     sessions,
     now,
     outputCapBytes: settings.outputCapBytes,
+    maxRunningTasks: settings.maxRunningTasks,
     shellPolicy: settings.shellPolicy,
     // The store does not await the announcement; a notice outlives the task.
     onFinish: (view) => {
