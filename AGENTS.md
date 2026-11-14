@@ -42,6 +42,16 @@ Source references from the two upstream plugins are cloned under `.tmp/` (git-ig
 - Every state file write is atomic (temp file + rename) and every read tolerates a corrupt file by falling back to `.prev`.
 - Style is machine-enforced: `.editorconfig` (2 spaces, LF, final newline) plus Biome for both formatting and linting — one tool, so there is no Prettier/ESLint pair to keep in sync. `npm run lint` must be clean before a change is done; do not reformat files you did not otherwise touch.
 
+## Parallel implementers
+
+Start a second implementer only after listing the files each ticket will touch.
+
+- No shared file → run them in parallel.
+- Shared file → isolate each in its own worktree (the default), and serialise only the tickets that change a shared shape: task kinds, the store version, tool registration in `src/index.ts`, or `src/ui/tasks-panel.ts`.
+- A ticket that changes a core type waits for the merge of the ticket it depends on, even when the tracker shows no blocking edge.
+
+Two implementers never share a worktree, and never both write the integration branch.
+
 ## Verification
 
 - `npm run check` — typecheck, no emit (`tsconfig.dev.json`, covers `src/` and `test/`).
