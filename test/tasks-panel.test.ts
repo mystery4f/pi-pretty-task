@@ -182,7 +182,7 @@ describe("task list", () => {
     expect(newer).toBeGreaterThan(-1);
     expect(older).toBeGreaterThan(newer);
     expect(drawn()).toContain("newer1");
-    expect(drawn()).toContain("process");
+    expect(lines[newer]).toContain("<dim>·</dim> <accent>running");
     expect(drawn()).toContain("running");
     expect(drawn()).toContain("3.5s");
     expect(drawn()).toContain("1.5 KiB");
@@ -492,10 +492,10 @@ describe("loop tasks in the list", () => {
     if (loopRow === undefined || processRow === undefined) throw new Error("both rows must render");
 
     expect(drawn().indexOf("review loop")).toBeLessThan(drawn().indexOf("nightly build"));
-    expect(loopRow).toContain("loop");
-    expect(loopRow).toContain("2+3");
-    // The row carries the countdown; the last fire's wall-clock time lives in the detail.
-    expect(loopRow).toContain("4.0s");
+    // The row carries the fires and the countdown; the dropped iterations and the
+    // last fire's wall-clock time live in the detail.
+    expect(loopRow).toContain("5 fires");
+    expect(loopRow).toContain("next 4.0s");
     expect(loopRow).not.toContain("KiB");
     expect(processRow).toContain("1.5 KiB");
     expect(processRow).not.toContain("iterations");

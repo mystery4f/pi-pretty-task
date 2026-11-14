@@ -681,20 +681,20 @@ export class TasksPanel implements Component {
     const task = row.task;
     const pointer = selected ? theme.fg("accent", "›") : " ";
     const dot = theme.fg(dotColour(task), "●");
-    const id = theme.fg("dim", pad(task.id, 10));
-    const kind = theme.fg("dim", pad(task.kind, 8));
-    const separator = theme.fg("dim", " · ");
+    const id = theme.fg("dim", task.id);
+    const separator = theme.fg("dim", "·");
     const status = theme.fg(STATUS_COLOUR[task.status], pad(task.status, 11));
+    const exit = exitText(task) === "" ? "" : theme.fg("dim", ` ${exitText(task)}`);
 
-    const exitRoom = 8;
-    const rightRoom = 18;
-    const nameRoom = Math.max(4, width - (5 + 10 + 1 + 8 + 3 + 11 + exitRoom + rightRoom));
-    const name = theme.fg(STATUS_COLOUR[task.status], pad(task.name, nameRoom));
-    const exit = theme.fg("dim", pad(exitText(task), exitRoom));
-    const right = theme.fg("dim", padStart(rightText(row), rightRoom));
+    // The name takes what the numbers do not, the way the panel this replaces
+    // splits its row: a name column that keeps growing would push the numbers
+    // off the edge on a wide terminal.
+    const nameRoom = Math.max(12, width - 78);
+    const name = theme.fg(nameColour(task), pad(task.name, nameRoom));
+    const right = theme.fg("dim", rightText(row));
     const growth = this.growthText(row);
 
-    const line = ` ${pointer} ${dot} ${name} ${id} ${kind}${separator}${status}${exit}${right}${growth}`;
+    const line = ` ${pointer} ${dot} ${name} ${id} ${separator} ${status}${exit} ${right}${growth}`;
     // A selected row is washed in one block of background, the way the panel this
     // replaces marks its cursor: the eye finds it without a colour of its own.
     return selected
@@ -946,8 +946,11 @@ function rightText(row: PanelTaskView): string {
   const task = row.task;
   const elapsed = formatDuration(row.elapsedMs);
   if (task.kind === "process") return `${elapsed} ${formatSize(row)}`;
-  const next = row.untilNextFireMs === undefined ? "" : ` · ${formatDuration(row.untilNextFireMs)}`;
-  return `${elapsed} ${iterationCountText(task)}${next}`;
+  // A loop has no exit code and no bytes: it reports the fires it made and how
+  // long until the next one, which is the whole question while it is running.
+  const next =
+    row.untilNextFireMs === undefined ? "" : ` · next ${formatDuration(row.untilNextFireMs)}`;
+  return `${elapsed} · ${firesText(task)} fires${next}`;
 }
 
 function pad(text: string, width: number): string {
@@ -956,9 +959,21 @@ function pad(text: string, width: number): string {
   return used >= width ? truncateToWidth(text, width, "", false) : text + " ".repeat(width - used);
 }
 
-function padStart(text: string, width: number): string {
-  const used = visibleWidth(text);
-  return used >= width ? text : " ".repeat(width - used) + text;
+/** Name colour, as the replaced panel had it: the ending decides, not the kind. */
+function nameColour(task: Task): ThemeColor {
+  switch (task.status) {
+    case "failed":
+      return "error";
+    case "killed":
+    case "interrupted":
+      return "warning";
+    case "completed":
+      return "success";
+    case "paused":
+      return "muted";
+    default:
+      return "text";
+  }
 }
 
 function messageOf(error: unknown): string {
@@ -987,14 +1002,6 @@ const CALL_COLOUR: Record<IterationCallStatus, ThemeColor> = {
 
 function isCommandCall(call: IterationCall): boolean {
   return COMMAND_TOOLS.has(call.tool);
-}
-
-/** The iterations column: kept count, plus any the history cap dropped. */
-function iterationCountText(task: Task): string {
-  if (task.kind !== "loop") return "—";
-  const dropped = task.droppedIterations ?? 0;
-  const kept = String(task.iterations.length);
-  return dropped === 0 ? kept : `${kept}+${String(dropped)}`;
 }
 
 function firesText(task: LoopTask): string {

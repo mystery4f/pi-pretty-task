@@ -30,6 +30,7 @@ updated: 2026-11-14
 | [0006 调度吃间隔简写与五段 cron](../../docs/adr/0006-cron-alongside-intervals.md) | 两种语法共用一个 `nextFire(after)`；六段拒绝 |
 | [0007 Iteration 历史上限与重启修复](../../docs/adr/0007-iteration-history-cap-and-restart-repair.md) | 各留最近 N 条并计数；重启把未完成的标 interrupted |
 | [0008 命令用哪个 shell、输出按什么编码读](../../docs/adr/0008-shell-choice-and-output-decoding.md) | 环境变量定默认 + `bg_run.shell` 覆盖；读取层 UTF-8 → Windows GB18030 回退 |
+| [0009 唤醒等 agent 空闲，Iteration 绑定它唤醒的那一轮](../../docs/adr/0009-wakes-wait-for-idle-and-bind-their-turn.md) | 自建待发队列、只在空闲时投递；open 待定、投递后 bind；pump 单飞 |
 
 ## 工具链与代码风格
 
