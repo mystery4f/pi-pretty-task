@@ -305,6 +305,34 @@ describe("retention", () => {
     await expect(store.load()).resolves.toEqual([expect.objectContaining({ id: "bg1a2cf" })]);
   });
 
+  it("prunes a session whose output file has already gone missing", async () => {
+    const root = await projectRoot();
+    const directory = await storedSession(root, "half-gone", [processTask()], {
+      ageDays: 30,
+      outputBytes: 30,
+    });
+    await rm(processOutputPath(directory, "bg1a2cf"));
+    // Removing a file refreshes the directory's own time; age it again, as it
+    // would be by the time the next session starts.
+    const old = new Date(NOW - 30 * DAY);
+    await utimes(directory, old, old);
+    const records = await sizeOf(directory);
+    const lines: string[] = [];
+
+    const report = await pruneSessions({
+      scope: { cwd: root, sessionId: "current-session" },
+      retentionDays: 7,
+      now: () => NOW,
+      report: (line) => lines.push(line),
+    });
+
+    // An output file is counted when it is there and simply contributes nothing
+    // when it is not: a record is never kept alive by a file that is gone.
+    await expect(stat(directory)).rejects.toMatchObject({ code: "ENOENT" });
+    expect(report).toEqual({ sessions: 1, bytes: records, failures: 0 });
+    expect(lines).toHaveLength(1);
+  });
+
   describe("at session start", () => {
     it("reclaims old sessions before the session does anything else", async () => {
       const root = await projectRoot();
