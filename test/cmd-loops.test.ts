@@ -289,6 +289,9 @@ describe("command loops", () => {
     await fireDue(task, loud);
     await waitForFire(task.harness, loud.id, 1, "failed");
 
+    // The fire row is persisted before the notice is sent (`finishFire` awaits
+    // the row, then the send), so polling for the row can win that race.
+    await waitFor("the failure notice", () => task.harness.messages.length === 1);
     expect(task.harness.messages).toHaveLength(1);
     const notice = task.harness.messages[0];
     expect(notice?.customType).toBe("task-finished");
