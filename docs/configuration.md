@@ -101,6 +101,34 @@ pi 会把这条信息报告为 “Failed to load extension: …”。**不做静
 
 **没有默认超时。** v0.1 的验收要求一条 10 分钟的长任务不被杀掉，默认超时与这条验收直接冲突；需要上限的调用方自己给出秒数。
 
+## 终端通知
+
+| 项 | 值 |
+|---|---|
+| 环境变量 | `PI_PRETTY_TASK_NOTIFY` |
+| 默认值 | `on` |
+| 合法值 | `on`、`off` |
+
+task 结束时向终端的 stdout 写一条 OSC 9 转义：
+
+```
+ESC ] 9 ; <任务名> <结束状态> BEL
+```
+
+例如 `nightly build` 正常结束写出的字节是 `\u001b]9;nightly build completed\u0007`。只有 `completed`、`failed`、`killed`、`interrupted` 这四个结束状态会写；还在跑或暂停的 task 一条也不写；`PI_PRETTY_TASK_NOTIFY=off` 时同样一条也不写。一个 task 结束恰好写一条。
+
+**“只在没聚焦时通知”做不到。** 终端是否在前台、有没有被别的窗口挡住，从扩展这一侧都观察不到：没有 API，没有可靠的转义查询，也不该去问。所以规则与 issue #15 一致——总是写，由终端自己决定怎么处理。
+
+终端的处理方式：
+
+- 支持通知的终端（iTerm2、Windows Terminal、WezTerm、kitty、Ghostty 等）会弹一条系统通知，里面的任务名与状态就是这条字符串带来的。
+- 不认识 OSC 9 的终端按终端规范丢弃这条字符串：既不显示，也不会把字节打印到屏幕上。这就是“不支持通知的终端不被打扰”的全部代价——什么都没有发生。
+- 一条转义被限制在 200 字节以内：任务名会被截断，结束状态永远完整。名字里的控制字节（包括 ESC 与 BEL）先被换成空格，否则一个 BEL 会提前结束字符串、一个 ESC 会开始第二条转义；连续空白折成一个空格；清洗后为空时用 `task`。中文名原样保留。
+
+只在有 UI 的会话里写：`ctx.hasUI` 为真的会话才可能写，headless 与 `print`、`json` 模式一条也不写。默认写入点还要求 `process.stdout.isTTY === true`，所以 `pi | tee` 这类把 stdout 接进管道的运行不会往管道里混进转义字节。
+
+没有外部进程，也没有新依赖：字节就是全部机制。会话里的完成通知照旧发送，终端转义只是额外的一层——终端不响应时信息也不会丢。
+
 ## 每次调用的目录与环境变量
 
 `bg_run` 每次调用可以自带 `cwd` 和 `env`，只影响这次派生出来的子进程：
@@ -144,10 +172,18 @@ Unknown template "tset". Known templates: "lint", "test". The task was not start
 ```
 任一文件解析失败只影响该文件：错误写到 stderr，带上文件路径和具体位置（例如 `invalid JSON (...)`、`template "test".command must be a non-empty string`），扩展继续加载，另一个文件里的模板照常可用。
 
-## 为什么上限与 shell 只来自环境变量
+## 为什么配置只从一个地方读
 
-上限与 shell 的选择只来自环境变量，一个键一种形状——见 `docs/scope-v1.md`。这样测试可以把一份显式环境交给扩展入口，宿主也可以用同样的方式传入，而“读哪里、什么时候校验”只有一个答案。唯一例外是命名模板：模板要跨会话复用，所以放在项目与 agent 的 `pretty-task.json`；它同样在扩展入口读一次、校验一次，坏文件只报告，不阻断加载。
+所有由环境变量决定的东西——输出上限、shell 策略、通知开关、agent 设置目录——都在 `src/tasks/base/settings.ts` 里读一次，合成一个 `Settings` 值交给需要它的模块；`src/tasks/process/limits.ts` 只剩与时间有关的数值校验，`src/tasks/process/shell.ts` 从传入的环境里解析，扩展只经 `Settings` 调用它。一个键一种形状——见 `docs/scope-v1.md`。这样测试可以把一份显式环境（或一个普通对象）交给扩展入口，宿主也可以用同样的方式传入，而“读哪里、什么时候校验”只有一个答案：某个模块自己再读一次 `process.env` 是缺陷，不是优化。
+
+`PI_PRETTY_TASK_*` 里这个版本不认识的键同样是错误：
+
+```
+PI_PRETTY_TASK_NOTIFY_TIMEOUT is not a key this version reads; known keys: PI_PRETTY_TASK_OUTPUT_CAP_BYTES, PI_PRETTY_TASK_NOTIFY, PI_PRETTY_TASK_SHELL, PI_PRETTY_TASK_SHELL_PATH, PI_PRETTY_TASK_POSIX_SHELL, PI_PRETTY_TASK_POSIX_SHELL_PATH
+```
+
+拼错的名字不该变成一个用户以为生效、扩展却默默忽略的设置。唯一例外是命名模板：模板要跨会话复用，所以放在项目与 agent 的 `pretty-task.json`；它也按 `Settings` 给出的路径在扩展入口读一次、校验一次，坏文件只报告，不阻断加载。
 
 ## 上限如何落到进程上
 
-上限由 `src/tasks/process/limits.ts` 解析，shell 策略由 `src/tasks/process/shell.ts` 解析；扩展入口 `src/index.ts` 在注册任何工具之前调用两者并读取模板文件；上限与 shell 的解析结果交给 `ProcessTasks`，由其传给 supervisor 的输出写入点与 `spawn` 调用。`bg_run` 的 `shell` 在 `spawn` 之前解析完，不支持的取值不会留下一条跑不起来的记录。超限与超时都不引入第二套终止机制：它们只是带着原因调用 `ProcessTasks.stop()`，与 `bg_kill` 走同一条路。读输出时 `src/tasks/base/decode.ts` 是唯一解码点，`src/tasks/base/output.ts` 的尾巴读取与 `bg_logs` 的整段读取共用它。
+上限与 shell 策略都来自同一个 `Settings`：扩展入口 `src/index.ts` 在注册任何工具之前调用 `readSettings()`，把环境读成 `Settings`，再按 `settings.templatePaths` 读模板文件；`settings.outputCapBytes` 与 `settings.shellPolicy` 交给 `ProcessTasks`，由其传给 supervisor 的输出写入点与 `spawn` 调用。`bg_run` 的 `shell` 在 `spawn` 之前解析完，不支持的取值不会留下一条跑不起来的记录。超限与超时都不引入第二套终止机制：它们只是带着原因调用 `ProcessTasks.stop()`，与 `bg_kill` 走同一条路。读输出时 `src/tasks/base/decode.ts` 是唯一解码点，`src/tasks/base/output.ts` 的尾巴读取与 `bg_logs` 的整段读取共用它。

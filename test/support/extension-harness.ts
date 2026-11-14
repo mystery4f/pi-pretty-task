@@ -64,6 +64,11 @@ export interface HarnessOptions {
    * collects them into `problems`; production writes them to stderr.
    */
   readonly reportProblem?: (message: string) => void;
+  /**
+   * Receives the terminal notification bytes. The production writer is silent
+   * unless stdout is a TTY, and a test runner's stdout is a pipe.
+   */
+  readonly notificationWrite?: (text: string) => void;
 }
 
 export interface Harness {
@@ -300,6 +305,7 @@ export function createHarness(defaultTurn: Turn, options: HarnessOptions = {}): 
       problems.push(message);
       options.reportProblem?.(message);
     },
+    writeTerminal: options.notificationWrite,
   });
 
   return {

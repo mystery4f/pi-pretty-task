@@ -27,6 +27,7 @@ import {
   TASK_FINISHED_CUSTOM_TYPE,
 } from "./ui/notification.js";
 import { publishStatus, registerTasksCommand } from "./ui/tasks-command.js";
+import { createTerminalNotifications } from "./ui/terminal-notification.js";
 
 export interface ExtensionOptions {
   /** Clock seam for tests; defaults to `Date.now`. */
@@ -46,6 +47,11 @@ export interface ExtensionOptions {
   readonly projectDir?: string;
   /** Agent settings directory; defaults to `PI_CODING_AGENT_DIR`, then pi's own default. */
   readonly agentDir?: string;
+  /**
+   * Where the terminal notification bytes go; defaults to stdout, and then only
+   * when stdout is a terminal. A test captures the bytes instead of a terminal.
+   */
+  readonly writeTerminal?: (text: string) => void;
   /**
    * Receives a configuration problem as one line, without the `pi-pretty-task:`
    * prefix. Defaults to stderr: a bad template file must be loud at load and
@@ -144,6 +150,15 @@ export function createExtension(
       publishStatusLine();
     },
   });
+  // Where a task's ending reaches the terminal (issue #15). The gate is a UI this
+  // session actually has: a headless run writes nothing, and a session that has
+  // shut down must not write into a terminal it no longer owns.
+  let uiAttached = false;
+  const terminal = createTerminalNotifications({
+    enabled: settings.notify,
+    attached: () => uiAttached,
+    write: options.writeTerminal,
+  });
   const processTasks = new ProcessTasks({
     sessions,
     now,
@@ -152,11 +167,11 @@ export function createExtension(
     // The store does not await the announcement; a notice outlives the task.
     onFinish: (view) => {
       void notifyTaskFinished(pi, view);
+      terminal.finished(view.task.name, view.task.status);
       // A finished task changes the count, so the line is refreshed with it.
       publishStatusLine();
     },
   });
-
   for (const tool of processTaskTools(processTasks, templates.templates)) pi.registerTool(tool);
   for (const tool of loopTaskTools(loops)) pi.registerTool(tool);
   pi.registerMessageRenderer(TASK_FINISHED_CUSTOM_TYPE, renderTaskFinished);
@@ -182,11 +197,14 @@ export function createExtension(
     readonly cwd: string;
     readonly sessionManager: { getSessionId(): string };
     readonly ui: ExtensionUIContext;
+    /** pi says whether this mode has a UI at all; a tool call's context may omit it. */
+    readonly hasUI?: boolean;
   }): Promise<void> => {
     const fresh = statusUi === undefined;
     const scope = scopeOf(ctx);
     statusUi = ctx.ui;
     statusScope = scope;
+    uiAttached = ctx.hasUI === true;
     if (fresh) await publishStatus(ctx.ui, processTasks, loops, scope);
   };
 
@@ -252,6 +270,7 @@ export function createExtension(
     await loops.attach(scope);
     statusUi = ctx.ui;
     statusScope = scope;
+    uiAttached = ctx.hasUI;
     // The line exists before the panel is ever opened; `/tasks` only refreshes it,
     // so the first paint is awaited rather than left to race the session start.
     await publishStatus(ctx.ui, processTasks, loops, scope);
@@ -297,6 +316,7 @@ export function createExtension(
     stopTimer();
     statusUi = undefined;
     statusScope = undefined;
+    uiAttached = false;
   });
 
   return {
