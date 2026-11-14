@@ -110,7 +110,7 @@ export function createExtension(
   for (const tool of loopTaskTools(loops)) pi.registerTool(tool);
   pi.registerMessageRenderer(TASK_FINISHED_CUSTOM_TYPE, renderTaskFinished);
   pi.registerMessageRenderer(LOOP_WAKE_CUSTOM_TYPE, renderLoopWake);
-  registerTasksCommand(pi, processTasks);
+  registerTasksCommand(pi, processTasks, loops);
 
   const interval = options.pumpIntervalMs ?? DEFAULT_PUMP_INTERVAL_MS;
   let timer: ReturnType<typeof setInterval> | undefined;

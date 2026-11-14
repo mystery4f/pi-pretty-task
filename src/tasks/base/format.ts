@@ -47,3 +47,12 @@ export function commandPreview(command: string, maxLength = 80): string {
   if (firstLine.length + suffix.length <= maxLength) return `${firstLine}${suffix}`;
   return `${firstLine.slice(0, Math.max(1, maxLength - 1))}…`;
 }
+
+/** A wall-clock time as the panel shows it: `09:30:05`, local time. */
+export function formatClockTime(at: number): string {
+  const when = new Date(at);
+  const hours = String(when.getHours()).padStart(2, "0");
+  const minutes = String(when.getMinutes()).padStart(2, "0");
+  const seconds = String(when.getSeconds()).padStart(2, "0");
+  return `${hours}:${minutes}:${seconds}`;
+}

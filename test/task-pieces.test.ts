@@ -10,7 +10,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { commandPreview, formatBytes, formatDuration } from "../src/tasks/base/format.js";
+import {
+  commandPreview,
+  formatBytes,
+  formatClockTime,
+  formatDuration,
+} from "../src/tasks/base/format.js";
 import { readOutputTail } from "../src/tasks/base/output.js";
 import {
   processOutputPath,
@@ -102,5 +107,11 @@ describe("format", () => {
     expect(commandPreview(`echo ${"x".repeat(200)}`)).toHaveLength(80);
     expect(commandPreview(`echo ${"x".repeat(200)}`).endsWith("…")).toBe(true);
     expect(commandPreview("line one\nline two")).toContain("…");
+  });
+
+  it("tells the time of a fire on the wall clock", () => {
+    const at = new Date(2026, 0, 1, 9, 5, 7).getTime();
+    expect(formatClockTime(at)).toBe("09:05:07");
+    expect(formatClockTime(at)).toHaveLength(8);
   });
 });
