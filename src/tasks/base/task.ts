@@ -4,8 +4,9 @@
  * A Task carries what both kinds share — id, name, status and timeline. The
  * `kind` discriminator selects the arm, so fields that only mean something for
  * one kind live on that arm instead of being optional on a single flat object.
- * The `process` and `loop` arms are the two kinds, and both live in this one
- * union so the store and the panel can carry them together (ADR-0005).
+ * The `process` and `llm-loop` arms are the two implemented kinds, and both live
+ * in this one union so the store and the panel can carry them together (ADR-0005).
+ * `cmd-loop` is reserved for the arm that will run a command on a schedule.
  *
  * @author mystery4f <40482524+mystery4f@users.noreply.github.com>
  */
@@ -24,7 +25,7 @@ export type TaskStatus = "running" | "paused" | "completed" | "failed" | "killed
 export type KillReason = "user" | "timeout" | "output_cap" | "shutdown";
 
 /** Which kind of work a task represents. */
-export type TaskKind = "process" | "loop";
+export type TaskKind = "process" | "llm-loop" | "cmd-loop";
 
 /** Fields every task carries, whatever its kind. */
 export interface TaskBase {
@@ -66,12 +67,12 @@ export interface ProcessTask extends TaskBase {
   killReason?: KillReason;
 }
 /**
- * A schedule that wakes the assistant with a stored prompt (ADR-0001). It owns
- * no command and no output file: a fire is a message, and what the resulting
- * turn does is recorded as an Iteration.
+ * An llm loop: a schedule that wakes the assistant with a stored prompt
+ * (ADR-0001). It owns no command and no output file: a fire is a message, and
+ * what the resulting turn does is recorded as an Iteration.
  */
-export interface LoopTask extends TaskBase {
-  readonly kind: "loop";
+export interface LlmLoopTask extends TaskBase {
+  readonly kind: "llm-loop";
   /** Raw schedule expression, kept verbatim for listings (ADR-0006). */
   readonly schedule: string;
   /** Message injected into the session on every fire. */
@@ -97,5 +98,5 @@ export interface LoopTask extends TaskBase {
   droppedIterations?: number;
 }
 
-/** One tracked unit of work: a process task or a loop task, never a second list. */
-export type Task = ProcessTask | LoopTask;
+/** One tracked unit of work: a process task or an llm loop, never a second list. */
+export type Task = ProcessTask | LlmLoopTask;

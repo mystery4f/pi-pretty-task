@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { previousTaskRecordPath, taskRecordPath } from "../src/tasks/base/runtime-state.js";
-import type { LoopTask, ProcessTask } from "../src/tasks/base/task.js";
+import type { LlmLoopTask, ProcessTask } from "../src/tasks/base/task.js";
 import { TaskStore } from "../src/tasks/base/task-store.js";
 import { makeTempDir } from "./support/processes.js";
 
@@ -46,10 +46,10 @@ function processTask(overrides: Partial<ProcessTask> = {}): ProcessTask {
 }
 
 /** A loop arm record, plus one field this version does not know, to prove it round-trips. */
-function loopRecord(overrides: Partial<LoopTask> = {}): LoopTask {
+function loopRecord(overrides: Partial<LlmLoopTask> = {}): LlmLoopTask {
   return {
     id: "lp12cd",
-    kind: "loop",
+    kind: "llm-loop",
     name: "nightly review",
     status: "completed",
     createdAt: 1_700_000_000_000,
@@ -63,7 +63,7 @@ function loopRecord(overrides: Partial<LoopTask> = {}): LoopTask {
     intervalMs: 300_000,
     iterations: [],
     ...overrides,
-  } as LoopTask;
+  } as LlmLoopTask;
 }
 
 describe("the task record file", () => {
@@ -79,11 +79,11 @@ describe("the task record file", () => {
     expect(previousTaskRecordPath(directory)).toBe(join(directory, "tasks.json.prev"));
   });
 
-  it("reads a version 1 record without an update time as created, then writes version 2", async () => {
+  it("reads a version 1 record without an update time as created, then writes version 3", async () => {
     const directory = await stateDirectory();
     const oldProcess: Record<string, unknown> = { ...processTask({ id: "ab12cd" }) };
     delete oldProcess.updatedAt;
-    const oldLoop: Record<string, unknown> = { ...loopRecord({ id: "lp12cd" }) };
+    const oldLoop: Record<string, unknown> = { ...loopRecord({ id: "lp12cd" }), kind: "loop" };
     delete oldLoop.updatedAt;
     await writeFile(
       taskRecordPath(directory),
@@ -106,7 +106,51 @@ describe("the task record file", () => {
     const saved = JSON.parse(await readFile(taskRecordPath(directory), "utf8")) as {
       version: number;
     };
-    expect(saved.version).toBe(2);
+    expect(saved.version).toBe(3);
+  });
+
+  it("reads a version 2 loop as an llm loop and keeps its schedule across the upgrade", async () => {
+    const directory = await stateDirectory();
+    const oldLoop = {
+      id: "lp0001",
+      kind: "loop",
+      name: "nightly review",
+      status: "running",
+      createdAt: 1_700_000_000_000,
+      updatedAt: 1_700_000_001_000,
+      schedule: "15m",
+      prompt: "review the diff",
+      maxFires: 10,
+      fires: 3,
+      nextFireAt: 1_700_000_900_000,
+      iterations: [],
+    };
+    await writeFile(
+      taskRecordPath(directory),
+      JSON.stringify({ version: 2, tasks: [oldLoop] }),
+      "utf8",
+    );
+
+    const loaded = await new TaskStore(directory).load();
+    const [record] = loaded;
+    if (record?.kind !== "llm-loop") throw new Error("the old loop did not load as an llm loop");
+    expect(record).toMatchObject({
+      id: "lp0001",
+      kind: "llm-loop",
+      schedule: "15m",
+      fires: 3,
+      maxFires: 10,
+      nextFireAt: 1_700_000_900_000,
+    });
+
+    await new TaskStore(directory).save(loaded);
+    const saved = JSON.parse(await readFile(taskRecordPath(directory), "utf8")) as {
+      version: number;
+    };
+    expect(saved.version).toBe(3);
+
+    const reloaded = await new TaskStore(directory).load();
+    expect(reloaded).toEqual(loaded);
   });
 
   it("has no records before the first write, and never throws for that", async () => {
@@ -232,7 +276,7 @@ describe("the task record file", () => {
     // turn outlives the process that was running it.
     expect(loaded).toHaveLength(1);
     const record = loaded[0];
-    if (record?.kind !== "loop") throw new Error("the loop record did not load");
+    if (record?.kind !== "llm-loop") throw new Error("the loop record did not load");
     expect(record.status).toBe("running");
     const [iteration] = record.iterations;
     expect(iteration).toMatchObject({ status: "interrupted", endedAt: 1_700_000_009_000 });
