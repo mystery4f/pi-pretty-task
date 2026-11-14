@@ -35,6 +35,15 @@ export interface TaskBase {
   status: TaskStatus;
   /** Epoch milliseconds. */
   readonly createdAt: number;
+  /**
+   * Epoch milliseconds of the last change a reader cares about, and the panel's
+   * sort key (ADR-0010). Starts equal to `createdAt` and moves only on a real
+   * transition: start, finish, kill and interrupt of a task, a loop fire, one of
+   * that loop's iterations settling, and pause/resume/complete. Output growth
+   * never moves it — a running command writes bytes every tick, which would pin
+   * the order to whichever task wrote last instead of which one changed.
+   */
+  updatedAt: number;
   /** Epoch milliseconds; absent while the task is still running. */
   endedAt?: number;
 }

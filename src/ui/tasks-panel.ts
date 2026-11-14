@@ -46,8 +46,14 @@ export const LIST_VISIBLE_ROWS = 12;
 /** Width of a detail label column, colon included, so the values line up. */
 const LABEL_WIDTH = 12;
 
+/** An id carries its kind, so the column holds all of `bg-1a2cf` and pads the old six. */
+const ID_COLUMN_WIDTH = 8;
+
 /** Refresh period; the tail of a running task should look alive. */
 const REFRESH_MS = 1000;
+
+/** Longest query a reader can paste or type; more than this is a command, not a filter. */
+const QUERY_MAX_LENGTH = 120;
 
 /** One task as the panel reads it: the record plus the numbers the list shows. */
 export interface PanelTaskView {
@@ -92,14 +98,20 @@ export interface TasksPanelOptions {
   readonly source: PanelSource;
   /** Refresh period in milliseconds; 0 disables the tick, letting tests drive refreshes. */
   readonly refreshMs?: number;
+  /** Clock for the ages shown on rows and details; tests pin it to a fixed time. */
+  readonly now?: () => number;
 }
 
 /** List → task detail → iteration detail; the third level exists only under a loop. */
 type PanelMode = "list" | "detail" | "iteration";
 
-/** Newest first: the row the reader most likely wants is on top. */
-function newestFirst(left: PanelTaskView, right: PanelTaskView): number {
-  return right.task.createdAt - left.task.createdAt;
+/**
+ * Most recently changed first, not most recently created: a task that just ended
+ * or just fired is what the reader wants, while a long job that only grew would
+ * otherwise sink under every fresh row (ADR-0010).
+ */
+function mostRecentlyChangedFirst(left: PanelTaskView, right: PanelTaskView): number {
+  return right.task.updatedAt - left.task.updatedAt;
 }
 
 /** Whitespace-free lines of an output tail, newest last. */
@@ -113,6 +125,7 @@ export class TasksPanel implements Component {
   private readonly theme: Theme;
   private readonly done: () => void;
   private readonly source: PanelSource;
+  private readonly now: () => number;
   private readonly timer: ReturnType<typeof setInterval> | undefined;
 
   private mode: PanelMode = "list";
@@ -128,6 +141,10 @@ export class TasksPanel implements Component {
   private listTop = 0;
   /** `l` narrows the list to loop tasks; a second press brings the process rows back. */
   private onlyLoops = false;
+  /** `/` turns keys into a query instead of navigation; `alt+q` leaves it. */
+  private searching = false;
+  /** The query outlives search mode: leaving keeps it, and the header keeps showing it. */
+  private query = "";
 
   private detailId: string | undefined;
   private detailLines: readonly string[] = [];
@@ -157,6 +174,7 @@ export class TasksPanel implements Component {
     this.theme = options.theme;
     this.done = options.done;
     this.source = options.source;
+    this.now = options.now ?? Date.now;
     const refreshMs = options.refreshMs ?? REFRESH_MS;
     if (refreshMs > 0) {
       this.timer = setInterval(() => {
@@ -182,25 +200,15 @@ export class TasksPanel implements Component {
   /** Reload rows, and the detail tail while it is being followed. */
   async refresh(): Promise<void> {
     try {
-      const all = [...(await this.source.list())].sort(newestFirst);
-      this.allRows = all;
-      // The loop filter narrows what the reader sees, never what the store holds.
-      const kindRows = this.onlyLoops ? all.filter((row) => row.task.kind === "loop") : all;
-      // Finished work is history, and history is asked for: the panel opens on what
-      // is live and never reveals the past on its own, so `h` means the same thing
-      // whether or not something is still running.
-      const live = kindRows.filter((row) => row.task.status === "running");
-      this.rows = this.showHistory ? kindRows : live;
+      this.allRows = [...(await this.source.list())].sort(mostRecentlyChangedFirst);
+      this.applyFilters();
     } catch {
       // A store that cannot list is a store with nothing to show, not a crash.
       this.rows = [];
     }
     this.trackGrowth();
 
-    if (!this.rows.some((row) => row.task.id === this.selectedId)) {
-      this.selectedId = this.rows[0]?.task.id;
-      this.listTop = 0;
-    }
+    this.keepSelection();
     if (this.mode === "detail" && this.following && this.detailRow()?.task.kind === "process") {
       await this.readTail();
     }
@@ -217,6 +225,35 @@ export class TasksPanel implements Component {
     }
   }
 
+  /**
+   * Recompute what the reader may open: the loop filter, then the query, then the
+   * history gate — in that order, so a search never reveals a row `h` is hiding
+   * and never changes the counts, which stay over every task.
+   */
+  private applyFilters(): void {
+    // The loop filter narrows what the reader sees, never what the store holds.
+    const kindRows = this.onlyLoops
+      ? this.allRows.filter((row) => row.task.kind === "loop")
+      : this.allRows;
+    const matched =
+      this.query.length === 0
+        ? kindRows
+        : kindRows.filter((row) => matchesQuery(row.task, this.query));
+    // Finished work is history, and history is asked for: the panel opens on what
+    // is live and never reveals the past on its own, so `h` means the same thing
+    // whether or not something is still running.
+    const live = matched.filter((row) => row.task.status === "running");
+    this.rows = this.showHistory ? matched : live;
+    this.keepSelection();
+  }
+
+  /** Hold the selected task across a refresh, or fall back to the first row. */
+  private keepSelection(): void {
+    if (!this.rows.some((row) => row.task.id === this.selectedId)) {
+      this.selectedId = this.rows[0]?.task.id;
+      this.listTop = 0;
+    }
+  }
   /**
    * Remember how much each task grew since the last look, so a list row can say
    * `+4.1KB ↑` the way a file manager shows a download. A finished task keeps its
@@ -247,12 +284,24 @@ export class TasksPanel implements Component {
   }
 
   handleInput(data: string): void {
-    if (data === "x" || data === "q" || matchesKey(data, "escape")) {
+    if (matchesKey(data, "alt+q")) {
+      // Leaving search keeps the query, which the header goes on showing; a second
+      // press closes the panel, exactly as `x` does.
+      if (this.mode === "list" && this.searching) {
+        this.searching = false;
+        this.paint();
+        return;
+      }
+      this.done();
+      return;
+    }
+    if (data === "x") {
       this.done();
       return;
     }
     if (this.mode === "iteration") this.handleIterationInput(data);
     else if (this.mode === "detail") this.handleDetailInput(data);
+    else if (this.searching) this.handleSearchInput(data);
     else this.handleListInput(data);
   }
 
@@ -267,6 +316,11 @@ export class TasksPanel implements Component {
   // ---- input ---------------------------------------------------------------
 
   private handleListInput(data: string): void {
+    if (data === "/") {
+      this.searching = true;
+      this.paint();
+      return;
+    }
     if (matchesKey(data, "up")) {
       this.moveSelection(-1);
       return;
@@ -293,6 +347,31 @@ export class TasksPanel implements Component {
     if (data === "h") this.toggleHistory();
     if (data === "R") this.rerunSelected();
     if (data === "c") this.showOutputPath();
+  }
+
+  /**
+   * A query is typed, not navigated: the panel only filters. Paste arrives as one
+   * bracketed sequence, so its newlines must not read as Enter presses.
+   */
+  private handleSearchInput(data: string): void {
+    if (data === "\x7f" || data === "\b") {
+      this.setQuery(this.query.slice(0, -1));
+      return;
+    }
+    const pasted = pastedQuery(data);
+    if (pasted !== undefined) {
+      this.setQuery(`${this.query}${pasted}`);
+      return;
+    }
+    const typed = typedQuery(data);
+    if (typed !== undefined) this.setQuery(`${this.query}${typed}`);
+  }
+
+  /** Set the query, filter on it at once, and paint without going through the store. */
+  private setQuery(query: string): void {
+    this.query = query.slice(0, QUERY_MAX_LENGTH);
+    this.applyFilters();
+    this.paint();
   }
 
   private handleDetailInput(data: string): void {
@@ -704,7 +783,13 @@ export class TasksPanel implements Component {
     const theme = this.theme;
     const heading = theme.fg("borderMuted", "──") + theme.fg("text", " Background Tasks ");
     const rule = Math.max(0, width - visibleWidth("── Background Tasks "));
-    return [heading + theme.fg("borderMuted", "─".repeat(rule)), ` ${this.countsLine()} `];
+    const lines = [heading + theme.fg("borderMuted", "─".repeat(rule)), ` ${this.countsLine()} `];
+    // The query stays visible after search mode is left, so the reader can see why
+    // rows are missing; the counts above still cover every task.
+    if (this.query.length > 0) {
+      lines.push(` ${theme.fg("muted", "filter:")} ${theme.fg("accent", this.query)} `);
+    }
+    return lines;
   }
 
   /** One `dot label number` per ending, in the order the reader cares about. */
@@ -750,7 +835,7 @@ export class TasksPanel implements Component {
 
   /** The list's keys: the replaced panel's set, plus the loop filter this plugin adds. */
   private listFooter(): string {
-    return "↑/↓ · Enter logs · k stop · a stop all · h history · R rerun · c path · l loops · x close";
+    return "↑/↓ · Enter logs · / search · k stop · a stop all · h history · R rerun · l loops · alt+q close";
   }
 
   /** The box around the rows: the header sits above it, the keys inside the bottom. */
@@ -797,7 +882,7 @@ export class TasksPanel implements Component {
       (most, row) => Math.max(most, visibleWidth(row.task.name)),
       12,
     );
-    const nameRoom = Math.min(longest, Math.max(12, inner - 67));
+    const nameRoom = Math.min(longest, Math.max(12, inner - 79));
 
     const visible = this.rows.slice(this.listTop, this.listTop + LIST_VISIBLE_ROWS);
     visible.forEach((row, offset) => {
@@ -831,7 +916,7 @@ export class TasksPanel implements Component {
     const task = row.task;
     const pointer = selected ? theme.fg("accent", "›") : " ";
     const dot = theme.fg(dotColour(task), "●");
-    const id = theme.fg("dim", task.id);
+    const id = theme.fg("dim", pad(task.id, ID_COLUMN_WIDTH));
     const separator = theme.fg("dim", "·");
     // Both kinds share one table, so the row has to say which it is: a loop runs
     // nothing and a process wakes nobody, and their numbers mean different things.
@@ -842,7 +927,7 @@ export class TasksPanel implements Component {
     // The name column is as wide as the longest name, not as wide as the terminal:
     // a fixed split leaves a canyon between the name and the id on a wide screen.
     const name = theme.fg(nameColour(task), pad(task.name, nameRoom));
-    const right = theme.fg("dim", rightText(row));
+    const right = theme.fg("dim", rightText(row, this.now()));
     const growth = this.growthText(row);
 
     const head = ` ${pointer} ${dot} ${name} ${id} ${separator} ${kind} ${status}${exit} `;
@@ -878,6 +963,7 @@ export class TasksPanel implements Component {
       this.field("Status", theme.fg(colour, task.status)),
       this.field("Runtime", formatDuration(row.elapsedMs)),
       this.field("Started", formatClockTime(task.createdAt)),
+      this.field("Updated", this.updatedText(task.updatedAt)),
       this.field("Output", task.outputPath),
       this.field("Size", formatSize(row)),
     ];
@@ -903,7 +989,7 @@ export class TasksPanel implements Component {
       `task: ${task.name}`,
       `${task.id} · ${task.status} · ${live}`,
       body,
-      "↑/↓ scroll · r follow · ← list · k stop · R rerun · c path · x close",
+      "↑/↓ scroll · r follow · ← list · k stop · R rerun · c path · alt+q close",
       width,
     );
   }
@@ -945,6 +1031,7 @@ export class TasksPanel implements Component {
       this.field("Status", theme.fg(colour, task.status)),
       this.field("Kind", task.kind),
       this.field("Runtime", formatDuration(row.elapsedMs)),
+      this.field("Updated", this.updatedText(task.updatedAt)),
       this.field("Schedule", task.schedule),
       this.field("Fires", firesText(task)),
       this.field("Next fire", nextFireText(task, row)),
@@ -988,7 +1075,7 @@ export class TasksPanel implements Component {
       `loop: ${task.name}`,
       `${task.id} · ${task.status} · ${task.schedule}`,
       body,
-      "↑/↓ select · Enter iteration · ← list · k stop · x close",
+      "↑/↓ select · Enter iteration · ← list · k stop · alt+q close",
       width,
     );
   }
@@ -1038,7 +1125,7 @@ export class TasksPanel implements Component {
       `fire ${String(iteration.fire)}`,
       `${task.name} · ${task.id} · ${iteration.status}`,
       body,
-      "↑/↓ scroll · ← loop · k stop · x close",
+      "↑/↓ scroll · ← loop · k stop · alt+q close",
       width,
     );
   }
@@ -1077,6 +1164,12 @@ export class TasksPanel implements Component {
     const text = visibleWidth(value) > room ? truncateToWidth(value, room, "…", false) : value;
     return `${this.theme.fg("muted", pad(`${label}:`, LABEL_WIDTH))}${text}`;
   }
+
+  /** Absolute clock plus age: the list shows only the age, the detail can afford both. */
+  private updatedText(updatedAt: number): string {
+    const age = formatDuration(Math.max(0, this.now() - updatedAt));
+    return `${formatClockTime(updatedAt)} · ${age} ago`;
+  }
 }
 
 /** Size column: output bytes for a process task; a loop task has no output file. */
@@ -1097,16 +1190,21 @@ function exitText(task: Task): string {
   return task.exitCode === undefined ? "" : `exit ${String(task.exitCode)}`;
 }
 
-/** Right-hand numbers: a process reports runtime and output size, a loop its fires and schedule. */
-function rightText(row: PanelTaskView): string {
+/**
+ * Right-hand numbers: a process reports runtime, output size and how long ago it last
+ * changed; a loop its fires, schedule and the same age. Recency sits on the right so a
+ * row that just moved to the top says why (ADR-0010).
+ */
+function rightText(row: PanelTaskView, now: number): string {
   const task = row.task;
   const elapsed = formatDuration(row.elapsedMs);
-  if (task.kind === "process") return `${elapsed} ${formatSize(row)}`;
+  const age = ` · ${formatDuration(Math.max(0, now - task.updatedAt))} ago`;
+  if (task.kind === "process") return `${elapsed} ${formatSize(row)}${age}`;
   // A loop has no exit code and no bytes: it reports the fires it made and how
   // long until the next one, which is the whole question while it is running.
   const next =
     row.untilNextFireMs === undefined ? "" : ` · next ${formatDuration(row.untilNextFireMs)}`;
-  return `${elapsed} · ${firesText(task)} fires${next}`;
+  return `${elapsed} · ${firesText(task)} fires${next}${age}`;
 }
 
 function pad(text: string, width: number): string {
@@ -1226,4 +1324,52 @@ function callTopFor(iteration: Iteration, requested: number): number {
 function singleLine(text: string, maxLength: number): string {
   const oneLine = text.replace(/\s*\n\s*/g, " ").trim();
   return truncateToWidth(oneLine, Math.max(1, maxLength), "…", false);
+}
+
+/** True when any searchable field of the task contains the query, ignoring case. */
+function matchesQuery(task: Task, query: string): boolean {
+  const needle = query.toLowerCase();
+  // The kind word is the one the row prints, so searching `proc` finds the processes
+  // the reader can see; the status word is the string the row colours.
+  const fields =
+    task.kind === "process"
+      ? [task.name, task.id, task.command, task.status, "proc"]
+      : [task.name, task.id, task.prompt, task.status, "loop"];
+  return fields.some((field) => field.toLowerCase().includes(needle));
+}
+
+/** Bracketed paste, as pi-tui hands it to `handleInput`: ESC [200~ … ESC [201~. */
+const PASTE_START = "\x1b[200~";
+const PASTE_END = "\x1b[201~";
+
+/**
+ * The pasted text as a query. A newline would otherwise read as Enter and a tab as
+ * a key of its own, so both become spaces; the remaining C0 controls are dropped.
+ */
+function pastedQuery(data: string): string | undefined {
+  if (!data.startsWith(PASTE_START)) return undefined;
+  const end = data.indexOf(PASTE_END, PASTE_START.length);
+  const text = end === -1 ? data.slice(PASTE_START.length) : data.slice(PASTE_START.length, end);
+  return withoutControls(text.replace(/[\n\r\t]/g, " ")).slice(0, QUERY_MAX_LENGTH);
+}
+
+/** Drop C0 controls and DEL, which a pasted command may carry but a query must not. */
+function withoutControls(text: string): string {
+  let kept = "";
+  for (const character of text) {
+    const code = character.codePointAt(0) ?? 0;
+    if (code < 0x20 || code === 0x7f) continue;
+    kept += character;
+  }
+  return kept;
+}
+
+/** A printable keypress; key sequences, Enter and Escape are not part of a query. */
+function typedQuery(data: string): string | undefined {
+  if (data.length === 0) return undefined;
+  for (const character of data) {
+    const code = character.codePointAt(0) ?? 0;
+    if (code < 0x20 || code === 0x7f) return undefined;
+  }
+  return data;
 }

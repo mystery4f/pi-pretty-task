@@ -35,7 +35,10 @@ const CreateParameters = Type.Object({
       "Message sent into the session each time the loop fires; it starts a new turn. There is no command to run.",
   }),
   name: Type.Optional(
-    Type.String({ description: "Short label for the loop; defaults to its prompt's first line." }),
+    Type.String({
+      description:
+        "Short purpose of the loop, not its prompt: why it keeps waking the session, in a few words the panel can show. Example: `为 CI 生成 changelog`. Optional; without it the loop falls back to its prompt's first line.",
+    }),
   ),
   maxFires: Type.Optional(
     Type.Integer({
