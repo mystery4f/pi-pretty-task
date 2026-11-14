@@ -17,7 +17,7 @@ import { type LoopFire, LoopTasks } from "./tasks/loop/loop-tasks.js";
 import { loopTaskTools } from "./tasks/loop/tools.js";
 import { LoopWakes } from "./tasks/loop/wake-queue.js";
 import { parseOutputCapBytes } from "./tasks/process/limits.js";
-import { ProcessTasks } from "./tasks/process/process-tasks.js";
+import { ProcessTasks, type ProcessTaskView } from "./tasks/process/process-tasks.js";
 import { resolveShellPolicy } from "./tasks/process/shell.js";
 import { processTaskTools } from "./tasks/process/tools.js";
 import { LOOP_WAKE_CUSTOM_TYPE, renderLoopWake, sendLoopWake } from "./ui/loop-wake.js";
@@ -117,10 +117,30 @@ export function createExtension(
       // A fire changes a loop's countdown, and its status line entry.
       publishStatusLine();
     },
+    onCommandFire: async (fire) => {
+      // A fire is an ordinary process task carrying its loop id and fire number
+      // (ADR-0014), started by the same path `bg_run` uses — never a second spawn.
+      const child = await processTasks.start({
+        cwd: fire.scope.cwd,
+        sessionId: fire.scope.sessionId,
+        command: fire.task.command,
+        // The human alias of ADR-0016 is rendered here; the fire's id stays opaque.
+        name: `${fire.task.name} #${String(fire.fire)}`,
+        ...(fire.task.cwd === undefined ? {} : { workingDirectory: fire.task.cwd }),
+        ...(fire.task.env === undefined ? {} : { env: fire.task.env }),
+        parentId: fire.task.id,
+        fire: fire.fire,
+      });
+      publishStatusLine();
+      return { taskId: child.id };
+    },
     onCancel: async (taskId) => {
       // The loop stopped while its wake waited: the wake must never reach pi, and
       // the pending iteration must not claim a turn that will not happen.
       for (const fire of wakes.cancel(taskId)) await recordSafely(iterations.drop(fire));
+      // A command loop that stops must not leave a fire running: its process is
+      // killed through the same polite-then-force path as `bg_kill` (ADR-0014).
+      await processTasks.stopChildren(taskId, { reason: "user" });
       publishStatusLine();
     },
   });
@@ -131,11 +151,45 @@ export function createExtension(
     shellPolicy,
     // The store does not await the announcement; a notice outlives the task.
     onFinish: (view) => {
-      void notifyTaskFinished(pi, view);
+      if (view.task.parentId === undefined) {
+        void notifyTaskFinished(pi, view);
+      } else {
+        // A fire ended: its outcome lands on the owning loop, and only a failed
+        // fire may speak (ADR-0014) — a healthy fire adds nothing to the transcript.
+        void finishFire(view).catch((error: unknown) => {
+          process.stderr.write(`pi-pretty-task: fire record failed: ${String(error)}\n`);
+        });
+      }
       // A finished task changes the count, so the line is refreshed with it.
       publishStatusLine();
     },
   });
+
+  /**
+   * Close one fire on its loop. The child record is the truth for exit code,
+   * duration and bytes; the loop keeps the history row and the failure backoff.
+   */
+  async function finishFire(view: ProcessTaskView): Promise<void> {
+    const { parentId, fire } = view.task;
+    if (parentId === undefined || fire === undefined) return;
+    const completed = await loops.completeFire({
+      parentId,
+      taskId: view.task.id,
+      fire,
+      status: view.task.status,
+      exitCode: view.task.exitCode,
+      outputPath: view.task.outputPath,
+      outputBytes: view.task.outputBytes,
+      durationMs: view.elapsedMs,
+      killReason: view.task.killReason,
+      error: view.task.error,
+      endedAt: view.task.endedAt,
+    });
+    if (completed === undefined || !completed.failed) return;
+    if (completed.loop.wakeOnFailure === false) return;
+    // The child is already named `loop #N`, which is the alias the notice shows.
+    await notifyTaskFinished(pi, view);
+  }
 
   for (const tool of processTaskTools(processTasks)) pi.registerTool(tool);
   for (const tool of loopTaskTools(loops)) pi.registerTool(tool);

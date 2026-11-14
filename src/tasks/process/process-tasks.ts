@@ -45,6 +45,13 @@ export interface StartProcessTaskInput extends TaskScope {
    * has what it needs.
    */
   env?: Record<string, string>;
+  /**
+   * The cmd loop whose fire starts this process (ADR-0014). The child keeps an
+   * ordinary process id and carries the link in its record, never in the id.
+   */
+  parentId?: string;
+  /** One-based fire number of the owning loop; always given with `parentId`. */
+  fire?: number;
 }
 
 /** A task as it looks right now: the record plus the values that keep moving. */
@@ -241,6 +248,8 @@ export class ProcessTasks {
       cwd,
       outputPath: processOutputPath(session.directory, id),
       outputBytes: 0,
+      ...(input.parentId !== undefined ? { parentId: input.parentId } : {}),
+      ...(input.fire !== undefined ? { fire: input.fire } : {}),
     };
 
     session.tasks.set(id, task);
@@ -382,9 +391,33 @@ export class ProcessTasks {
     if (loaded === undefined) return undefined;
     // A record of the loop kind is not this store's to stop.
     if (loaded.kind !== "process") return undefined;
-    const task: ProcessTask = loaded;
+    return this.stopRecord(session, loaded, options);
+  }
 
-    const running = session.running.get(id);
+  /**
+   * Stop every running child of one loop, across loaded sessions. The loop's
+   * own stop path goes through here so a paused or deleted command loop never
+   * leaves a process running that no root row points at (ADR-0014).
+   */
+  async stopChildren(parentId: string, options: StopTaskOptions = {}): Promise<StopTaskResult[]> {
+    const sessions = await Promise.all([...this.sessions.values()]);
+    const results: StopTaskResult[] = [];
+    for (const session of sessions) {
+      for (const task of [...session.tasks.values()]) {
+        if (task.kind !== "process" || task.parentId !== parentId) continue;
+        if (task.status !== "running" || !session.running.has(task.id)) continue;
+        results.push(await this.stopRecord(session, task, options));
+      }
+    }
+    return results;
+  }
+
+  private async stopRecord(
+    session: SessionTasks,
+    task: ProcessTask,
+    options: StopTaskOptions,
+  ): Promise<StopTaskResult> {
+    const running = session.running.get(task.id);
     if (running === undefined) {
       return { view: this.view(session, task), outcome: "already-finished", tookMs: 0 };
     }
@@ -393,8 +426,9 @@ export class ProcessTasks {
     // reports whether anything was signalled, the store knows who asked. The
     // first ask wins — a second stop joins the one already in flight instead of
     // relabelling its end.
-    if (!session.killReasons.has(id)) session.killReasons.set(id, options.reason ?? "user");
-    this.clearRuntimeCap(session, id);
+    if (!session.killReasons.has(task.id))
+      session.killReasons.set(task.id, options.reason ?? "user");
+    this.clearRuntimeCap(session, task.id);
     const stopped = await running.stop({
       graceMs: options.graceMs ?? this.killGraceMs,
       confirmMs: options.confirmMs ?? this.killConfirmMs,
@@ -407,7 +441,7 @@ export class ProcessTasks {
     if (stopped.outcome === "stopped" && !(await settledWithin(running.exit, EXIT_WAIT_MS))) {
       this.finish(session, task, running, null);
     }
-    session.killReasons.delete(id);
+    session.killReasons.delete(task.id);
 
     return {
       view: this.view(session, task),
