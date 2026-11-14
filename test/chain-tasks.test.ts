@@ -181,6 +181,12 @@ describe("chain tasks", () => {
     // The cursor stays on the step that failed: that is where the queue stopped.
     expect(chain.task.cursor).toBe(0);
     expect(chain.task.error).toContain(first.id);
+    // The chain ending, the skipped step and the child's last line of output are
+    // three separate writes; wait for each instead of racing the slowest one.
+    await waitFor("the skipped step", async () => {
+      const view = await stores.processes.get(scope, third.stepId);
+      return view?.task.status === "skipped";
+    });
     const skipped = (await stores.processes.get(scope, third.stepId))?.task;
     expect(skipped?.status).toBe("skipped");
     expect(skipped?.endedAt).toBeDefined();
@@ -188,7 +194,12 @@ describe("chain tasks", () => {
     expect(skipped?.error).toContain(`parent ${second.chainId} did not succeed`);
     expect(skipped?.error).toContain(first.id);
     // Nothing behind the failure ever ran.
+    await waitFor("the last line of build's output", async () => {
+      const text = await readFile(log, "utf8").catch(() => "");
+      return text.includes("end build");
+    });
     expect((await readFile(log, "utf8")).trim().split("\n")).toEqual(["start build", "end build"]);
+    await waitFor("the chain ending", () => stores.chainEndings.length > 0);
     expect(stores.chainEndings.map((view) => view.task.status)).toEqual(["failed"]);
   });
 
