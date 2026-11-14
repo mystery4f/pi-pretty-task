@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { previousTaskRecordPath, taskRecordPath } from "../src/tasks/base/runtime-state.js";
-import type { LlmLoopTask, ProcessTask } from "../src/tasks/base/task.js";
+import type { CmdLoopTask, LlmLoopTask, ProcessTask } from "../src/tasks/base/task.js";
 import { TaskStore } from "../src/tasks/base/task-store.js";
 import { makeTempDir } from "./support/processes.js";
 
@@ -66,6 +66,67 @@ function loopRecord(overrides: Partial<LlmLoopTask> = {}): LlmLoopTask {
   } as LlmLoopTask;
 }
 
+/** A command loop: a schedule with a command, its last three fires kept for the row. */
+function cmdLoopRecord(overrides: Partial<CmdLoopTask> = {}): CmdLoopTask {
+  return {
+    id: "lc34ef",
+    kind: "cmd-loop",
+    name: "watch",
+    status: "running",
+    createdAt: 1_700_000_000_000,
+    updatedAt: 1_700_000_181_000,
+    schedule: "5m",
+    command: "node watch.js",
+    cwd: "/work/project",
+    env: { NODE_ENV: "test" },
+    wakeOnFailure: false,
+    fires: 3,
+    nextFireAt: 1_700_000_300_000,
+    lastFireAt: 1_700_000_181_000,
+    missedFires: 1,
+    consecutiveFailures: 0,
+    lastExitCode: 0,
+    lastOutputPath: "/state/bg13cd.output",
+    lastOutputBytes: 42,
+    fireHistory: [
+      {
+        fire: 1,
+        at: 1_700_000_061_000,
+        startedAt: 1_700_000_061_000,
+        endedAt: 1_700_000_061_800,
+        outcome: "success",
+        exitCode: 0,
+        durationMs: 800,
+        outputBytes: 42,
+        taskId: "bg11cd",
+      },
+      {
+        fire: 2,
+        at: 1_700_000_121_000,
+        startedAt: 1_700_000_121_000,
+        endedAt: 1_700_000_122_900,
+        outcome: "failed",
+        exitCode: 2,
+        durationMs: 1_900,
+        outputBytes: 12,
+        taskId: "bg12cd",
+      },
+      {
+        fire: 3,
+        at: 1_700_000_181_000,
+        startedAt: 1_700_000_181_000,
+        outcome: "success",
+        exitCode: 0,
+        endedAt: 1_700_000_181_800,
+        durationMs: 800,
+        outputBytes: 42,
+        taskId: "bg13cd",
+      },
+    ],
+    ...overrides,
+  };
+}
+
 describe("the task record file", () => {
   it("holds process and loop records side by side under one schema", async () => {
     const directory = await stateDirectory();
@@ -79,7 +140,7 @@ describe("the task record file", () => {
     expect(previousTaskRecordPath(directory)).toBe(join(directory, "tasks.json.prev"));
   });
 
-  it("reads a version 1 record without an update time as created, then writes version 3", async () => {
+  it("reads a version 1 record without an update time as created, then writes the current version", async () => {
     const directory = await stateDirectory();
     const oldProcess: Record<string, unknown> = { ...processTask({ id: "ab12cd" }) };
     delete oldProcess.updatedAt;
@@ -106,7 +167,7 @@ describe("the task record file", () => {
     const saved = JSON.parse(await readFile(taskRecordPath(directory), "utf8")) as {
       version: number;
     };
-    expect(saved.version).toBe(3);
+    expect(saved.version).toBe(4);
   });
 
   it("reads a version 2 loop as an llm loop and keeps its schedule across the upgrade", async () => {
@@ -147,7 +208,7 @@ describe("the task record file", () => {
     const saved = JSON.parse(await readFile(taskRecordPath(directory), "utf8")) as {
       version: number;
     };
-    expect(saved.version).toBe(3);
+    expect(saved.version).toBe(4);
 
     const reloaded = await new TaskStore(directory).load();
     expect(reloaded).toEqual(loaded);
@@ -284,6 +345,55 @@ describe("the task record file", () => {
       status: "interrupted",
       endedAt: 1_700_000_009_000,
       durationMs: 8_800,
+    });
+  });
+
+  it("round-trips a command loop, its fire history and its child process", async () => {
+    const directory = await stateDirectory();
+    // The child is an ordinary process record that points at its loop and its fire.
+    const child = processTask({ id: "bg13cd", name: "watch #3", parentId: "lc34ef", fire: 3 });
+    const records = [cmdLoopRecord(), child];
+
+    await new TaskStore(directory).save(records);
+    const loaded = await new TaskStore(directory).load();
+
+    expect(loaded).toEqual(records);
+  });
+
+  it("keeps a command loop schedule across a restart and interrupts only its in-flight fire", async () => {
+    const directory = await stateDirectory();
+    // The fire that was running when pi stopped: its process died with the previous pi.
+    const loop = cmdLoopRecord({
+      fireHistory: [
+        {
+          fire: 3,
+          at: 1_700_000_181_000,
+          startedAt: 1_700_000_181_000,
+          outcome: "running",
+          taskId: "bg13cd",
+        },
+      ],
+    });
+    await new TaskStore(directory).save([loop]);
+
+    const loaded = await new TaskStore(directory, { now: () => 1_700_000_200_000 }).load();
+
+    // The schedule survives: it owns no process. The fire that was running cannot,
+    // because the process it started died with the previous pi (ADR-0014).
+    expect(loaded).toHaveLength(1);
+    const record = loaded[0];
+    if (record?.kind !== "cmd-loop") throw new Error("the command loop did not load");
+    expect(record.status).toBe("running");
+    expect(record.schedule).toBe("5m");
+    expect(record.nextFireAt).toBe(1_700_000_300_000);
+    expect(record.fires).toBe(3);
+    expect(record.fireHistory).toHaveLength(1);
+    expect(record.fireHistory[0]).toMatchObject({
+      fire: 3,
+      outcome: "interrupted",
+      endedAt: 1_700_000_200_000,
+      durationMs: 19_000,
+      taskId: "bg13cd",
     });
   });
 });
