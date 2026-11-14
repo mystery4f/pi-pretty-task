@@ -40,7 +40,7 @@ export interface TaskBase {
    * Epoch milliseconds of the last change a reader cares about, and the panel's
    * sort key (ADR-0010). Starts equal to `createdAt` and moves only on a real
    * transition: start, finish, kill and interrupt of a task, a loop fire, one of
-   * that loop's iterations settling, and pause/resume/complete. Output growth
+   * that loop's iterations settling, and pause/resume/complete/retune. Output growth
    * never moves it — a running command writes bytes every tick, which would pin
    * the order to whichever task wrote last instead of which one changed.
    */
@@ -111,8 +111,11 @@ export interface FireRecord {
  * transitions and one fire counter.
  */
 export interface LoopBase extends TaskBase {
-  /** Raw schedule expression, kept verbatim for listings (ADR-0006). */
-  readonly schedule: string;
+  /**
+   * Raw schedule expression, kept verbatim for listings (ADR-0006). `loop_update`
+   * rewrites it in place when the user retunes the loop.
+   */
+  schedule: string;
   /** Stop after this many fires; absent means no fire-count limit. */
   readonly maxFires?: number;
   /** Epoch milliseconds after which the schedule stops; absent means no deadline. */

@@ -26,6 +26,8 @@ interface LoopDetails {
   endedAt?: number;
   untilNextFireMs?: number;
   outcome?: string;
+  iterations?: Array<{ fire: number; status: string }>;
+  error?: string;
 }
 
 const cleanup: Array<() => Promise<void>> = [];
@@ -302,6 +304,105 @@ describe("loop tools", () => {
     task.advance(10_000);
     expect(await task.harness.pump(task.now)).toEqual([]);
     expect(task.harness.messages).toHaveLength(1);
+  });
+
+  it("retunes a loop through loop_update and keeps its id, fires and iterations", async () => {
+    const task = await setup();
+    const created = await createLoop(task.harness, { schedule: "10s", prompt: "keep going" });
+
+    task.advance(10_000);
+    await task.harness.pump(task.now);
+    const before = detailsOf(await task.harness.call("loop_list", { id: created.id }));
+    expect(before).toMatchObject({ fires: 1, schedule: "10s" });
+    expect(before.iterations).toHaveLength(1);
+
+    task.advance(5_000);
+    const retuned = await task.harness.call("loop_update", { id: created.id, schedule: "1h" });
+    expect(resultText(retuned)).toContain("Retuned loop");
+    expect(detailsOf(retuned)).toMatchObject({
+      id: created.id,
+      outcome: "rescheduled",
+      status: "running",
+      schedule: "1h",
+      fires: before.fires,
+      lastFireAt: before.lastFireAt,
+      nextFireAt: task.now + 3_600_000,
+    });
+
+    const listed = await task.harness.call("loop_list", { id: created.id });
+    expect(resultText(listed)).toContain("schedule: 1h");
+    expect(detailsOf(listed).iterations).toEqual(before.iterations);
+
+    // The 10s slot the old schedule had picked does not fire; the 1h one does.
+    task.advance(10_000);
+    expect(await task.harness.pump(task.now)).toEqual([]);
+    task.advance(3_600_000 - 10_000);
+    expect(await task.harness.pump(task.now)).toHaveLength(1);
+  });
+
+  it("retunes a paused loop through loop_update and leaves it paused", async () => {
+    const task = await setup();
+    const created = await createLoop(task.harness, { schedule: "10s", prompt: "keep going" });
+    await task.harness.call("loop_update", { id: created.id, action: "pause" });
+
+    const retuned = await task.harness.call("loop_update", { id: created.id, schedule: "30m" });
+    expect(resultText(retuned)).toContain("stays paused");
+    expect(detailsOf(retuned)).toMatchObject({
+      outcome: "rescheduled",
+      status: "paused",
+      schedule: "30m",
+    });
+    expect(detailsOf(retuned).nextFireAt).toBeUndefined();
+
+    task.advance(10_000);
+    expect(await task.harness.pump(task.now)).toEqual([]);
+
+    const resumed = await task.harness.call("loop_update", { id: created.id, action: "resume" });
+    expect(detailsOf(resumed)).toMatchObject({
+      status: "running",
+      nextFireAt: task.now + 1_800_000,
+    });
+  });
+
+  it("rejects an invalid schedule on loop_update with the message loop_create gives", async () => {
+    const task = await setup();
+    const created = await createLoop(task.harness, { schedule: "10s", prompt: "keep going" });
+    const rejectedCreate = await task.harness.call("loop_create", {
+      schedule: "10 minutes",
+      prompt: "keep going",
+    });
+
+    const rejectedUpdate = await task.harness.call("loop_update", {
+      id: created.id,
+      schedule: "10 minutes",
+    });
+    expect(resultText(rejectedUpdate)).toBe(resultText(rejectedCreate));
+    expect(detailsOf(rejectedUpdate).error).toContain('Invalid schedule "10 minutes"');
+    expect(detailsOf(rejectedUpdate).id).toBeUndefined();
+
+    const unchanged = detailsOf(await task.harness.call("loop_list", { id: created.id }));
+    expect(unchanged).toMatchObject({
+      schedule: "10s",
+      status: "running",
+      nextFireAt: created.nextFireAt,
+    });
+
+    task.advance(10_000);
+    expect(await task.harness.pump(task.now)).toHaveLength(1);
+  });
+
+  it("asks for an action or a schedule when loop_update gets neither", async () => {
+    const task = await setup();
+    const created = await createLoop(task.harness, { schedule: "10s", prompt: "keep going" });
+
+    const result = await task.harness.call("loop_update", { id: created.id });
+    expect(resultText(result)).toContain("Give an action or a schedule");
+    expect(detailsOf(result).outcome).toBeUndefined();
+    expect(detailsOf(result).error).toContain("Give an action or a schedule");
+
+    // The loop is untouched by the refusal, not merely unchanged in the reply.
+    const listed = detailsOf(await task.harness.call("loop_list", { id: created.id }));
+    expect(listed).toMatchObject({ schedule: "10s", status: "running" });
   });
 
   it("reloads a loop after a restart and keeps its fire count", async () => {

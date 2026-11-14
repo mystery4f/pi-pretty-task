@@ -18,12 +18,7 @@ import { Type } from "typebox";
 import { formatBytes, formatDuration } from "../base/format.js";
 import type { TaskScope } from "../base/runtime-state.js";
 import type { CmdLoopTask, FireRecord, LlmLoopTask } from "../base/task.js";
-import {
-  LoopInputError,
-  type LoopTasks,
-  type LoopTaskView,
-  type LoopUpdateAction,
-} from "./loop-tasks.js";
+import { LoopInputError, type LoopTasks, type LoopTaskView } from "./loop-tasks.js";
 
 const CreateParameters = Type.Object({
   schedule: Type.String({
@@ -88,10 +83,18 @@ const ListParameters = Type.Object({
 
 const UpdateParameters = Type.Object({
   id: Type.String({ description: "Loop id to update." }),
-  action: Type.Union([Type.Literal("pause"), Type.Literal("resume"), Type.Literal("complete")], {
-    description:
-      "pause stops fires but keeps the record; resume re-arms from now; complete ends the loop.",
-  }),
+  action: Type.Optional(
+    Type.Union([Type.Literal("pause"), Type.Literal("resume"), Type.Literal("complete")], {
+      description:
+        "pause stops fires but keeps the record; resume re-arms from now; complete ends the loop. Omit it to change only the schedule.",
+    }),
+  ),
+  schedule: Type.Optional(
+    Type.String({
+      description:
+        "New schedule for the same loop, in the forms loop_create accepts. The loop keeps its id, fire count and every recorded iteration; a running loop is re-armed from this update, never from the slot the old schedule had picked. An invalid expression is refused and the old schedule stays in force.",
+    }),
+  ),
 });
 
 const DeleteParameters = Type.Object({
@@ -338,6 +341,12 @@ function updateHeadline(id: string, result: Awaited<ReturnType<LoopTasks["update
       return `Loop ${id} was already paused.`;
     case "resumed":
       return `Resumed loop ${id} (${name}); its next fire is ${nextFireText(result.view)}.`;
+    case "rescheduled": {
+      const retuned = `Retuned loop ${id} (${name}) to ${result.view.task.schedule}`;
+      return result.view.task.status === "paused"
+        ? `${retuned}; it stays paused until resumed.`
+        : `${retuned}; its next fire is ${nextFireText(result.view)}.`;
+    }
     case "already-running":
       return `Loop ${id} is already running.`;
     case "completed":
@@ -442,9 +451,9 @@ export function loopTaskTools(loops: LoopTasks): ToolDefinition[] {
 
   const update: ToolDefinition<typeof UpdateParameters> = {
     name: "loop_update",
-    label: "Pause, resume or complete a loop",
+    label: "Pause, resume, complete or retune a loop",
     description:
-      "Change a loop without deleting its history: pause stops fires, resume re-arms from now, complete ends it. Pausing or completing also cancels a wake that is still waiting for the agent to be idle, so the loop will not wake the model after you stop it.",
+      "Change a loop without deleting its history: pause stops fires, resume re-arms from now, complete ends it, and schedule retunes when it fires. A retune keeps the id, the fire count and every recorded iteration; a running loop's next fire is computed from this update rather than from the slot the old schedule had already picked, a paused loop keeps the new schedule and arms onto it when resumed, and an invalid expression is refused with the old schedule still in force. Pausing or completing also cancels a wake that is still waiting for the agent to be idle, so the loop will not wake the model after you stop it.",
     parameters: UpdateParameters,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const id = params.id.trim();
@@ -452,19 +461,32 @@ export function loopTaskTools(loops: LoopTasks): ToolDefinition[] {
         return text("Pass the id of the loop to update; loop_list lists the ids of this session.");
       }
 
-      const result = await loops.update(scopeOf(ctx), id, params.action as LoopUpdateAction);
-      if (result === undefined) {
-        return text(`No loop with id ${id} in this session.`);
-      }
-      return {
-        content: [
-          {
-            type: "text",
-            text: [updateHeadline(id, result), "", describeLoop(result.view)].join("\n"),
-          },
-        ],
-        details: { ...loopDetails(result.view), outcome: result.outcome },
+      // A retune and a transition may arrive together; the store applies the
+      // schedule first, so `resume` with a new schedule lands on the new interval.
+      const input = {
+        ...scopeOf(ctx),
+        id,
+        ...(params.action === undefined ? {} : { action: params.action }),
+        ...(params.schedule === undefined ? {} : { schedule: params.schedule }),
       };
+      try {
+        const result = await loops.update(input);
+        if (result === undefined) {
+          return text(`No loop with id ${id} in this session.`);
+        }
+        return {
+          content: [
+            {
+              type: "text",
+              text: [updateHeadline(id, result), "", describeLoop(result.view)].join("\n"),
+            },
+          ],
+          details: { ...loopDetails(result.view), outcome: result.outcome },
+        };
+      } catch (error) {
+        if (error instanceof LoopInputError) return inputError(error);
+        throw error;
+      }
     },
   };
 

@@ -88,7 +88,7 @@ export function panelSourceFor(
       // A loop is stopped by ending its schedule; a process by killing its tree.
       const loop = await loops.get(scope, id);
       if (loop !== undefined) {
-        const result = await loops.update(scope, id, "complete");
+        const result = await loops.update({ ...scope, id, action: "complete" });
         if (result === undefined) return undefined;
         return { outcome: result.outcome, view: loopRow(result.view) };
       }
