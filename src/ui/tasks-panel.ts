@@ -1061,10 +1061,20 @@ export class TasksPanel implements Component {
     // The name column is as wide as the longest name, not as wide as the terminal:
     // a fixed split leaves a canyon between the name and the id on a wide screen.
     const name = theme.fg(nameColour(task), pad(task.name, nameRoom));
-    const right = theme.fg("dim", rightText(row, this.now()));
     const growth = this.growthText(row);
-
     const headPlain = ` ${pointer} ${dot} ${name} ${id} ${separator} ${kind} ${status}${exit} `;
+    // The numbers get the room the head leaves, minus one space of gap, so they can
+    // shed their least important parts instead of pushing the row past the border.
+    // The room is measured on the bare cells: a theme adds markup, and only the
+    // characters a reader sees should cost a number its place.
+    const headCells = ` ${selected ? "›" : " "} ● ${pad(task.name, nameRoom)} ${pad(
+      task.id,
+      ID_COLUMN_WIDTH,
+    )} · ${kindWord(task.kind)} ${pad(task.status, 11)}${exitText(task) === "" ? "" : ` ${exitText(task)}`} `;
+    const right = theme.fg(
+      "dim",
+      rightText(row, this.now(), width - 2 - visibleWidth(headCells) - visibleWidth(growth) - 1),
+    );
     // The strip is a command loop's own column: the newest fires, oldest left, so a
     // failure count can never hide a run that never happened (ADR-0015). It drops
     // its oldest cells on a narrow row and disappears entirely before wrapping.
@@ -1447,7 +1457,7 @@ function exitText(task: Task): string {
  * changed; a loop its fires, schedule and the same age. Recency sits on the right so a
  * row that just moved to the top says why (ADR-0010).
  */
-function rightText(row: PanelTaskView, now: number): string {
+function rightText(row: PanelTaskView, now: number, room = Number.POSITIVE_INFINITY): string {
   const task = row.task;
   const elapsed = formatDuration(row.elapsedMs);
   const age = ` · ${formatDuration(Math.max(0, now - task.updatedAt))} ago`;
@@ -1458,12 +1468,21 @@ function rightText(row: PanelTaskView, now: number): string {
   // a backoff so the two read together (ADR-0017).
   const streak = failureStreak(task);
   const failed = streak === 0 ? "" : ` · ${String(streak)} failed`;
+  const state = `${elapsed} · ${firesText(task)} fires${failed}`;
   const backingOff = streak > 0 ? " (backoff)" : "";
   const next =
     row.untilNextFireMs === undefined
-      ? ""
-      : ` · next ${formatDuration(row.untilNextFireMs)}${backingOff}`;
-  return `${elapsed} · ${firesText(task)} fires${failed}${next}${age}`;
+      ? undefined
+      : ` · next ${formatDuration(row.untilNextFireMs)}`;
+  // The state the ticket asks the row to carry is the streak and the backoff, so
+  // the age gives way first, then the word marking the wait a backoff, then the
+  // wait itself. Nothing is ever cut mid-number and the row never wraps (ADR-0015).
+  const candidates = [
+    `${state}${next ?? ""}${backingOff}${age}`,
+    `${state}${next ?? ""}${backingOff}`,
+    ...(next === undefined ? [] : [`${state}${next}`, state]),
+  ];
+  return candidates.find((candidate) => visibleWidth(candidate) <= room) ?? state;
 }
 
 function pad(text: string, width: number): string {

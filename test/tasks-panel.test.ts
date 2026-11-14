@@ -7,6 +7,7 @@
  */
 
 import type { Theme } from "@earendil-works/pi-coding-agent";
+import { visibleWidth } from "@earendil-works/pi-tui";
 import { describe, expect, it, vi } from "vitest";
 import { formatClockTime, formatDuration } from "../src/tasks/base/format.js";
 import type { OutputTail } from "../src/tasks/base/output.js";
@@ -1317,13 +1318,25 @@ describe("command loops in the list and in the detail", () => {
     const { panel, drawn } = openPanel(source, () => 13_000, plainTheme());
     await panel.settle();
 
-    const row = drawn()
-      .split("\n")
-      .find((line) => line.includes("watch loop"));
-    if (row === undefined) throw new Error("the loop row must render");
-    // The streak is on the row, and the wait to the next fire says it is a backoff.
+    const rowAt = (width: number): string => {
+      const line = panel.render(width).find((candidate) => candidate.includes("watch loop"));
+      if (line === undefined) throw new Error("the loop row must render");
+      return line;
+    };
+    // A hundred columns is tight: the streak and the wait fit and the strip keeps its
+    // cells, so the label saying the wait is a backoff is the first thing to go.
+    const row = rowAt(WIDTH);
     expect(row).toContain("3 failed");
-    expect(row).toContain(`next ${formatDuration(40 * 60_000)} (backoff)`);
+    expect(row).toContain(`next ${formatDuration(40 * 60_000)}`);
+    expect(row).toContain("#4✗");
+    expect(row).toContain("#5–");
+    // Whatever it sheds, the row stays inside the frame instead of pushing it wide.
+    for (const line of panel.render(WIDTH)) {
+      expect(visibleWidth(line)).toBeLessThanOrEqual(WIDTH);
+    }
+    // A wider screen has room for the word, and the wait is then labelled as what it
+    // is: the schedule pushed out by the streak, not the schedule as written.
+    expect(rowAt(120)).toContain(`next ${formatDuration(40 * 60_000)} (backoff)`);
     // The raw expression is not rewritten into the delay: the row never shows it,
     // and the detail still prints the schedule the user typed.
     expect(row).not.toContain("10s");
