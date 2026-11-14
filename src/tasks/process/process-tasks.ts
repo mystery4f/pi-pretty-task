@@ -14,7 +14,7 @@
 
 import { stat } from "node:fs/promises";
 import { resolve } from "node:path";
-import { type OutputTail, readOutputTail } from "../base/output.js";
+import { type OutputTail, readOutputFrom, readOutputTail } from "../base/output.js";
 import { processOutputPath, sessionTaskDirectory, type TaskScope } from "../base/runtime-state.js";
 import type { KillReason, ProcessTask, Task } from "../base/task.js";
 import { type TaskSession, TaskSessions } from "../base/task-sessions.js";
@@ -89,6 +89,24 @@ export interface WaitTaskResult {
   waited: boolean;
 }
 
+/** What a follow read answered: the new bytes, and where the cursor now sits. */
+export interface FollowTaskResult {
+  /** The record as it stood when the read returned. */
+  view: ProcessTaskView;
+  /** Output appended since this task's previous follow read, decoded as text. */
+  delta: string;
+  /** Offset the read started at. */
+  from: number;
+  /** Offset just past the bytes read; the next follow read starts here. */
+  offset: number;
+  /** Bytes in `delta`. */
+  deltaBytes: number;
+  /** True when the task has ended and the file has been read to its end. */
+  finished: boolean;
+  /** True when the window passed with no new bytes; the task may still be running. */
+  timedOut: boolean;
+}
+
 export interface ProcessTasksOptions {
   platform?: NodeJS.Platform;
   env?: NodeJS.ProcessEnv;
@@ -135,6 +153,13 @@ interface SessionTasks extends TaskSession {
    * a wait is woken by the end event instead of polling the record.
    */
   readonly waiters: Map<string, Set<() => void>>;
+  /**
+   * Where each task's follow read has reached, in output bytes. Follow is the
+   * only reader that moves a cursor, so a plain `bg_logs` tail neither seeds nor
+   * consumes one; nothing here is persisted because a cursor belongs to the
+   * session that asked, not to the task.
+   */
+  readonly followOffsets: Map<string, number>;
 }
 
 const NAME_LIMIT = 48;
@@ -330,6 +355,32 @@ export class ProcessTasks {
     // `bg_logs`, the panel and a completion notice alike (ADR-0008).
     const tail = await readOutputTail(task.outputPath, { ...options, platform: this.platform });
     return { view: this.view(session, task), tail };
+  }
+
+  /**
+   * The output appended to a task's file since this task's previous follow read.
+   * Undefined when the session has no such task. The cursor is in memory and
+   * belongs to the session: it starts at the beginning of the file, moves only
+   * past bytes an answer actually carried, and a plain tail read leaves it
+   * alone. `finished` says the record has ended, so no later read will grow.
+   */
+  async follow(scope: TaskScope, id: string): Promise<FollowTaskResult | undefined> {
+    const session = await this.session(scope);
+    const task = session.tasks.get(id);
+    if (task === undefined || task.kind !== "process") return undefined;
+
+    const from = session.followOffsets.get(id) ?? 0;
+    const read = await readOutputFrom(task.outputPath, from, { platform: this.platform });
+    session.followOffsets.set(id, read.to);
+    return {
+      view: this.view(session, task),
+      delta: read.text,
+      from: read.from,
+      offset: read.to,
+      deltaBytes: read.to - read.from,
+      finished: task.endedAt !== undefined,
+      timedOut: false,
+    };
   }
 
   /**
@@ -553,6 +604,7 @@ export class ProcessTasks {
       limitReasons: new Map(),
       runtimeCaps: new Map(),
       waiters: new Map(),
+      followOffsets: new Map(),
     };
   }
 

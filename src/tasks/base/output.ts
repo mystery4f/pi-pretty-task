@@ -1,9 +1,10 @@
 /**
- * Reading the tail of a task's output file.
+ * Reading a task's output file: its tail, or what was appended past a cursor.
  *
  * A tail read is bounded twice — by bytes read from the end of the file and by
  * lines returned — because the same code serves `bg_logs` and the panel, and a
- * runaway command must never be able to flood either.
+ * runaway command must never be able to flood either. A follow read is bounded
+ * by the file itself: it returns exactly the bytes the previous follow left.
  *
  * @author mystery4f <40482524+mystery4f@users.noreply.github.com>
  */
@@ -75,6 +76,59 @@ export async function readOutputTail(
     }
 
     return { text: all.join("\n"), lines: all.length, truncated };
+  } finally {
+    await handle.close();
+  }
+}
+
+/** Bytes appended to one output file since an offset. */
+export interface OutputDelta {
+  text: string;
+  /** Offset the read started at, clamped to the file's current size. */
+  from: number;
+  /** Offset just past the bytes read; the next follow read starts here. */
+  to: number;
+  /** Size of the file when it was read. */
+  size: number;
+}
+
+export interface OutputDeltaOptions {
+  /** Platform whose console encoding the reader falls back to; defaults to this host. */
+  platform?: NodeJS.Platform;
+}
+
+/**
+ * Read what an output file holds past `offset`. A missing file has nothing past
+ * it, and an offset beyond the end is clamped, so a file that was replaced or
+ * truncated answers an empty delta instead of failing the follow. The bytes are
+ * decoded the same way a tail read decodes them, so a follower and a tail
+ * reader never disagree about a character.
+ */
+export async function readOutputFrom(
+  path: string,
+  offset: number,
+  options: OutputDeltaOptions = {},
+): Promise<OutputDelta> {
+  let handle: Awaited<ReturnType<typeof open>>;
+  try {
+    handle = await open(path, "r");
+  } catch (error) {
+    if (isFileNotFound(error)) return { text: "", from: Math.max(0, offset), to: Math.max(0, offset), size: 0 };
+    throw error;
+  }
+
+  try {
+    const { size } = await handle.stat();
+    const from = Math.max(0, Math.min(offset, size));
+    const length = size - from;
+    const buffer = Buffer.alloc(length);
+    if (length > 0) await handle.read(buffer, 0, length, from);
+
+    const text = decodeOutput(buffer, { platform: options.platform ?? process.platform }).replace(
+      /\r\n/g,
+      "\n",
+    );
+    return { text, from, to: size, size };
   } finally {
     await handle.close();
   }
