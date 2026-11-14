@@ -38,6 +38,12 @@ export const OUTPUT_CAP_ENV = "PI_PRETTY_TASK_OUTPUT_CAP_BYTES";
 /** Whether an ending task may raise a terminal notification: `on` or `off`. */
 export const NOTIFY_ENV = "PI_PRETTY_TASK_NOTIFY";
 
+/** Days a finished session's records and output are kept before they are reclaimed. */
+export const DEFAULT_RETENTION_DAYS = 7;
+
+/** The retention window in whole days; see `docs/configuration.md`. */
+export const RETENTION_DAYS_ENV = "PI_PRETTY_TASK_RETENTION_DAYS";
+
 /** pi's own settings directory; `pretty-task.json` is read from it. */
 export const AGENT_DIR_ENV = "PI_CODING_AGENT_DIR";
 
@@ -45,6 +51,7 @@ export const AGENT_DIR_ENV = "PI_CODING_AGENT_DIR";
 const KNOWN_KEYS: readonly string[] = [
   OUTPUT_CAP_ENV,
   NOTIFY_ENV,
+  RETENTION_DAYS_ENV,
   SHELL_ENV,
   SHELL_PATH_ENV,
   POSIX_SHELL_ENV,
@@ -61,6 +68,8 @@ export interface Settings {
   readonly shellPolicy: ShellPolicy;
   /** Whether an ending task may write a terminal notification. */
   readonly notify: boolean;
+  /** Days a finished session is kept before pruning reclaims it; never zero. */
+  readonly retentionDays: number;
   /** Where the named templates are read from: the project first, then the agent dir. */
   readonly templatePaths: TemplateConfigPaths;
 }
@@ -95,6 +104,7 @@ export function readSettings(options: SettingsOptions = {}): Settings {
       probe: options.probe,
     }),
     notify: parseNotify(env),
+    retentionDays: parseRetentionDays(env),
     templatePaths: templateConfigPaths(options.projectDir ?? process.cwd(), agentDir),
   };
 }
@@ -128,6 +138,27 @@ function parseNotify(env: NodeJS.ProcessEnv): boolean {
   if (raw === "on") return true;
   if (raw === "off") return false;
   throw new Error(`${NOTIFY_ENV} does not accept ${JSON.stringify(raw)}; it is one of: on, off`);
+}
+
+/**
+ * The retention window, in whole days. An absent key means the default.
+ *
+ * Zero, a fraction and a typo are all refused instead of being read as a window:
+ * `0` would reclaim every finished session on the next start, `1.5` would round
+ * into a window nobody asked for, and `Number("week")` is `NaN`, which compares
+ * false against every age — pruning would silently stop. Failing the load says
+ * which key to fix, and nothing has been deleted at that point.
+ */
+function parseRetentionDays(env: NodeJS.ProcessEnv): number {
+  const raw = env[RETENTION_DAYS_ENV];
+  if (raw === undefined) return DEFAULT_RETENTION_DAYS;
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new Error(
+      `${RETENTION_DAYS_ENV} must be a positive whole number of days; received ${JSON.stringify(raw)}`,
+    );
+  }
+  return value;
 }
 
 /**

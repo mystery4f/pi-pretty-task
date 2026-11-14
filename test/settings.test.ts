@@ -12,8 +12,10 @@ import { describe, expect, it } from "vitest";
 import {
   AGENT_DIR_ENV,
   DEFAULT_OUTPUT_CAP_BYTES,
+  DEFAULT_RETENTION_DAYS,
   NOTIFY_ENV,
   OUTPUT_CAP_ENV,
+  RETENTION_DAYS_ENV,
   readSettings,
 } from "../src/tasks/base/settings.js";
 import { POSIX_SHELL_ENV, SHELL_ENV, SHELL_PATH_ENV } from "../src/tasks/process/shell.js";
@@ -34,6 +36,7 @@ describe("settings", () => {
       env: {
         [OUTPUT_CAP_ENV]: "65536",
         [NOTIFY_ENV]: "off",
+        [RETENTION_DAYS_ENV]: "30",
         [AGENT_DIR_ENV]: "/work/agent",
         [SHELL_ENV]: "bash",
         [SHELL_PATH_ENV]: "C:\\Program Files\\Git\\bin\\bash.exe",
@@ -44,6 +47,7 @@ describe("settings", () => {
     });
     expect(settings.outputCapBytes).toBe(65_536);
     expect(settings.notify).toBe(false);
+    expect(settings.retentionDays).toBe(30);
     expect(settings.shellPolicy).toEqual({
       name: "bash",
       executable: "C:\\Program Files\\Git\\bin\\bash.exe",
@@ -58,6 +62,7 @@ describe("settings", () => {
     const settings = readSettings({ env: {}, projectDir: "/work/project", platform: "linux" });
     expect(settings.outputCapBytes).toBe(DEFAULT_OUTPUT_CAP_BYTES);
     expect(settings.notify).toBe(true);
+    expect(settings.retentionDays).toBe(DEFAULT_RETENTION_DAYS);
     expect(settings.shellPolicy).toEqual({ name: "inherit", executable: "/bin/sh" });
     expect(settings.templatePaths.agentFile).toBe(
       join(homedir(), ".pi", "agent", "pretty-task.json"),
@@ -134,6 +139,25 @@ describe("settings", () => {
       createHarness({ cwd: ".", sessionId: "session-typo" }, { env: { [OUTPUT_CAP_ENV]: "lots" } }),
     ).toThrow(
       /PI_PRETTY_TASK_OUTPUT_CAP_BYTES must be a positive whole number of bytes; received "lots"/,
+    );
+  });
+
+  it("keeps the retention window at seven days for an environment that says nothing", () => {
+    const settings = readSettings({ env: {}, platform: "linux" });
+    expect(settings.retentionDays).toBe(DEFAULT_RETENTION_DAYS);
+    expect(DEFAULT_RETENTION_DAYS).toBe(7);
+  });
+
+  it("refuses a retention window that is not a positive whole number of days", () => {
+    // `0` is not "off" and a fraction is not a window: either would turn a typo
+    // into a sweep that deletes yesterday's sessions or into no cap at all.
+    for (const raw of ["0", "-3", "1.5", "week", ""]) {
+      expect(() => readSettings({ env: { [RETENTION_DAYS_ENV]: raw }, platform: "linux" })).toThrow(
+        /PI_PRETTY_TASK_RETENTION_DAYS must be a positive whole number of days; received/,
+      );
+    }
+    expect(() => readSettings({ env: { [RETENTION_DAYS_ENV]: "1.5" }, platform: "linux" })).toThrow(
+      /received "1.5"/,
     );
   });
 });
