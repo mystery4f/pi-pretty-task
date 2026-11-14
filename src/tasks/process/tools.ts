@@ -25,7 +25,7 @@ import {
 } from "../base/search.js";
 import type { ProcessTask } from "../base/task.js";
 
-import { parseTimeoutSeconds, parseWaitSeconds } from "./limits.js";
+import { parseFollowSeconds, parseTimeoutSeconds, parseWaitSeconds } from "./limits.js";
 import type { ProcessTasks, ProcessTaskView, TaskScope } from "./process-tasks.js";
 
 const RunParameters = Type.Object({
@@ -84,6 +84,18 @@ const LogsParameters = Type.Object({
   ),
   full: Type.Optional(
     Type.Boolean({ description: "Return the whole output file instead of a tail." }),
+  ),
+  follow: Type.Optional(
+    Type.Boolean({
+      description:
+        "Return only the output appended since this task's previous follow call in this session, waiting for new bytes instead of repeating what was already shown. `lines` and `full` do not apply. The answer says when the task has finished and nothing more will arrive.",
+    }),
+  ),
+  timeoutSeconds: Type.Optional(
+    Type.Number({
+      description:
+        "With `follow`, how long to wait for new bytes before answering an empty delta. Defaults to 10 seconds; the longest single read is 60.",
+    }),
   ),
 });
 
@@ -316,9 +328,43 @@ export function processTaskTools(tasks: ProcessTasks): ToolDefinition[] {
     name: "bg_logs",
     label: "Background task output",
     description:
-      "Return the tail of a background task's output, stdout and stderr in emission order. Ask again while it runs to see more.",
+      "Return the tail of a background task's output, stdout and stderr in emission order. Ask again while it runs to see more, or pass `follow` to get only what arrived since the previous follow call.",
     parameters: LogsParameters,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      if (params.follow === true) {
+        const windowMs = parseFollowSeconds(params.timeoutSeconds);
+        const followed = await tasks.follow(scopeOf(ctx), params.id.trim(), windowMs);
+        if (followed === undefined) {
+          return text(`No background task with id ${params.id} in this session.`);
+        }
+
+        const { view } = followed;
+        const note = followed.finished
+          ? "the task has finished; nothing more will arrive"
+          : followed.timedOut
+            ? `no new output in ${formatDuration(windowMs)}; the task is still running`
+            : `followed ${formatBytes(followed.deltaBytes)}`;
+        const header = [
+          `name: ${view.task.name} · ${view.task.id} · ${view.task.kind} · ${view.task.status}`,
+          `elapsed ${formatDuration(view.elapsedMs)} · output ${formatBytes(view.outputBytes)} · follow`,
+          note,
+        ].join("\n");
+        const delta = followed.delta.length > 0 ? followed.delta : "(no new output)";
+        return {
+          content: [{ type: "text", text: `${header}\n\n${delta}` }],
+          details: {
+            id: view.task.id,
+            status: view.task.status,
+            follow: true,
+            from: followed.from,
+            offset: followed.offset,
+            deltaBytes: followed.deltaBytes,
+            finished: followed.finished,
+            timedOut: followed.timedOut,
+          },
+        };
+      }
+
       const full = params.full === true;
       const wanted = Math.floor(params.lines ?? DEFAULT_LOG_LINES);
       const lines = Number.isFinite(wanted)
