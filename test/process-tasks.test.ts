@@ -537,6 +537,64 @@ describe("bg_wait", () => {
     expect(elapsed).toBeLessThan(10_000);
     expect(resultText(result)).toContain("completed");
   });
+
+  it("returns the running view, not an error, when the timeout passes", async () => {
+    const dir = await makeTempDir();
+    cleanup.push(dir.dispose);
+    const command = await writeScript(dir.path, "sleeper.js", "setTimeout(() => {}, 30000);\n");
+    const harness = createHarness({ cwd: dir.path, sessionId: "session-wait-timeout" });
+    const task = await startRunning(harness, command, "long wait job");
+
+    const started = Date.now();
+    const result = await harness.call("bg_wait", { id: task.id, timeoutSeconds: 0.3 });
+    const elapsed = Date.now() - started;
+    const details = result.details as TaskDetails & { waited: boolean };
+
+    // A deadline is an answer: the same view bg_status gives, plus `waited`.
+    expect(details.status).toBe("running");
+    expect(details.waited).toBe(false);
+    expect(elapsed).toBeGreaterThanOrEqual(250);
+    expect(elapsed).toBeLessThan(10_000);
+    expect(resultText(result)).toContain("did not finish");
+  });
+
+  it("returns at once for a task that already finished", async () => {
+    const dir = await makeTempDir();
+    cleanup.push(dir.dispose);
+    const command = await writeScript(
+      dir.path,
+      "already-done.js",
+      ["process.stdout.write('gone\\n');", "process.exit(4);", ""].join("\n"),
+    );
+    const harness = createHarness({ cwd: dir.path, sessionId: "session-wait-done" });
+    const task = await startRunning(harness, command, "finished job");
+    await waitForEnd(harness, task.id);
+
+    const started = Date.now();
+    const result = await harness.call("bg_wait", { id: task.id, timeoutSeconds: 600 });
+    const elapsed = Date.now() - started;
+    const details = result.details as TaskDetails & { waited: boolean };
+
+    expect(details.status).toBe("failed");
+    expect(details.exitCode).toBe(4);
+    expect(details.waited).toBe(true);
+    expect(elapsed).toBeLessThan(1000);
+  });
+
+  it("reports an unusable timeout and an unknown id as text, not by throwing", async () => {
+    const dir = await makeTempDir();
+    cleanup.push(dir.dispose);
+    const harness = createHarness({ cwd: dir.path, sessionId: "session-wait-bad" });
+
+    const tooLong = resultText(
+      await harness.call("bg_wait", { id: "b-whatever", timeoutSeconds: 601 }),
+    );
+    expect(tooLong).toContain("no larger than 600");
+    expect(tooLong).toContain("Nothing was waited for");
+
+    const unknown = resultText(await harness.call("bg_wait", { id: "b-unknown" }));
+    expect(unknown).toContain("No background task with id b-unknown in this session.");
+  });
 });
 
 describe("bg_kill", () => {

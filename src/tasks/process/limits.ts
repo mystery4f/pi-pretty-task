@@ -20,6 +20,15 @@ export const OUTPUT_CAP_ENV = "PI_PRETTY_TASK_OUTPUT_CAP_BYTES";
 /** The longest delay `setTimeout` honours; a longer one fires immediately. */
 export const MAX_TIMEOUT_MS = 2_147_483_647;
 
+/** Default wait for `bg_wait`, in seconds. */
+export const DEFAULT_WAIT_SECONDS = 60;
+
+/**
+ * Longest wait `bg_wait` accepts. A wait holds the turn, so its bound is much
+ * tighter than a task's runtime cap.
+ */
+export const MAX_WAIT_SECONDS = 600;
+
 /**
  * Read the output byte cap from the environment.
  *
@@ -52,6 +61,21 @@ export function parseTimeoutSeconds(seconds: number): number {
   if (!Number.isFinite(seconds) || seconds <= 0 || timeoutMs < 1 || timeoutMs > MAX_TIMEOUT_MS) {
     throw new RangeError(
       `timeoutSeconds must be a positive number of seconds no larger than ${String(MAX_TIMEOUT_MS / 1000)}; received ${String(seconds)}`,
+    );
+  }
+  return timeoutMs;
+}
+
+/**
+ * Turn a `bg_wait` timeout into milliseconds. Absent means the tool's default;
+ * an explicit value must stay inside the wait's own, much tighter bound.
+ */
+export function parseWaitSeconds(seconds: number | undefined): number {
+  if (seconds === undefined) return DEFAULT_WAIT_SECONDS * 1000;
+  const timeoutMs = Math.round(seconds * 1000);
+  if (!Number.isFinite(seconds) || seconds <= 0 || seconds > MAX_WAIT_SECONDS || timeoutMs < 1) {
+    throw new RangeError(
+      `timeoutSeconds must be a positive number no larger than ${String(MAX_WAIT_SECONDS)}; received ${String(seconds)}`,
     );
   }
   return timeoutMs;

@@ -18,7 +18,7 @@ import { Type } from "typebox";
 import { commandPreview, formatBytes, formatDuration } from "../base/format.js";
 import type { ProcessTask } from "../base/task.js";
 
-import { parseTimeoutSeconds } from "./limits.js";
+import { parseTimeoutSeconds, parseWaitSeconds } from "./limits.js";
 import type { ProcessTasks, ProcessTaskView, TaskScope } from "./process-tasks.js";
 
 const RunParameters = Type.Object({
@@ -93,8 +93,6 @@ const WaitParameters = Type.Object({
     }),
   ),
 });
-const DEFAULT_WAIT_SECONDS = 60;
-const MAX_WAIT_SECONDS = 600;
 const DEFAULT_LOG_LINES = 50;
 const MAX_LOG_LINES = 2000;
 /**
@@ -319,14 +317,17 @@ export function processTaskTools(tasks: ProcessTasks): ToolDefinition[] {
         );
       }
 
-      const seconds = params.timeoutSeconds ?? DEFAULT_WAIT_SECONDS;
-      if (!(seconds > 0) || seconds > MAX_WAIT_SECONDS) {
-        throw new RangeError(
-          `timeoutSeconds must be a positive number no larger than ${MAX_WAIT_SECONDS}; received ${seconds}`,
-        );
+      // A wait that cannot be counted would hold the turn forever, so a bad
+      // bound is reported before the store is called.
+      let timeoutMs: number;
+      try {
+        timeoutMs = parseWaitSeconds(params.timeoutSeconds);
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        return text(`${reason} Nothing was waited for.`);
       }
 
-      const result = await tasks.wait(scopeOf(ctx), id, parseTimeoutSeconds(seconds));
+      const result = await tasks.wait(scopeOf(ctx), id, timeoutMs);
       if (result === undefined) {
         return text(`No background task with id ${id} in this session.`);
       }
