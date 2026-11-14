@@ -1342,16 +1342,46 @@ describe("recency and search", () => {
     panel.dispose();
   });
 
-  it("filters by an id prefix", async () => {
+  it("matches a query as an in-order subsequence, not as a substring", async () => {
+    const source = new FakeSource();
+    source.rows = [
+      view("bg-aaaaa", { name: "deploy-bg", createdAt: 1_000 }),
+      view("bg-bbbbb", { name: "build-test", createdAt: 2_000 }),
+      view("bg-ccccc", { name: "unit tests", createdAt: 3_000 }),
+    ];
+    const { panel, drawn } = openPanel(source, () => 13_000, plainTheme());
+    await panel.settle();
+
+    panel.handleInput("/");
+    for (const character of "dbg") panel.handleInput(character);
+
+    // `dbg` sits inside `deploy-bg` one letter at a time; no field of the other
+    // two rows carries the three letters in order.
+    expect(drawn()).toContain("deploy-bg");
+    expect(drawn()).not.toContain("build-test");
+    expect(drawn()).not.toContain("unit tests");
+
+    for (let index = 0; index < 3; index += 1) panel.handleInput(BACKSPACE);
+    for (const character of "bldt") panel.handleInput(character);
+
+    // Neither `bldt` nor `bt` is a substring of `build-test`.
+    expect(drawn()).toContain("build-test");
+    expect(drawn()).not.toContain("deploy-bg");
+
+    panel.dispose();
+  });
+
+  it("finds a row by its id", async () => {
     const source = searchFixture();
     const { panel, drawn } = openPanel(source);
     await panel.settle();
 
     panel.handleInput("/");
-    for (const character of "bg-b") panel.handleInput(character);
+    for (const character of "a1b") panel.handleInput(character);
 
-    expect(drawn()).toContain("unit tests");
-    expect(drawn()).not.toContain("web build");
+    // Every id starts `bg-`, so a fuzzy query has to name the part that differs.
+    expect(drawn()).toContain("web build");
+    expect(drawn()).not.toContain("unit tests");
     expect(drawn()).not.toContain("lint run");
 
     panel.dispose();

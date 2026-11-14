@@ -2187,7 +2187,24 @@ function pageKey(data: string, current: PanelTab): PanelTab | undefined {
   return undefined;
 }
 
-/** True when any searchable field of the task contains the query, ignoring case. */
+/**
+ * True when the query's characters all appear in the field, in order: the match
+ * `dbg` makes against `deploy-bg`, where the three letters never sit together.
+ */
+function fuzzyContains(field: string, needle: string): boolean {
+  let from = 0;
+  for (const character of needle) {
+    const at = field.indexOf(character, from);
+    if (at === -1) return false;
+    from = at + 1;
+  }
+  return true;
+}
+
+/**
+ * True when any searchable field of the task carries the query as an in-order
+ * subsequence, ignoring case.
+ */
 function matchesQuery(task: Task, query: string, shown: readonly string[] = []): boolean {
   const needle = query.toLowerCase();
   // The kind word is the one the row prints, so searching `proc` finds the
@@ -2202,7 +2219,7 @@ function matchesQuery(task: Task, query: string, shown: readonly string[] = []):
           // so those are words the reader can see and search for (ADR-0012).
           [task.name, task.id, task.status, kind, ...shown]
         : [task.name, task.id, task.command, task.status, kind];
-  return fields.some((field) => field.toLowerCase().includes(needle));
+  return fields.some((field) => fuzzyContains(field.toLowerCase(), needle));
 }
 
 /** Bracketed paste, as pi-tui hands it to `handleInput`: ESC [200~ … ESC [201~. */
