@@ -42,6 +42,7 @@ Source references from the two upstream plugins are cloned under `.tmp/` (git-ig
 - Every state file write is atomic (temp file + rename) and every read tolerates a corrupt file by falling back to `.prev`.
 - Style is machine-enforced: `.editorconfig` (2 spaces, LF, final newline) plus Biome for both formatting and linting — one tool, so there is no Prettier/ESLint pair to keep in sync. `npm run lint` must be clean before a change is done; do not reformat files you did not otherwise touch.
 
+
 ## Verification
 
 - `npm run check` — typecheck, no emit (`tsconfig.dev.json`, covers `src/` and `test/`).
