@@ -26,11 +26,15 @@ updated: 2026-11-14
 | [0002 Iteration 记录该轮全部工具调用](../../docs/adr/0002-iteration-records-all-tool-calls.md) | 全记，列表只突出命令类 |
 | [0003 面板用状态栏 + 浮层](../../docs/adr/0003-panel-not-persistent-widget.md) | 不做常驻 widget |
 | [0004 参考上游行为，重写代码结构](../../docs/adr/0004-reference-not-fork.md) | 不 fork，抄经验不抄类 |
-| [0005 Task 是 process 与 loop 的上位概念](../../docs/adr/0005-task-is-the-supertype.md) | 一种 Task、两种 kind、一张面板表；Iteration 是子记录 |
+| [0005 Task 是 process 与 loop 的上位概念](../../docs/adr/0005-task-is-the-supertype.md) | 一种 Task、多个 kind、一张面板表；Iteration、Fire、Step 都是子记录 |
 | [0006 调度吃间隔简写与五段 cron](../../docs/adr/0006-cron-alongside-intervals.md) | 两种语法共用一个 `nextFire(after)`；六段拒绝 |
 | [0007 Iteration 历史上限与重启修复](../../docs/adr/0007-iteration-history-cap-and-restart-repair.md) | 各留最近 N 条并计数；重启把未完成的标 interrupted |
 | [0008 命令用哪个 shell、输出按什么编码读](../../docs/adr/0008-shell-choice-and-output-decoding.md) | 环境变量定默认 + `bg_run.shell` 覆盖；读取层 UTF-8 → Windows GB18030 回退 |
 | [0009 唤醒等 agent 空闲，Iteration 绑定它唤醒的那一轮](../../docs/adr/0009-wakes-wait-for-idle-and-bind-their-turn.md) | 自建待发队列、只在空闲时投递；open 待定、投递后 bind；pump 单飞 |
+| [0010 Task 的更新时间要落盘](../../docs/adr/0010-task-recency-is-persisted.md) | `updatedAt` 落盘、按它排序；由状态/触发推动，输出增长不算 |
+| [0011 id 自带你是什么](../../docs/adr/0011-ids-carry-their-kind.md) | `bg-`/`lp-`/`lc-`/`ch-` 前缀，模型与人看 id 就知道种类 |
+| [0012 面板三页、只列根、一条链一行](../../docs/adr/0012-panel-tabs-and-roots.md) | `1/2/3` 切页、只列根、链整条一行、触发与步骤不单独占行 |
+| [0013 链是第四种 kind，持有一条队列](../../docs/adr/0013-chain-is-a-task-kind-holding-a-queue.md) | `kind: "chain"`、`steps` 存 id + 游标、一次一步、只排 process |
 
 ## 工具链与代码风格
 
