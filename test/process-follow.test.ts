@@ -10,6 +10,9 @@
  * @author mystery4f <40482524+mystery4f@users.noreply.github.com>
  */
 
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
+
 import type { AgentToolResult } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -20,6 +23,7 @@ interface TaskDetails {
   id: string;
   status: string;
   outputPath: string;
+  outputBytes: number;
 }
 
 interface FollowDetails {
@@ -84,5 +88,47 @@ describe("bg_logs following a task", () => {
     expect(details.finished).toBe(true);
     expect(details.timedOut).toBe(false);
     expect(text).toContain("nothing more will arrive");
+  });
+
+  it("returns only what was appended since the previous follow call", async () => {
+    const dir = await makeTempDir();
+    cleanup.push(dir.dispose);
+    const trigger = join(dir.path, "write-second-line");
+    const command = await writeScript(
+      dir.path,
+      "two-writes.js",
+      [
+        'const { existsSync } = require("node:fs");',
+        'process.stdout.write("one\\n");',
+        "const timer = setInterval(() => {",
+        `  if (!existsSync(${JSON.stringify(trigger)})) return;`,
+        "  clearInterval(timer);",
+        '  process.stdout.write("two\\n");',
+        "}, 10);",
+        "",
+      ].join("\n"),
+    );
+    const harness = createHarness({ cwd: dir.path, sessionId: "session-follow-delta" });
+    const started = await harness.call("bg_run", { command });
+    const task = started.details as TaskDetails;
+
+    await waitFor("the first line", async () => {
+      const status = await harness.call("bg_status", { id: task.id });
+      return (status.details as TaskDetails).outputBytes >= 4;
+    });
+    const first = followAnswer(await harness.call("bg_logs", { id: task.id, follow: true }));
+    expect(body(first.text)).toBe("one\n");
+
+    await writeFile(trigger, "");
+    await waitFor("the second line", async () => {
+      const status = await harness.call("bg_status", { id: task.id });
+      return (status.details as TaskDetails).outputBytes >= 8;
+    });
+    const second = followAnswer(await harness.call("bg_logs", { id: task.id, follow: true }));
+
+    expect(body(second.text)).toBe("two\n");
+    expect(second.details.from).toBe(4);
+    expect(second.details.offset).toBe(8);
+    expect(second.text).not.toContain("one");
   });
 });

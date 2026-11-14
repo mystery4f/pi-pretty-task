@@ -113,7 +113,10 @@ export async function readOutputFrom(
   try {
     handle = await open(path, "r");
   } catch (error) {
-    if (isFileNotFound(error)) return { text: "", from: Math.max(0, offset), to: Math.max(0, offset), size: 0 };
+    if (isFileNotFound(error)) {
+      const start = Math.max(0, offset);
+      return { text: "", from: start, to: start, size: 0 };
+    }
     throw error;
   }
 
