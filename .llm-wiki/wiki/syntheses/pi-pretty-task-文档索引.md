@@ -38,6 +38,7 @@ updated: 2026-11-14
 | [0014 子记录是记录，不是行](../../docs/adr/0014-children-are-records-not-rows.md) | 触发与步骤是普通 Task、不占列表行、可被 `bg_*` 直接查；计数含子记录；`k` 级联 |
 | [0015 循环行内嵌触发的紧凑条带](../../docs/adr/0015-loop-row-carries-a-fire-strip.md) | 最近 3 次触发 `#43✓ #44✓ #45✗`、旧在左、窄了从左侧丢；回车展开全部 |
 | [0016 子任务的 id 不携带父与序号](../../docs/adr/0016-child-ids-stay-opaque.md) | 触发与步骤都用 `bg-` + 随机；父与序号是字段；别名写 `name#seq (id)` |
+| [0017 重叠跳过、失败退避，不排队](../../docs/adr/0017-overlap-skips-and-failures-back-off.md) | 重叠的触发记 `skipped` 不排队；失败翻倍封顶一小时、成功归位；两个计数落盘 |
 
 ## 工具链与代码风格
 

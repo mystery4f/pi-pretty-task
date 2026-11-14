@@ -1061,10 +1061,20 @@ export class TasksPanel implements Component {
     // The name column is as wide as the longest name, not as wide as the terminal:
     // a fixed split leaves a canyon between the name and the id on a wide screen.
     const name = theme.fg(nameColour(task), pad(task.name, nameRoom));
-    const right = theme.fg("dim", rightText(row, this.now()));
     const growth = this.growthText(row);
-
     const headPlain = ` ${pointer} ${dot} ${name} ${id} ${separator} ${kind} ${status}${exit} `;
+    // The numbers get the room the head leaves, minus one space of gap, so they can
+    // shed their least important parts instead of pushing the row past the border.
+    // The room is measured on the bare cells: a theme adds markup, and only the
+    // characters a reader sees should cost a number its place.
+    const headCells = ` ${selected ? "›" : " "} ● ${pad(task.name, nameRoom)} ${pad(
+      task.id,
+      ID_COLUMN_WIDTH,
+    )} · ${kindWord(task.kind)} ${pad(task.status, 11)}${exitText(task) === "" ? "" : ` ${exitText(task)}`} `;
+    const right = theme.fg(
+      "dim",
+      rightText(row, this.now(), width - 2 - visibleWidth(headCells) - visibleWidth(growth) - 1),
+    );
     // The strip is a command loop's own column: the newest fires, oldest left, so a
     // failure count can never hide a run that never happened (ADR-0015). It drops
     // its oldest cells on a narrow row and disappears entirely before wrapping.
@@ -1258,13 +1268,17 @@ export class TasksPanel implements Component {
       this.field("Runtime", formatDuration(row.elapsedMs)),
       this.field("Updated", this.updatedText(task.updatedAt)),
       this.field("Schedule", task.schedule),
-      this.field("Fires", firesText(task)),
-      this.field("Next fire", nextFireText(task, row)),
+      this.field("Fires", `${firesText(task)}${missedText(task)}`),
+      this.field("Next fire", nextFireText(task, row, failureStreak(task) > 0)),
       this.field(
         "Last fire",
         task.lastFireAt === undefined ? "—" : formatClockTime(task.lastFireAt),
       ),
     ];
+    // A streak explains why the next fire is later than the expression says, so
+    // it sits with the schedule facts and never rewrites them (ADR-0017).
+    const streak = failureStreak(task);
+    if (streak > 0) body.push(this.field("Failures", `${String(streak)} in a row`));
     if (task.expiresAt !== undefined) {
       body.push(this.field("Expires", formatClockTime(task.expiresAt)));
     }
@@ -1443,16 +1457,32 @@ function exitText(task: Task): string {
  * changed; a loop its fires, schedule and the same age. Recency sits on the right so a
  * row that just moved to the top says why (ADR-0010).
  */
-function rightText(row: PanelTaskView, now: number): string {
+function rightText(row: PanelTaskView, now: number, room = Number.POSITIVE_INFINITY): string {
   const task = row.task;
   const elapsed = formatDuration(row.elapsedMs);
   const age = ` · ${formatDuration(Math.max(0, now - task.updatedAt))} ago`;
   if (task.kind === "process") return `${elapsed} ${formatSize(row)}${age}`;
   // A loop has no exit code and no bytes: it reports the fires it made and how
-  // long until the next one, which is the whole question while it is running.
+  // long until the next one, which is the whole question while it is running. A
+  // failure streak sits next to the count, and the wait it pushed out is labelled
+  // a backoff so the two read together (ADR-0017).
+  const streak = failureStreak(task);
+  const failed = streak === 0 ? "" : ` · ${String(streak)} failed`;
+  const state = `${elapsed} · ${firesText(task)} fires${failed}`;
+  const backingOff = streak > 0 ? " (backoff)" : "";
   const next =
-    row.untilNextFireMs === undefined ? "" : ` · next ${formatDuration(row.untilNextFireMs)}`;
-  return `${elapsed} · ${firesText(task)} fires${next}${age}`;
+    row.untilNextFireMs === undefined
+      ? undefined
+      : ` · next ${formatDuration(row.untilNextFireMs)}`;
+  // The state the ticket asks the row to carry is the streak and the backoff, so
+  // the age gives way first, then the word marking the wait a backoff, then the
+  // wait itself. Nothing is ever cut mid-number and the row never wraps (ADR-0015).
+  const candidates = [
+    `${state}${next ?? ""}${backingOff}${age}`,
+    `${state}${next ?? ""}${backingOff}`,
+    ...(next === undefined ? [] : [`${state}${next}`, state]),
+  ];
+  return candidates.find((candidate) => visibleWidth(candidate) <= room) ?? state;
 }
 
 function pad(text: string, width: number): string {
@@ -1510,13 +1540,26 @@ function firesText(task: LoopBase): string {
   if (task.maxFires === undefined) return String(task.fires);
   return `${String(task.fires)} / ${String(task.maxFires)}`;
 }
+/**
+ * Failed fires in a row on a command loop. Only a fire that ran can fail, so an
+ * llm loop never carries a streak and its rows never claim one (ADR-0017).
+ */
+function failureStreak(task: Task): number {
+  return task.kind === "cmd-loop" ? (task.consecutiveFailures ?? 0) : 0;
+}
 
-function nextFireText(task: LoopBase, row: PanelTaskView): string {
+/** Fires that never ran because the previous one still was, appended to the count. */
+function missedText(task: CmdLoopTask): string {
+  const missed = task.missedFires ?? 0;
+  return missed === 0 ? "" : ` · ${String(missed)} skipped`;
+}
+
+function nextFireText(task: LoopBase, row: PanelTaskView, backingOff = false): string {
   if (task.nextFireAt === undefined) return "—";
   const at = formatClockTime(task.nextFireAt);
-  return row.untilNextFireMs === undefined
-    ? at
-    : `${at} (in ${formatDuration(row.untilNextFireMs)})`;
+  if (row.untilNextFireMs === undefined) return at;
+  const wait = `${formatDuration(row.untilNextFireMs)}${backingOff ? ", backoff" : ""}`;
+  return `${at} (in ${wait})`;
 }
 
 /** Iteration list heading: kept and dropped counts are both stated, never hidden. */
