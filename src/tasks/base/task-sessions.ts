@@ -70,12 +70,26 @@ export class TaskSessions {
     const existing = this.sessions.get(directory);
     if (existing !== undefined) return existing;
 
-    const opened = this.open(directory);
+    const opened = this.open(directory, true);
     this.sessions.set(directory, opened);
     return opened;
   }
 
-  /** Every session touched so far, for work that belongs to no single turn (the pump). */
+  /**
+   * The session's records read from disk without joining the shared map, and
+   * without making its directory. Looking at another session's records goes
+   * through here: a session this extension is not running in must never become
+   * one it holds, pumps or writes.
+   */
+  read(scope: TaskScope): Promise<TaskSession> {
+    return this.open(sessionTaskDirectory(scope.cwd, scope.sessionId), false);
+  }
+
+  /**
+   * Every session this hub holds, own and merely visited. Work that belongs to no
+   * single turn (a chain step ending) looks a record up here; the loop pump does
+   * not, because a session that was only ever looked at must never be fired.
+   */
   loaded(): Promise<TaskSession[]> {
     return Promise.all([...this.sessions.values()]);
   }
@@ -104,8 +118,12 @@ export class TaskSessions {
     }
   }
 
-  private async open(directory: string): Promise<TaskSession> {
-    await mkdir(directory, { recursive: true });
+  /**
+   * `create` says whether this is a session the extension writes to: only then is
+   * its directory made, so a read of another session leaves the filesystem alone.
+   */
+  private async open(directory: string, create: boolean): Promise<TaskSession> {
+    if (create) await mkdir(directory, { recursive: true });
     const store = new TaskStore(directory, { now: this.now });
     const tasks = new Map<string, Task>();
     for (const record of await store.load()) tasks.set(record.id, record);

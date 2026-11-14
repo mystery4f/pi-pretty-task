@@ -240,12 +240,16 @@ export class LoopTasks {
     | undefined;
   private readonly onCancel: ((taskId: string) => Promise<void> | void) | undefined;
   /**
-   * The scope each loaded session was opened with, keyed by state directory. A
-   * fire starts a process task in the same session, and a {@link TaskSession}
-   * holds directory and records but not the cwd and session id the process store
-   * is keyed by.
+   * The scopes this extension owns, keyed by state directory: the session it runs
+   * in, plus any scope it wrote to. Only these are pumped. A {@link TaskScope}
+   * carries the cwd and session id a fired command's process store is keyed by,
+   * which a {@link TaskSession} does not.
+   *
+   * Looking at another session's loops is a read, and a read never lands here:
+   * otherwise a due schedule of a session we merely displayed would fire in this
+   * one — waking this session and writing that session's records.
    */
-  private readonly scopes = new Map<string, TaskScope>();
+  private readonly owned = new Map<string, TaskScope>();
   /** The pump in flight, so a timer tick and a turn end cannot interleave. */
   private inFlight: Promise<void> | undefined;
 
@@ -257,9 +261,12 @@ export class LoopTasks {
     this.onCancel = options.onCancel;
   }
 
-  /** Load the session so the pump sees it even before the first loop-tool call. */
+  /**
+   * Take ownership of the session at `session_start`, so the pump sees its loops
+   * even before the first loop-tool call.
+   */
   async attach(scope: TaskScope): Promise<void> {
-    this.rememberScope(scope);
+    this.ownScope(scope);
     await this.sessions.session(scope);
   }
 
@@ -316,7 +323,8 @@ export class LoopTasks {
       expiresAt = this.now() + duration;
     }
 
-    this.rememberScope(input);
+    // Creating a loop is a write, and a scope this store writes to is one it owns.
+    this.ownScope(input);
     const session = await this.sessions.session(input);
     const active = [...session.tasks.values()].filter(
       (task) =>
@@ -379,18 +387,20 @@ export class LoopTasks {
     return this.view(task);
   }
 
-  /** Loops of the session, in record order, finished ones included as history. */
+  /**
+   * Loops of the session, in record order, finished ones included as history. A
+   * read of another session's loops is the panel's "others" view: it goes through
+   * {@link readSession}, so displaying them never makes them this session's to fire.
+   */
   async list(scope: TaskScope): Promise<LoopTaskView[]> {
-    this.rememberScope(scope);
-    const session = await this.sessions.session(scope);
+    const session = await this.readSession(scope);
     return [...session.tasks.values()]
       .filter((task) => task.kind === "prompt-loop" || task.kind === "cmd-loop")
       .map((task) => this.view(task));
   }
 
   async get(scope: TaskScope, id: string): Promise<LoopTaskView | undefined> {
-    this.rememberScope(scope);
-    const session = await this.sessions.session(scope);
+    const session = await this.readSession(scope);
     const task = this.findLoop(session, id);
     return task === undefined ? undefined : this.view(task);
   }
@@ -404,7 +414,7 @@ export class LoopTasks {
    * the record changes, on the same message `loop_create` gives (ADR-0006).
    */
   async update(input: UpdateLoopInput): Promise<LoopUpdateResult | undefined> {
-    this.rememberScope(input);
+    this.ownScope(input);
     const session = await this.sessions.session(input);
     const task = this.findLoop(session, input.id);
     if (task === undefined) return undefined;
@@ -524,7 +534,7 @@ export class LoopTasks {
   }
 
   async delete(scope: TaskScope, id: string): Promise<LoopTaskView | undefined> {
-    this.rememberScope(scope);
+    this.ownScope(scope);
     const session = await this.sessions.session(scope);
     const task = this.findLoop(session, id);
     if (task === undefined) return undefined;
@@ -568,7 +578,7 @@ export class LoopTasks {
    * (deleted, or history trimmed), so a late child can never resurrect a record.
    */
   async completeFire(result: FireResult): Promise<CompletedFire | undefined> {
-    for (const session of await this.sessions.loaded()) {
+    for (const { session } of await this.ownedSessions()) {
       const loop = this.findCmdLoop(session, result.parentId);
       if (loop === undefined) continue;
       const fire = loop.fireHistory.find((entry) => entry.fire === result.fire);
@@ -610,7 +620,7 @@ export class LoopTasks {
     const fires: LoopFire[] = [];
     const commandFires: CommandFire[] = [];
 
-    for (const session of await this.sessions.loaded()) {
+    for (const { scope, session } of await this.ownedSessions()) {
       let changed = false;
 
       for (const record of session.tasks.values()) {
@@ -660,20 +670,9 @@ export class LoopTasks {
         }
 
         this.pushFire(record, { fire, at, outcome: "running", startedAt: at });
-        const scope = this.scopes.get(session.directory);
-        if (scope === undefined) {
-          // Every loaded session came through a scope, so this is a hole, not a
-          // policy: fail the fire loudly instead of guessing a directory.
-          const entry = record.fireHistory.at(-1);
-          if (entry !== undefined) {
-            entry.outcome = "failed";
-            entry.endedAt = at;
-            entry.error = "the loop's session scope is unknown";
-          }
-          this.noteFailure(record, at);
-        } else {
-          commandFires.push({ task: record, at, fire, session, scope });
-        }
+        // The scope came with the session: the pump only walks scopes it owns, so a
+        // command always knows which session's cwd and store the child belongs to.
+        commandFires.push({ task: record, at, fire, session, scope });
         this.advanceSchedule(record, recurrence, at);
       }
 
@@ -796,10 +795,35 @@ export class LoopTasks {
     loop.nextFireAt = Math.max(loop.nextFireAt, at + delay);
   }
 
-  private rememberScope(scope: TaskScope): void {
-    // Keyed exactly as TaskSessions keys its map, so a fire finds its scope
-    // from the session alone.
-    this.scopes.set(sessionTaskDirectory(scope.cwd, scope.sessionId), scope);
+  /** A scope this extension runs in or writes to: the only kind the pump drives. */
+  private ownScope(scope: TaskScope): void {
+    // Keyed exactly as TaskSessions keys its map, so the same session is meant
+    // by both.
+    this.owned.set(sessionTaskDirectory(scope.cwd, scope.sessionId), scope);
+  }
+
+  /**
+   * The session a read looks at. A scope this extension owns is the shared, live
+   * session; any other is read from disk and never joins the hub, so a session
+   * that is only being displayed cannot be pumped, woken or written.
+   */
+  private readSession(scope: TaskScope): Promise<TaskSession> {
+    const directory = sessionTaskDirectory(scope.cwd, scope.sessionId);
+    return this.owned.has(directory) ? this.sessions.session(scope) : this.sessions.read(scope);
+  }
+
+  /**
+   * The sessions the pump drives, each with the scope that fires its commands.
+   * Deliberately not `TaskSessions.loaded()`: that set also holds sessions a panel
+   * merely visited, and a visit must never fire their schedules.
+   */
+  private ownedSessions(): Promise<Array<{ scope: TaskScope; session: TaskSession }>> {
+    return Promise.all(
+      [...this.owned.values()].map(async (scope) => ({
+        scope,
+        session: await this.sessions.session(scope),
+      })),
+    );
   }
 
   private findLoop(session: TaskSession, id: string): LoopTask | undefined {
