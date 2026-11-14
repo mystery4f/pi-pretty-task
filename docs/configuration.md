@@ -1,6 +1,6 @@
 # 配置与上限
 
-本文档说明 v0.1 的全部配置面：命令在哪个 shell 里跑、输出字节上限，以及 `bg_run` 每次可以自带的运行超时、工作目录与环境变量。上限与超时都以“终止原因”收尾，见 `GLOSSARY.md` 的 Process task 条目；shell 与解码的决定见 `docs/adr/0008-shell-choice-and-output-decoding.md`。
+本文档说明当前的配置面：命令在哪个 shell 里跑、输出字节上限、`bg_run` 每次可以自带的运行超时/工作目录/环境变量，以及按名字复用的命令模板。上限与超时都以“终止原因”收尾，见 `GLOSSARY.md` 的 Process task 条目；shell 与解码的决定见 `docs/adr/0008-shell-choice-and-output-decoding.md`。
 
 ## 命令在哪个 shell 里跑
 
@@ -118,10 +118,36 @@ Working directory /work/project/no-such-dir does not exist. The task was not sta
 
 `env` 合并到扩展自身的 `process.env` 之上，只作用于这个子进程；空字符串也是值，可以把变量清空。`undefined` 或非字符串会被 schema 拒绝。**`env` 不落盘**：名字和值都不写进 `.pi/tasks/<session>/tasks.json`，也没有任何工具会把值打印出来——文件里的记录不是存放 token 的地方，而进程启动时已经拿到了它。
 
-## 为什么只有环境变量
+## 命名模板
+`bg_run` 可以把一组常用参数写成模板，用一个名字代替整条命令。模板来自两个 `pretty-task.json`：项目文件优先，同名模板整个由项目文件覆盖；只写在 agent 文件里的名字照样可用。
 
-配置只来自环境，一个键一种形状，没有配置文件方言——见 `docs/scope-v1.md`。这样测试可以把一份显式环境交给扩展入口，宿主也可以用同样的方式传入，而“读哪里、什么时候校验”只有一个答案。
+| 位置 | 路径 |
+|---|---|
+| 项目 | `<项目根>/.pi/pretty-task.json` |
+| agent 设置目录 | `$PI_CODING_AGENT_DIR/pretty-task.json`（默认 `~/.pi/agent/pretty-task.json`） |
+形状：
+```
+{
+  "templates": {
+    "test": { "command": "npm test -- --run", "cwd": "packages/app", "timeoutSeconds": 600 }
+  }
+}
+```
+调用时只给模板名，命令、目录和超时都来自模板：
+```
+bg_run({ "template": "test" })
+```
+模板字段与 `bg_run` 的同名参数含义相同：`cwd` 仍按会话目录解析，`timeoutSeconds` 仍受上面的上限约束。调用里显式给出的 `command`、`cwd`、`timeoutSeconds` 优先于模板，模板不会悄悄盖掉它们。模板不携带 `env`，需要环境变量的调用自己传。
+名字不存在时任务不会创建，错误信息列出当前已知的名字：
+```
+Unknown template "tset". Known templates: "lint", "test". The task was not started.
+```
+任一文件解析失败只影响该文件：错误写到 stderr，带上文件路径和具体位置（例如 `invalid JSON (...)`、`template "test".command must be a non-empty string`），扩展继续加载，另一个文件里的模板照常可用。
+
+## 为什么上限与 shell 只来自环境变量
+
+上限与 shell 的选择只来自环境变量，一个键一种形状——见 `docs/scope-v1.md`。这样测试可以把一份显式环境交给扩展入口，宿主也可以用同样的方式传入，而“读哪里、什么时候校验”只有一个答案。唯一例外是命名模板：模板要跨会话复用，所以放在项目与 agent 的 `pretty-task.json`；它同样在扩展入口读一次、校验一次，坏文件只报告，不阻断加载。
 
 ## 上限如何落到进程上
 
-上限由 `src/tasks/process/limits.ts` 解析，shell 策略由 `src/tasks/process/shell.ts` 解析；扩展入口 `src/index.ts` 在注册任何工具之前调用两者，解析结果交给 `ProcessTasks`，由其传给 supervisor 的输出写入点与 `spawn` 调用。`bg_run` 的 `shell` 在 `spawn` 之前解析完，不支持的取值不会留下一条跑不起来的记录。超限与超时都不引入第二套终止机制：它们只是带着原因调用 `ProcessTasks.stop()`，与 `bg_kill` 走同一条路。读输出时 `src/tasks/base/decode.ts` 是唯一解码点，`src/tasks/base/output.ts` 的尾巴读取与 `bg_logs` 的整段读取共用它。
+上限由 `src/tasks/process/limits.ts` 解析，shell 策略由 `src/tasks/process/shell.ts` 解析；扩展入口 `src/index.ts` 在注册任何工具之前调用两者并读取模板文件；上限与 shell 的解析结果交给 `ProcessTasks`，由其传给 supervisor 的输出写入点与 `spawn` 调用。`bg_run` 的 `shell` 在 `spawn` 之前解析完，不支持的取值不会留下一条跑不起来的记录。超限与超时都不引入第二套终止机制：它们只是带着原因调用 `ProcessTasks.stop()`，与 `bg_kill` 走同一条路。读输出时 `src/tasks/base/decode.ts` 是唯一解码点，`src/tasks/base/output.ts` 的尾巴读取与 `bg_logs` 的整段读取共用它。

@@ -14,7 +14,8 @@
 
 import { stat } from "node:fs/promises";
 import { resolve } from "node:path";
-import { type OutputTail, readOutputTail } from "../base/output.js";
+import { setTimeout as sleep } from "node:timers/promises";
+import { type OutputTail, readOutputFrom, readOutputTail } from "../base/output.js";
 import { processOutputPath, sessionTaskDirectory, type TaskScope } from "../base/runtime-state.js";
 import type { KillReason, ProcessTask, Task } from "../base/task.js";
 import { type TaskSession, TaskSessions } from "../base/task-sessions.js";
@@ -96,6 +97,24 @@ export interface WaitTaskResult {
   waited: boolean;
 }
 
+/** What a follow read answered: the new bytes, and where the cursor now sits. */
+export interface FollowTaskResult {
+  /** The record as it stood when the read returned. */
+  view: ProcessTaskView;
+  /** Output appended since this task's previous follow read, decoded as text. */
+  delta: string;
+  /** Offset the read started at. */
+  from: number;
+  /** Offset just past the bytes read; the next follow read starts here. */
+  offset: number;
+  /** Bytes in `delta`. */
+  deltaBytes: number;
+  /** True when the task has ended and the file has been read to its end. */
+  finished: boolean;
+  /** True when the window passed with no new bytes; the task may still be running. */
+  timedOut: boolean;
+}
+
 export interface ProcessTasksOptions {
   platform?: NodeJS.Platform;
   env?: NodeJS.ProcessEnv;
@@ -142,6 +161,13 @@ interface SessionTasks extends TaskSession {
    * a wait is woken by the end event instead of polling the record.
    */
   readonly waiters: Map<string, Set<() => void>>;
+  /**
+   * Where each task's follow read has reached, in output bytes. Follow is the
+   * only reader that moves a cursor, so a plain `bg_logs` tail neither seeds nor
+   * consumes one; nothing here is persisted because a cursor belongs to the
+   * session that asked, not to the task.
+   */
+  readonly followOffsets: Map<string, number>;
 }
 
 const NAME_LIMIT = 48;
@@ -151,6 +177,13 @@ const NAME_LIMIT = 48;
  * gone. Past that, the stop settles the record itself.
  */
 const EXIT_WAIT_MS = 2000;
+
+/**
+ * How often a follow read looks at the output file while it waits for new
+ * bytes. Small enough that a line shows up promptly, large enough that a
+ * minute-long follow is a few thousand stats, not a busy loop.
+ */
+const FOLLOW_POLL_MS = 50;
 
 /** Map the supervisor's answer onto the store's, which speaks of tasks. */
 const STOP_OUTCOMES: Record<StopOutcome, StopTaskOutcome> = {
@@ -339,6 +372,60 @@ export class ProcessTasks {
     // `bg_logs`, the panel and a completion notice alike (ADR-0008).
     const tail = await readOutputTail(task.outputPath, { ...options, platform: this.platform });
     return { view: this.view(session, task), tail };
+  }
+
+  /**
+   * The output appended to a task's file since this task's previous follow read.
+   * Undefined when the session has no such task. The cursor is in memory and
+   * belongs to the session: it starts at the beginning of the file, moves only
+   * past bytes an answer actually carried, and a plain tail read leaves it
+   * alone. `finished` says the record has ended, so no later read will grow.
+   * A read waits up to `timeoutMs` for new bytes and returns as soon as some
+   * arrive; an empty delta with `timedOut` is an answer, not an error.
+   */
+  async follow(
+    scope: TaskScope,
+    id: string,
+    timeoutMs: number,
+  ): Promise<FollowTaskResult | undefined> {
+    const session = await this.session(scope);
+    const task = session.tasks.get(id);
+    if (task === undefined || task.kind !== "process") return undefined;
+
+    const deadline = this.now() + timeoutMs;
+    for (;;) {
+      const from = session.followOffsets.get(id) ?? 0;
+      const read = await readOutputFrom(task.outputPath, from, { platform: this.platform });
+      session.followOffsets.set(id, read.to);
+      const finished = task.endedAt !== undefined;
+      if (read.text.length > 0 || finished) {
+        return {
+          view: this.view(session, task),
+          delta: read.text,
+          from: read.from,
+          offset: read.to,
+          deltaBytes: read.to - read.from,
+          finished,
+          timedOut: false,
+        };
+      }
+
+      // Nothing yet: give the process a moment, then look again. A finished
+      // task never reaches this wait, so an ended task answers at once.
+      const remaining = deadline - this.now();
+      if (remaining <= 0) {
+        return {
+          view: this.view(session, task),
+          delta: "",
+          from: read.from,
+          offset: read.to,
+          deltaBytes: 0,
+          finished: false,
+          timedOut: true,
+        };
+      }
+      await sleep(Math.min(FOLLOW_POLL_MS, remaining));
+    }
   }
 
   /**
@@ -587,6 +674,7 @@ export class ProcessTasks {
       limitReasons: new Map(),
       runtimeCaps: new Map(),
       waiters: new Map(),
+      followOffsets: new Map(),
     };
   }
 

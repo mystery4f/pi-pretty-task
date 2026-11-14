@@ -80,3 +80,24 @@ export function parseWaitSeconds(seconds: number | undefined): number {
   }
   return timeoutMs;
 }
+
+/** Default window `bg_logs` follows a task's output for, in seconds. */
+export const DEFAULT_FOLLOW_SECONDS = 10;
+
+/** Longest window a single follow read may hold the turn for. */
+export const MAX_FOLLOW_SECONDS = 60;
+
+/**
+ * Turn a `bg_logs` follow window into milliseconds. Absent means the tool's
+ * default; an explicit value must stay inside the follow's tighter bound.
+ */
+export function parseFollowSeconds(seconds: number | undefined): number {
+  if (seconds === undefined) return DEFAULT_FOLLOW_SECONDS * 1000;
+  const windowMs = Math.round(seconds * 1000);
+  if (!Number.isFinite(seconds) || seconds <= 0 || seconds > MAX_FOLLOW_SECONDS || windowMs < 1) {
+    throw new RangeError(
+      `timeoutSeconds must be a positive number no larger than ${String(MAX_FOLLOW_SECONDS)}; received ${String(seconds)}`,
+    );
+  }
+  return windowMs;
+}
