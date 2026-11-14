@@ -242,14 +242,17 @@ interface Opened {
  */
 function plainTheme(): Theme {
   const plain = (_colour: string, text: string): string => text;
+  // A weight or a slant takes the text alone, so it cannot share the two-argument
+  // shape of a colour: a stray colour argument would be read as the text itself.
+  const decorate = (text: string): string => text;
   return {
     fg: plain,
     bg: plain,
-    bold: plain,
-    italic: plain,
-    underline: plain,
-    inverse: plain,
-    strikethrough: plain,
+    bold: decorate,
+    italic: decorate,
+    underline: decorate,
+    inverse: decorate,
+    strikethrough: decorate,
   } as unknown as Theme;
 }
 
@@ -1736,5 +1739,191 @@ describe("command loops in the list and in the detail", () => {
     expect(second.drawn()).toContain("nightly probe");
     expect(second.drawn()).toContain("nightly review");
     second.panel.dispose();
+  });
+});
+
+describe("chains in the list and in the detail", () => {
+  const CHAIN = "ch-abcde";
+
+  /**
+   * One chain of three steps as the store keeps them: the steps are ordinary process
+   * records with a `parentId`, so the panel resolves them by id and never lists them
+   * as rows of their own (ADR-0014).
+   */
+  function chainOf(names: readonly string[] = ["build", "deploy", "smoke"]): PanelTaskView[] {
+    const ids = names.map((_, index) => `bg-0000${String(index + 1)}`);
+    const steps = names.map((name, index) =>
+      view(
+        ids[index] ?? "bg-00000",
+        {
+          name,
+          parentId: CHAIN,
+          status: index === 0 ? "completed" : index === 1 ? "running" : "waiting",
+          createdAt: 1_000 + index * 2_000,
+          updatedAt: 3_000 + index * 2_000,
+          ...(index === 0 ? { exitCode: 0, endedAt: 3_000 } : {}),
+        },
+        3_000,
+      ),
+    );
+    return [
+      chainView(
+        CHAIN,
+        { name: "build", steps: ids, cursor: 1, createdAt: 1_000, updatedAt: 5_000 },
+        12_000,
+      ),
+      ...steps,
+    ];
+  }
+
+  it("draws a chain as one row of steps, the running one in the accent colour", async () => {
+    const source = new FakeSource();
+    source.rows = chainOf();
+    const { theme, painted } = recordingTheme();
+    const { panel, drawn } = await openOn("chains", source, () => 13_000, theme);
+    await panel.settle();
+
+    const lines = panel
+      .render(WIDTH)
+      .join("\n")
+      .split("\n")
+      .filter((line) => line.includes("build → deploy → smoke"));
+    expect(lines).toHaveLength(1);
+    // The chain is one row: its steps never get rows of their own.
+    expect(drawn()).not.toContain("bg-00002");
+    expect(drawn()).not.toContain("1/3");
+    expect(drawn()).toContain("2/3");
+    // The step being worked on is the one the page points at.
+    expect(painted).toContainEqual({ colour: "accent", text: "deploy" });
+    expect(painted).toContainEqual({ colour: "success", text: "build" });
+    expect(painted).toContainEqual({ colour: "muted", text: "smoke" });
+
+    panel.dispose();
+  });
+
+  it("sheds the finished steps on a narrow row and keeps the running one", async () => {
+    const source = new FakeSource();
+    source.rows = chainOf(["compile assets", "deploy edge", "smoke test"]);
+    const { panel } = await openOn("chains", source, () => 13_000, plainTheme());
+    await panel.settle();
+
+    const narrow = panel.render(70).join("\n");
+    expect(narrow).toContain("deploy edge");
+    expect(narrow).not.toContain("compile assets");
+    expect(narrow).toContain("…");
+    // Nothing wraps: every line still fits the width it was given.
+    for (const line of panel.render(70)) expect(visibleWidth(line)).toBeLessThanOrEqual(70);
+
+    panel.dispose();
+  });
+
+  it("opens the chain detail on its steps, in run order, with what each ended with", async () => {
+    const source = new FakeSource();
+    source.rows = chainOf();
+    const { panel, drawn } = await openOn("chains", source, () => 13_000, plainTheme());
+    await panel.settle();
+
+    panel.handleInput(ENTER);
+    await panel.settle();
+
+    const text = drawn();
+    expect(text).toContain("chain: build");
+    expect(text).toContain("1 of 3 done · step 2 of 3");
+    const build = text.indexOf("1. build");
+    const deploy = text.indexOf("2. deploy");
+    const smoke = text.indexOf("3. smoke");
+    expect(build).toBeGreaterThan(-1);
+    expect(build).toBeLessThan(deploy);
+    expect(deploy).toBeLessThan(smoke);
+    // Every line carries its status, its duration and, where it has one, its exit code.
+    expect(text).toMatch(/1\. build\s+completed\s+2\.0s\s+exit 0/);
+    expect(text).toMatch(/2\. deploy\s+running\s+10\.0s\b/);
+    // A step that has not run yet has no duration and no exit code to report.
+    expect(text).toMatch(/3\. smoke\s+waiting\s+—/);
+
+    panel.dispose();
+  });
+
+  it("stops the whole chain from the running step on k, never a step of its own", async () => {
+    const source = new FakeSource();
+    source.rows = chainOf();
+    const { panel, source: fake, drawn } = await openOn("chains", source);
+    await panel.settle();
+
+    panel.handleInput("k");
+    await panel.settle();
+
+    expect(fake.stopped).toEqual([CHAIN]);
+    expect(drawn()).toContain(`stopped ${CHAIN}`);
+    expect(fake.stopped).not.toContain("bg-00002");
+
+    panel.dispose();
+  });
+
+  it("refuses to rerun a chain and to name an output file it does not have", async () => {
+    const source = new FakeSource();
+    source.rows = chainOf();
+    const { panel, drawn } = await openOn("chains", source);
+    await panel.settle();
+
+    panel.handleInput("R");
+    await panel.settle();
+    expect(drawn()).toContain("A chain is a queue; run its steps again with bg_run.");
+    expect(source.reran).toEqual([]);
+
+    panel.handleInput("c");
+    await panel.settle();
+    expect(drawn()).toContain("a chain writes no output of its own");
+
+    panel.dispose();
+  });
+
+  it("finds a chain by a step name its row shows, and by no word it leaves out", async () => {
+    const source = new FakeSource();
+    source.rows = chainOf().map((row) =>
+      row.task.kind === "process" && row.task.name === "deploy"
+        ? { ...row, task: { ...row.task, command: "curl -sf https://edge" } }
+        : row,
+    );
+    const { panel, drawn } = await openOn("chains", source, () => 13_000, plainTheme());
+    await panel.settle();
+
+    panel.handleInput("/");
+    for (const character of "deploy") panel.handleInput(character);
+    await panel.settle();
+    expect(drawn()).toContain("build → deploy → smoke");
+
+    // A step's command is not on the row, so it must not bring the row back.
+    for (let index = 0; index < "deploy".length; index += 1) panel.handleInput("\u007f");
+    for (const character of "curl") panel.handleInput(character);
+    await panel.settle();
+    expect(drawn()).toContain("Nothing on this page matches the search");
+    expect(drawn()).not.toContain("build → deploy → smoke");
+
+    panel.dispose();
+  });
+
+  it("counts a fire the pages never give a row, as ADR 0014 asks", async () => {
+    const source = new FakeSource();
+    source.rows = [
+      view("bg-aaaaa", { name: "server", status: "running" }),
+      view("bg-bbbbb", { name: "unit tests", status: "completed", exitCode: 0 }),
+      // The failing fire of some command loop: a record, not a row.
+      view("bg-ccccc", {
+        name: "watch loop #7",
+        parentId: "lc00001",
+        fire: 7,
+        status: "failed",
+        exitCode: 1,
+      }),
+    ];
+    const { panel, drawn } = await openOn("processes", source, () => 13_000, plainTheme());
+    await panel.settle();
+
+    expect(drawn()).toContain("Failed 1");
+    expect(drawn()).toContain("Running 1");
+    expect(drawn()).not.toContain("watch loop #7");
+
+    panel.dispose();
   });
 });

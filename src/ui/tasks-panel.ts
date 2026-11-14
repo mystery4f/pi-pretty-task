@@ -23,6 +23,7 @@ import {
 import { formatBytes, formatClockTime, formatDuration } from "../tasks/base/format.js";
 import type { OutputTail } from "../tasks/base/output.js";
 import type {
+  ChainTask,
   CmdLoopTask,
   FireOutcome,
   FireRecord,
@@ -30,6 +31,7 @@ import type {
   LoopBase,
   Task,
   TaskKind,
+  TaskStatus,
 } from "../tasks/base/task.js";
 import type {
   Iteration,
@@ -298,9 +300,23 @@ export class TasksPanel implements Component {
   private applyFilters(): void {
     const roots = this.allRows.filter((row) => inTab(row.task, this.tab));
     const kept = roots.filter((row) => passesFilter(row.task, this.filter));
-    this.rows =
-      this.query.length === 0 ? kept : kept.filter((row) => matchesQuery(row.task, this.query));
+    this.rows = this.query.length === 0 ? kept : kept.filter((row) => this.matchesQuery(row.task));
     this.keepSelection();
+  }
+
+  /**
+   * Whether a row matches the query. A chain row displays its step names, so those are
+   * matchable words; nothing a row does not display — a step's command, a fire's id —
+   * can bring a row back (ticket #27).
+   */
+  private matchesQuery(task: Task): boolean {
+    const shown =
+      task.kind === "chain" ? task.steps.map((id) => this.stepRecord(id)?.name ?? "") : [];
+    return matchesQuery(
+      task,
+      this.query,
+      shown.filter((name) => name !== ""),
+    );
   }
 
   /** Hold the selected task across a refresh, or fall back to the first row. */
@@ -838,6 +854,14 @@ export class TasksPanel implements Component {
       this.paint();
       return;
     }
+    if (row.task.kind === "chain") {
+      // A chain is a queue, and its steps are the commands: `R` has nothing to repeat
+      // here, so the panel says so instead of starting something the reader did not ask
+      // for. Starting the same pipeline again is a `bg_run` with the same `after`.
+      this.notice = "A chain is a queue; run its steps again with bg_run.";
+      this.paint();
+      return;
+    }
     if (row.task.kind !== "process") {
       this.notice = "A loop is scheduled, not run; create a new one instead.";
       this.paint();
@@ -878,7 +902,9 @@ export class TasksPanel implements Component {
         ? `output: ${task.outputPath}`
         : task.kind === "cmd-loop" && task.lastOutputPath !== undefined
           ? `output: ${task.lastOutputPath}`
-          : "a loop writes no output file";
+          : task.kind === "chain"
+            ? "a chain writes no output of its own; each step has its own file."
+            : "a loop writes no output file";
     this.paint();
   }
 
@@ -1102,11 +1128,15 @@ export class TasksPanel implements Component {
     }
 
     // One name column for the whole page, so the ids line up and nothing more.
+    const room = (row: PanelTaskView): number => visibleWidth(this.chainCells(row).plain);
     const longest = this.rows.reduce(
-      (most, row) => Math.max(most, visibleWidth(row.task.name)),
+      (most, row) =>
+        Math.max(most, row.task.kind === "chain" ? room(row) : visibleWidth(row.task.name)),
       12,
     );
-    const nameRoom = Math.min(longest, Math.max(12, inner - 79));
+    // A chain sells its name column to the steps, so the numbers beside it need less
+    // room than a process's size and age; the strip sheds its finished steps instead.
+    const nameRoom = Math.min(longest, Math.max(12, inner - (this.tab === "chains" ? 48 : 79)));
 
     const visible = this.rows.slice(this.listTop, this.listTop + LIST_VISIBLE_ROWS);
     visible.forEach((row, offset) => {
@@ -1150,14 +1180,20 @@ export class TasksPanel implements Component {
 
     // The name column is as wide as the longest name, not as wide as the terminal:
     // a fixed split leaves a canyon between the name and the id on a wide screen.
-    const name = theme.fg(nameColour(task), pad(task.name, nameRoom));
+    // A chain spends the column on its steps instead of a name of its own (ADR-0012).
+    const chain = task.kind === "chain" ? this.chainCells(row, nameRoom) : undefined;
+    const namePlain = pad(chain?.plain ?? task.name, nameRoom);
+    const name =
+      chain === undefined
+        ? theme.fg(nameColour(task), namePlain)
+        : `${chain.themed}${" ".repeat(Math.max(0, nameRoom - visibleWidth(chain.plain)))}`;
     const growth = this.growthText(row);
     const headPlain = ` ${pointer} ${dot} ${name} ${id} ${separator} ${kind} ${status}${exit} `;
     // The numbers get the room the head leaves, minus one space of gap, so they can
     // shed their least important parts instead of pushing the row past the border.
     // The room is measured on the bare cells: a theme adds markup, and only the
     // characters a reader sees should cost a number its place.
-    const headCells = ` ${selected ? "›" : " "} ● ${pad(task.name, nameRoom)} ${pad(
+    const headCells = ` ${selected ? "›" : " "} ● ${namePlain} ${pad(
       task.id,
       ID_COLUMN_WIDTH,
     )} · ${kindWord(task.kind)} ${pad(task.status, 11)}${exitText(task) === "" ? "" : ` ${exitText(task)}`} `;
@@ -1208,12 +1244,158 @@ export class TasksPanel implements Component {
     return cells.map((cell) => cell.themed).join(" ");
   }
 
+  /** The record a chain step id names, or undefined while its record is missing. */
+  private stepRecord(id: string): Task | undefined {
+    return this.allRows.find((row) => row.task.id === id)?.task;
+  }
+
+  /** Which step a chain is on, in words a reader does not have to decode a cursor for. */
+  private chainPlace(task: ChainTask): string {
+    if (task.steps.length === 0) return "no step queued";
+    if (task.cursor >= task.steps.length)
+      return `${String(task.steps.length)} of ${String(task.steps.length)} done`;
+    return `step ${String(task.cursor + 1)} of ${String(task.steps.length)}`;
+  }
+
+  /**
+   * The chain's own column: its steps in run order, joined by arrows, with the step at
+   * the cursor in the accent colour and bold. On a narrow row the steps it has already
+   * got through drop first, newest kept, and a leading ellipsis says something was
+   * left out — a chain never wraps and never hides the step that is running (ADR-0012).
+   */
+  private chainCells(
+    row: PanelTaskView,
+    room = Number.POSITIVE_INFINITY,
+  ): {
+    plain: string;
+    themed: string;
+  } {
+    const task = row.task;
+    if (task.kind !== "chain")
+      return { plain: task.name, themed: this.theme.fg(nameColour(task), task.name) };
+    if (task.steps.length === 0) {
+      return {
+        plain: task.name,
+        themed: this.theme.fg(nameColour(task), task.name),
+      };
+    }
+    const cells = task.steps.map((id) => {
+      const step = this.stepRecord(id);
+      const name = step?.name ?? id;
+      const status = step?.status ?? "waiting";
+      return { name, status };
+    });
+    const build = (from: number, to: number, markers = true): { plain: string; themed: string } => {
+      const kept = cells.slice(from, to);
+      // The ellipses stand for the steps that make way, and they are the first thing
+      // to go when the column cannot hold them beside the step it must show.
+      const lead = markers && from > 0 ? "… " : "";
+      const trail = markers && to < cells.length ? " …" : "";
+      const plain = `${lead}${kept.map((cell) => cell.name).join(" → ")}${trail}`;
+      const themed =
+        this.theme.fg("dim", lead) +
+        kept
+          .map((cell, offset) => {
+            const index = from + offset;
+            const arrow = offset === 0 ? "" : this.theme.fg("dim", " → ");
+            const name =
+              index === task.cursor
+                ? this.theme.bold(this.theme.fg("accent", cell.name))
+                : this.theme.fg(stepColour(cell.status), cell.name);
+            return `${arrow}${name}`;
+          })
+          .join("") +
+        this.theme.fg("dim", trail);
+      return { plain, themed };
+    };
+    let from = 0;
+    let to = cells.length;
+    // The running step is the one fact the row may not lose, so shedding stops at it:
+    // finished steps go first, then the waiting ones behind, whichever end is further.
+    const fits = (): boolean => visibleWidth(build(from, to).plain) <= room;
+    while (!fits() && to - from > 1) {
+      if (task.cursor > from) from += 1;
+      else to -= 1;
+    }
+    const shown = build(from, to);
+    if (visibleWidth(shown.plain) <= room) return shown;
+    const tight = build(from, to, false);
+    if (visibleWidth(tight.plain) <= room) return tight;
+    // Even the running step alone is too wide for the column: cut it like a name.
+    const plain = truncateToWidth(tight.plain, Math.max(1, room), "…", false);
+    return { plain, themed: this.theme.fg(nameColour(task), plain) };
+  }
+
   private renderDetail(width: number): string[] {
     const row = this.detailRow();
     if (row === undefined) return this.renderList(width);
     if (row.task.kind === "llm-loop") return this.renderLoopDetail(row, width);
     if (row.task.kind === "cmd-loop") return this.renderCommandLoopDetail(row, width);
+    if (row.task.kind === "chain") return this.renderChainDetail(row, width);
     return this.renderProcessDetail(width);
+  }
+
+  /**
+   * A chain detail: the queue in run order, one line per step with the status, the
+   * duration and the exit code it ended with. The step at the cursor is marked, so
+   * the list says what is running now and what never got its turn (ADR-0012).
+   */
+  private renderChainDetail(row: PanelTaskView, width: number): string[] {
+    const theme = this.theme;
+    const task = row.task;
+    if (task.kind !== "chain") return this.renderList(width);
+    const colour = STATUS_COLOUR[task.status];
+    const done = task.steps.filter((id) => this.stepRecord(id)?.status === "completed").length;
+    const body: string[] = [
+      this.field("Name", theme.fg("accent", task.name)),
+      this.field("ID", theme.fg("accent", task.id)),
+      this.field("Status", theme.fg(colour, task.status)),
+      this.field("Runtime", formatDuration(row.elapsedMs)),
+      this.field("Updated", this.updatedText(task.updatedAt)),
+      this.field(
+        "Steps",
+        `${String(done)} of ${String(task.steps.length)} done · ${this.chainPlace(task)}`,
+      ),
+    ];
+    if (task.endedAt !== undefined) {
+      body.push(this.field("Ended", formatClockTime(task.endedAt)));
+    }
+    if (task.killReason !== undefined) body.push(this.field("Kill reason", task.killReason));
+    if (task.error !== undefined) body.push(this.field("Error", theme.fg(colour, task.error)));
+
+    body.push("", theme.fg("muted", ` Steps, in run order (${String(task.steps.length)}):`));
+    if (task.steps.length === 0) {
+      body.push(theme.fg("dim", "  no step queued yet"));
+    }
+    const room = Math.max(20, width - 4);
+    task.steps.forEach((id, index) => {
+      const step = this.stepRecord(id);
+      const status = step?.status ?? "waiting";
+      const marker = index === task.cursor ? theme.fg("accent", "›") : " ";
+      const mark = theme.fg(stepColour(status), STEP_MARK[status]);
+      const name = `${String(index + 1)}. ${step?.name ?? id}`;
+      // A step that has not run yet has no duration of its own, and a bare dash says
+      // that more honestly than the wait since it was queued does.
+      const duration =
+        step === undefined || status === "waiting"
+          ? "—"
+          : formatDuration(Math.max(0, (step.endedAt ?? this.now()) - step.createdAt));
+      const code =
+        step?.kind === "process" && step.exitCode !== undefined && step.exitCode !== null
+          ? `exit ${String(step.exitCode)}`
+          : "";
+      const line = `${marker} ${mark} ${pad(name, 20)} ${pad(status, 10)} ${pad(duration, 6)} ${code}`;
+      body.push(`${truncateToWidth(line.trimEnd(), room, "…", false)}  ${theme.fg("dim", id)}`);
+    });
+
+    if (this.notice !== undefined) body.push(theme.fg("warning", `  ${this.notice}`));
+    return this.frame(
+      `chain: ${task.name}`,
+      `${task.id} · ${task.status} · ${this.chainPlace(task)}`,
+      body,
+      "← list · k stop from the running step · alt+q close",
+      width,
+    );
   }
 
   private renderProcessDetail(width: number): string[] {
@@ -1553,10 +1735,16 @@ function rightText(row: PanelTaskView, now: number, room = Number.POSITIVE_INFIN
   const elapsed = formatDuration(row.elapsedMs);
   const age = ` · ${formatDuration(Math.max(0, now - task.updatedAt))} ago`;
   if (task.kind === "process") return `${elapsed} ${formatSize(row)}${age}`;
-  // A chain reports its place in the queue: how many steps it has finished and how
-  // many it holds. Its bytes are each step's, and they read on the step's own row.
-  if (task.kind === "chain")
-    return `${elapsed} · ${String(task.cursor)}/${String(task.steps.length)}${age}`;
+  if (task.kind === "chain") {
+    // A chain reports its place in the queue: the step it is on, and how many it holds.
+    // The steps' own bytes and exit codes read on the step lines of its detail.
+    const at = Math.min(task.cursor + 1, task.steps.length);
+    const place = `${String(at)}/${String(task.steps.length)}`;
+    // The elapsed time and the queue's place outrank the age, which goes first on a
+    // narrow row, so a chain still says where it is when the numbers must give way.
+    const candidates = [`${elapsed} · ${place}${age}`, `${elapsed} · ${place}`, place, elapsed];
+    return candidates.find((candidate) => visibleWidth(candidate) <= room) ?? place;
+  }
   // A loop has no exit code and no bytes: it reports the fires it made and how
   // long until the next one, which is the whole question while it is running. A
   // failure streak sits next to the count, and the wait it pushed out is labelled
@@ -1713,6 +1901,37 @@ const FIRE_COLOUR: Record<FireOutcome, ThemeColor> = {
   interrupted: STATUS_COLOUR.interrupted,
 };
 
+/** The mark a chain step carries on its line, one glyph per status it can hold. */
+const STEP_MARK: Record<TaskStatus, string> = {
+  running: "●",
+  paused: "•",
+  completed: "✓",
+  failed: "✗",
+  killed: "■",
+  interrupted: "!",
+  waiting: "·",
+  skipped: "–",
+  stopped: "■",
+};
+
+/** Step colour by status, so a finished step reads as done and a skipped one as absent. */
+function stepColour(status: TaskStatus): ThemeColor {
+  switch (status) {
+    case "completed":
+      return STATUS_COLOUR.completed;
+    case "failed":
+      return STATUS_COLOUR.failed;
+    case "killed":
+    case "interrupted":
+    case "stopped":
+      return STATUS_COLOUR.killed;
+    case "running":
+      return STATUS_COLOUR.running;
+    default:
+      return "muted";
+  }
+}
+
 /** One iteration row: fire number, result, when it ran, and what it cost. */
 function iterationLine(iteration: Iteration): string {
   const parts = [
@@ -1833,7 +2052,7 @@ function pageKey(data: string, current: PanelTab): PanelTab | undefined {
 }
 
 /** True when any searchable field of the task contains the query, ignoring case. */
-function matchesQuery(task: Task, query: string): boolean {
+function matchesQuery(task: Task, query: string, shown: readonly string[] = []): boolean {
   const needle = query.toLowerCase();
   // The kind word is the one the row prints, so searching `proc` finds the
   // processes the reader can see and searching `llm` finds the llm loops; the
@@ -1843,8 +2062,9 @@ function matchesQuery(task: Task, query: string): boolean {
     task.kind === "llm-loop"
       ? [task.name, task.id, task.prompt, task.status, kind]
       : task.kind === "chain"
-        ? // A chain has no command of its own: its steps hold theirs.
-          [task.name, task.id, task.status, kind]
+        ? // A chain has no command of its own: its row shows the step names it queues,
+          // so those are words the reader can see and search for (ADR-0012).
+          [task.name, task.id, task.status, kind, ...shown]
         : [task.name, task.id, task.command, task.status, kind];
   return fields.some((field) => field.toLowerCase().includes(needle));
 }

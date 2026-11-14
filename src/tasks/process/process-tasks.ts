@@ -443,14 +443,23 @@ export class ProcessTasks {
     });
     return this.view(await this.session(scope), task);
   }
+  /**
+   * Every process record of the session, children included, oldest first. The panel
+   * counts them (ADR-0014) and resolves a chain's steps through it; a row still
+   * stands for a root only.
+   */
+  async listAll(scope: TaskScope): Promise<ProcessTaskView[]> {
+    const session = await this.session(scope);
+    return [...session.tasks.values()]
+      .filter((task): task is ProcessTask => task.kind === "process")
+      .map((task) => this.view(session, task));
+  }
+
   /** Every root process task of the session, oldest first, including loaded history. */
   async list(scope: TaskScope): Promise<ProcessTaskView[]> {
-    const session = await this.session(scope);
     // A child is a record, not a row: a loop's fire and a chain's step read through
     // their own tools, and only the parent they belong to is listed (ADR-0014).
-    return [...session.tasks.values()]
-      .filter((task): task is ProcessTask => task.kind === "process" && task.parentId === undefined)
-      .map((task) => this.view(session, task));
+    return (await this.listAll(scope)).filter((view) => view.task.parentId === undefined);
   }
 
   async get(scope: TaskScope, id: string): Promise<ProcessTaskView | undefined> {
