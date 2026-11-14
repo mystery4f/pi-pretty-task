@@ -226,11 +226,11 @@ describe("recovery after a crash", () => {
     const turn = { cwd, sessionId: "session-mixed" };
     const directory = sessionTaskDirectory(cwd, turn.sessionId);
     await mkdir(directory, { recursive: true });
-    // A loop record in the loop arm's shape, plus a field this version does not
+    // An llm loop record in its arm's shape, plus a field this version does not
     // know, so the save path is proven to preserve both kinds and unknown data.
     const loop = {
       id: "lp0001",
-      kind: "loop",
+      kind: "llm-loop",
       name: "nightly review",
       status: "completed",
       createdAt: 1_700_000_000_000,
@@ -251,7 +251,7 @@ describe("recovery after a crash", () => {
     await waitForStatus(harness, started.id, "completed");
 
     const records = await new TaskStore(directory).load();
-    expect(records.map((record) => record.kind).sort()).toEqual(["loop", "process"]);
+    expect(records.map((record) => record.kind).sort()).toEqual(["llm-loop", "process"]);
     const restoredLoop = records.find((record) => record.id === "lp0001");
     expect(restoredLoop).toMatchObject({ name: "nightly review", status: "completed" });
     // Unknown fields round-trip untouched: the schema defends what it knows and

@@ -5,9 +5,11 @@
  * @author mystery4f <40482524+mystery4f@users.noreply.github.com>
  */
 
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createHarness, type Harness, resultText } from "./support/extension-harness.js";
+import { sessionTaskDirectory, taskRecordPath } from "../src/tasks/base/runtime-state.js";
+import { createHarness, type Harness, resultText, type Turn } from "./support/extension-harness.js";
 import { makeTempDir } from "./support/processes.js";
 
 interface LoopDetails {
@@ -32,11 +34,12 @@ afterEach(async () => {
   while (cleanup.length > 0) await cleanup.pop()?.();
 });
 
-async function setup() {
+async function setup(seed?: (turn: Turn) => Promise<void>) {
   const directory = await makeTempDir();
   cleanup.push(directory.dispose);
   let now = Date.UTC(2026, 0, 1, 9, 0, 0);
-  const turn = { cwd: directory.path, sessionId: "session-loops" };
+  const turn: Turn = { cwd: directory.path, sessionId: "session-loops" };
+  if (seed !== undefined) await seed(turn);
   const harness = createHarness(turn, { now: () => now });
   return {
     directory,
@@ -77,7 +80,7 @@ describe("loop tools", () => {
     });
 
     expect(created).toMatchObject({
-      kind: "loop",
+      kind: "llm-loop",
       status: "running",
       schedule: "10s",
       prompt: "review the diff",
@@ -324,5 +327,58 @@ describe("loop tools", () => {
     expect(fired).toHaveLength(1);
     expect(fired[0]?.fire).toBe(2);
     expect(restarted.messages[0]?.content).toBe("keep going");
+  });
+
+  it("loads a version 2 loop file, fires it, and rewrites it in the new version", async () => {
+    const first = Date.UTC(2026, 0, 1, 9, 0, 10);
+    const task = await setup(async (turn) => {
+      const directory = sessionTaskDirectory(turn.cwd, turn.sessionId);
+      await mkdir(directory, { recursive: true });
+      await writeFile(
+        taskRecordPath(directory),
+        JSON.stringify({
+          version: 2,
+          tasks: [
+            {
+              id: "lp0001",
+              kind: "loop",
+              name: "legacy review",
+              status: "running",
+              createdAt: first - 20_000,
+              schedule: "10s",
+              prompt: "keep reviewing",
+              fires: 2,
+              maxFires: 5,
+              nextFireAt: first,
+              lastFireAt: first - 10_000,
+            },
+          ],
+        }),
+      );
+    });
+
+    await task.harness.startSession();
+    task.advance(first - task.now);
+    expect(await task.harness.pump(task.now)).toHaveLength(1);
+    expect(task.harness.messages[0]?.content).toBe("keep reviewing");
+
+    const listed = detailsOf(await task.harness.call("loop_list", { id: "lp0001" }));
+    expect(listed).toMatchObject({
+      id: "lp0001",
+      kind: "llm-loop",
+      name: "legacy review",
+      schedule: "10s",
+      fires: 3,
+      maxFires: 5,
+    });
+
+    const directory = sessionTaskDirectory(task.turn.cwd, task.turn.sessionId);
+    const document = JSON.parse(await readFile(taskRecordPath(directory), "utf8")) as {
+      version: number;
+      tasks: Array<{ id: string; kind: string; nextFireAt?: number }>;
+    };
+    expect(document.version).toBe(3);
+    expect(document.tasks[0]).toMatchObject({ id: "lp0001", kind: "llm-loop" });
+    expect(document.tasks[0]?.nextFireAt).toBeGreaterThan(first);
   });
 });

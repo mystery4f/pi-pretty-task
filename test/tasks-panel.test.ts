@@ -9,7 +9,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { formatClockTime } from "../src/tasks/base/format.js";
 import type { OutputTail } from "../src/tasks/base/output.js";
-import type { LoopTask, ProcessTask } from "../src/tasks/base/task.js";
+import type { LlmLoopTask, ProcessTask } from "../src/tasks/base/task.js";
 import type { Iteration, IterationCall } from "../src/tasks/loop/iteration.js";
 import {
   DETAIL_OUTPUT_LINES,
@@ -53,14 +53,14 @@ function view(
 /** One loop row, with the iterations the store keeps under it. */
 function loopView(
   id: string,
-  overrides: Partial<LoopTask> = {},
+  overrides: Partial<LlmLoopTask> = {},
   elapsedMs = 12_000,
   untilNextFireMs?: number,
 ): PanelTaskView {
   const created = overrides.createdAt ?? 1_000;
-  const task: LoopTask = {
+  const task: LlmLoopTask = {
     id,
-    kind: "loop",
+    kind: "llm-loop",
     name: `loop ${id}`,
     status: "running",
     createdAt: created,
@@ -517,9 +517,11 @@ describe("loop tasks in the list", () => {
     expect(drawn().indexOf("review loop")).toBeLessThan(drawn().indexOf("nightly build"));
     // The row carries the fires and the countdown; the dropped iterations and the
     // last fire's wall-clock time live in the detail.
+    expect(loopRow).toContain("<muted>llm</muted>");
     expect(loopRow).toContain("5 fires");
     expect(loopRow).toContain("next 4.0s");
     expect(loopRow).not.toContain("KiB");
+    expect(processRow).toContain("<muted>proc</muted>");
     expect(processRow).toContain("1.5 KiB");
     expect(processRow).not.toContain("iterations");
 
@@ -571,6 +573,7 @@ describe("the loop detail view", () => {
 
     const screen = drawn();
     expect(screen).toContain("review loop");
+    expect(screen).toContain("llm-loop");
     expect(screen).toContain("10s");
     expect(screen).toContain("5 / 10");
     expect(screen).toContain("review the diff and report");
@@ -952,6 +955,24 @@ describe("recency and search", () => {
     expect(drawn()).toContain("unit tests");
     expect(drawn()).not.toContain("web build");
     expect(drawn()).not.toContain("lint run");
+
+    panel.dispose();
+  });
+
+  it("filters by the kind word the row shows, so an llm loop answers to llm", async () => {
+    const source = new FakeSource();
+    source.rows = [
+      loopView("lp-abcde", { name: "nightly review", createdAt: 2_000 }),
+      view("bg-aaaaa", { name: "nightly build", createdAt: 1_000 }),
+    ];
+    const { panel, drawn } = openPanel(source);
+    await panel.settle();
+
+    panel.handleInput("/");
+    for (const character of "llm") panel.handleInput(character);
+
+    expect(drawn()).toContain("nightly review");
+    expect(drawn()).not.toContain("nightly build");
 
     panel.dispose();
   });

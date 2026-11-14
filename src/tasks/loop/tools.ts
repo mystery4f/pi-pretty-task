@@ -17,7 +17,7 @@ import type {
 import { Type } from "typebox";
 import { formatDuration } from "../base/format.js";
 import type { TaskScope } from "../base/runtime-state.js";
-import type { LoopTask } from "../base/task.js";
+import type { LlmLoopTask } from "../base/task.js";
 import {
   LoopInputError,
   type LoopTasks,
@@ -130,7 +130,7 @@ export function describeLoop(view: LoopTaskView): string {
  * did. A loop with no iteration yet says so, because `iterations: none` is a fact
  * a caller can act on, unlike a missing line.
  */
-function iterationSummary(task: LoopTask): string {
+function iterationSummary(task: LlmLoopTask): string {
   const dropped = task.droppedIterations ?? 0;
   const droppedText = dropped > 0 ? ` (${String(dropped)} older dropped)` : "";
   const newest = task.iterations.at(-1);
@@ -146,7 +146,7 @@ function iterationSummary(task: LoopTask): string {
  * an iteration is reachable from the loop, never as a row of its own (ADR-0002).
  * A truncated record says how much it dropped rather than hiding it.
  */
-export function describeIterations(task: LoopTask): string {
+export function describeIterations(task: LlmLoopTask): string {
   if (task.iterations.length === 0) {
     return task.droppedIterations === undefined || task.droppedIterations === 0
       ? "No iteration yet: this loop has not fired."

@@ -2,7 +2,7 @@
  * Loop tasks: the schedule store, the pump that turns a due schedule into a
  * wake-up, and the pause/resume/complete/delete transitions.
  *
- * A loop is a {@link LoopTask} record like a process task is a {@link ProcessTask};
+ * A loop is a {@link LlmLoopTask} record like a process task is a {@link ProcessTask};
  * both live in one session record file through {@link TaskSessions}. Nothing here
  * starts a timer or a process. The caller owns the clock and calls {@link LoopTasks.pump}
  * with the instant it wants handled, which is what lets tests push a fake clock.
@@ -11,13 +11,13 @@
  */
 
 import type { TaskScope } from "../base/runtime-state.js";
-import type { LoopTask } from "../base/task.js";
+import type { LlmLoopTask } from "../base/task.js";
 import type { TaskSession, TaskSessions } from "../base/task-sessions.js";
 import { parseDurationMs, parseSchedule, resolveSchedule } from "./schedule.js";
 
 /** One due wake-up; the caller sends its prompt into the session. */
 export interface LoopFire {
-  readonly task: LoopTask;
+  readonly task: LlmLoopTask;
   /** Epoch ms the pump handled the fire at. */
   readonly at: number;
   /** One-based fire number, already recorded on the task. */
@@ -47,7 +47,7 @@ export interface CreateLoopInput extends TaskScope {
 
 /** A loop as the tools and the panel read it. */
 export interface LoopTaskView {
-  readonly task: LoopTask;
+  readonly task: LlmLoopTask;
   /** Time left before the next fire; absent while paused or finished. */
   readonly untilNextFireMs?: number;
 }
@@ -168,7 +168,7 @@ export class LoopTasks {
 
     const session = await this.sessions.session(input);
     const active = [...session.tasks.values()].filter(
-      (task) => task.kind === "loop" && (task.status === "running" || task.status === "paused"),
+      (task) => task.kind === "llm-loop" && (task.status === "running" || task.status === "paused"),
     );
     if (active.length >= MAX_LOOPS) {
       throw new LoopInputError(
@@ -183,9 +183,9 @@ export class LoopTasks {
     }
 
     const name = input.name?.trim();
-    const task: LoopTask = {
-      id: this.sessions.createId(session, "loop"),
-      kind: "loop",
+    const task: LlmLoopTask = {
+      id: this.sessions.createId(session, "llm-loop"),
+      kind: "llm-loop",
       name: name !== undefined && name.length > 0 ? name : deriveLoopName(prompt),
       status: "running",
       createdAt,
@@ -208,7 +208,7 @@ export class LoopTasks {
   async list(scope: TaskScope): Promise<LoopTaskView[]> {
     const session = await this.sessions.session(scope);
     return [...session.tasks.values()]
-      .filter((task) => task.kind === "loop")
+      .filter((task) => task.kind === "llm-loop")
       .map((task) => this.view(task));
   }
 
@@ -347,7 +347,7 @@ export class LoopTasks {
       let changed = false;
 
       for (const record of session.tasks.values()) {
-        if (record.kind !== "loop" || record.status !== "running") continue;
+        if (record.kind !== "llm-loop" || record.status !== "running") continue;
 
         if (record.maxFires !== undefined && record.fires >= record.maxFires) {
           this.finish(record, at, "completed");
@@ -416,12 +416,12 @@ export class LoopTasks {
     return fires;
   }
 
-  private findLoop(session: TaskSession, id: string): LoopTask | undefined {
+  private findLoop(session: TaskSession, id: string): LlmLoopTask | undefined {
     const task = session.tasks.get(id);
-    return task?.kind === "loop" ? task : undefined;
+    return task?.kind === "llm-loop" ? task : undefined;
   }
 
-  private finish(task: LoopTask, at: number, status: "completed" | "failed"): void {
+  private finish(task: LlmLoopTask, at: number, status: "completed" | "failed"): void {
     task.status = status;
     task.endedAt = at;
     delete task.nextFireAt;
@@ -430,7 +430,7 @@ export class LoopTasks {
     task.updatedAt = at;
   }
 
-  private view(task: LoopTask): LoopTaskView {
+  private view(task: LlmLoopTask): LoopTaskView {
     if (task.status !== "running" || task.nextFireAt === undefined) return { task };
     return { task, untilNextFireMs: Math.max(0, task.nextFireAt - this.now()) };
   }

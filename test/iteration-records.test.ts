@@ -306,7 +306,7 @@ describe("iteration recording", () => {
     const store = new TaskStore(sessionTaskDirectory(task.turn.cwd, task.turn.sessionId));
     const records = await store.load();
     const loop = records.find((record) => record.id === created.id);
-    if (loop?.kind !== "loop") throw new Error("the loop was not persisted");
+    if (loop?.kind !== "llm-loop") throw new Error("the loop was not persisted");
     expect(loop.iterations?.[0]).toMatchObject({ fire: 1, status: "interrupted" });
   });
 });

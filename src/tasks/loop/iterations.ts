@@ -22,7 +22,7 @@
  */
 
 import type { TaskScope } from "../base/runtime-state.js";
-import type { LoopTask } from "../base/task.js";
+import type { LlmLoopTask } from "../base/task.js";
 import type { TaskSession, TaskSessions } from "../base/task-sessions.js";
 import {
   callErrorText,
@@ -144,7 +144,7 @@ export class Iterations {
     if (entry === undefined || entry.bound) return;
     this.forget(fire.session.directory, fire.task.id, fire.fire);
     const task = fire.session.tasks.get(fire.task.id);
-    if (task?.kind !== "loop") return;
+    if (task?.kind !== "llm-loop") return;
     const index = task.iterations.findIndex((iteration) => iteration.fire === fire.fire);
     if (index < 0) return;
     task.iterations.splice(index, 1);
@@ -181,7 +181,7 @@ export class Iterations {
     const session = await this.sessions.session(scope);
     const at = this.now();
     for (const task of session.tasks.values()) {
-      if (task.kind !== "loop") continue;
+      if (task.kind !== "llm-loop") continue;
       for (let index = task.iterations.length - 1; index >= 0; index -= 1) {
         const iteration = task.iterations[index];
         const call = iteration?.calls.find(
@@ -220,14 +220,14 @@ export class Iterations {
       // The turn the loop woke has settled, which is the loop's own change: its
       // row moves on that, not only on the fire that started the turn (ADR-0010).
       const owner = session.tasks.get(entry.taskId);
-      if (owner?.kind === "loop") owner.updatedAt = at;
+      if (owner?.kind === "llm-loop") owner.updatedAt = at;
       changed = true;
     }
     if (changed) await this.sessions.persist(session);
   }
 
   /** Drop the oldest iterations until the history cap holds; return their fire numbers. */
-  private dropOverflow(task: LoopTask): number[] {
+  private dropOverflow(task: LlmLoopTask): number[] {
     const dropped: number[] = [];
     while (task.iterations.length > this.historyLimit) {
       const oldest = task.iterations.shift();
@@ -261,7 +261,7 @@ export class Iterations {
 
   private resolve(session: TaskSession, taskId: string, fire: number): Iteration | undefined {
     const task = session.tasks.get(taskId);
-    if (task?.kind !== "loop") return undefined;
+    if (task?.kind !== "llm-loop") return undefined;
     return task.iterations.find((iteration) => iteration.fire === fire);
   }
 
