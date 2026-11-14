@@ -153,6 +153,23 @@ export function createExtension(
     if (ui === undefined || scope === undefined) return;
     void publishStatus(ui, processTasks, loops, scope);
   };
+  /**
+   * Adopt the UI of whatever event is running. `session_start` is the normal way
+   * in, but an extension loaded mid-session (`/reload`) never sees it, and the
+   * footer would then stay empty for the rest of the session.
+   */
+  const remember = async (ctx: {
+    readonly cwd: string;
+    readonly sessionManager: { getSessionId(): string };
+    readonly ui: ExtensionUIContext;
+  }): Promise<void> => {
+    const fresh = statusUi === undefined;
+    const scope = scopeOf(ctx);
+    statusUi = ctx.ui;
+    statusScope = scope;
+    if (fresh) await publishStatus(ctx.ui, processTasks, loops, scope);
+  };
+
   const interval = options.pumpIntervalMs ?? DEFAULT_PUMP_INTERVAL_MS;
   let timer: ReturnType<typeof setInterval> | undefined;
 
@@ -226,12 +243,16 @@ export function createExtension(
   });
   // A turn is running: a fire recorded now waits for `agent_settled`, because pi
   // queues a `followUp` and cannot take it back (ADR-0009).
-  pi.on("agent_start", () => {
+  pi.on("agent_start", async (_event, ctx) => {
+    await remember(ctx);
     agentIdle = false;
   });
   // One pump on a turn boundary covers the case where the timer was delayed by
   // a long turn; a loop that became due during the turn wakes right after it.
-  pi.on("turn_end", pumpSafely);
+  pi.on("turn_end", async (_event, ctx) => {
+    await remember(ctx);
+    await pumpSafely();
+  });
   // The tool events are the only description of the turn a fire woke. Starts are
   // recorded into the newest open iteration of the session, ends are paired by
   // tool call id — parallel calls start in source order and finish in completion
@@ -247,6 +268,7 @@ export function createExtension(
   // first, then the wakes this turn was blocking go out — a wake never shares a
   // settle with the turn before it, and its own events open the next run.
   pi.on("agent_settled", async (event, ctx) => {
+    await remember(ctx);
     await recordSafely(iterations.settle(scopeOf(ctx), event.aborted));
     agentIdle = true;
     await flushWakes();

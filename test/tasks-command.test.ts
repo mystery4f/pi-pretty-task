@@ -139,6 +139,19 @@ describe("status line", () => {
     expect(harness.widgetKeys).toEqual([]);
   });
 
+  it("appears even when the extension is loaded mid-session", async () => {
+    const dir = await makeTempDir();
+    cleanup.push(dir.dispose);
+    const harness = createHarness({ cwd: dir.path, sessionId: "session-reload" });
+
+    // `/reload` never emits session_start, so the first turn is the way in.
+    await harness.emit({ type: "agent_start" });
+
+    const last = harness.statuses.at(-1);
+    expect(last?.key).toBe(STATUS_LINE_KEY);
+    expect(last?.text).toContain("Shift↓");
+  });
+
   it("is published at session start, before /tasks was ever opened", async () => {
     const dir = await makeTempDir();
     cleanup.push(dir.dispose);
@@ -231,8 +244,7 @@ describe("/tasks command", () => {
     panel.handleInput("x");
     await closed;
 
-    expect(harness.statuses).toHaveLength(1);
-    expect(harness.statuses[0]?.text).toContain("1 finished");
+    expect(harness.statuses.at(-1)?.text).toContain("1 finished");
     expect(harness.widgetKeys).toEqual([]);
   });
 
@@ -287,8 +299,8 @@ describe("/tasks command", () => {
     panel.handleInput("x");
     await closed;
 
-    expect(harness.statuses).toHaveLength(1);
-    expect(harness.statuses[0]?.text).toContain("1 running");
+    // The line was repainted as the turn ran; what matters is where it lands.
+    expect(harness.statuses.at(-1)?.text).toContain("1 running");
     expect(harness.widgetKeys).toEqual([]);
   });
 
@@ -321,8 +333,7 @@ describe("/tasks command", () => {
 
     panel.handleInput("x");
     await closed;
-    expect(harness.statuses).toHaveLength(1);
-    expect(harness.statuses[0]?.text).toContain("1 finished");
+    expect(harness.statuses.at(-1)?.text).toContain("1 finished");
     expect(harness.widgetKeys).toEqual([]);
   });
 });

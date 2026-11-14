@@ -252,6 +252,9 @@ describe("detail view", () => {
     const { panel, drawn } = openPanel(source);
     await panel.settle();
 
+    // A finished task is history, so it has to be asked for before Enter can open it.
+    panel.handleInput("h");
+    await panel.settle();
     panel.handleInput(ENTER);
     await panel.settle();
 
@@ -771,7 +774,7 @@ describe("history, rerun and the output path", () => {
     panel.dispose();
   });
 
-  it("lets h hide the history an idle panel opened on its own", async () => {
+  it("keeps history hidden on an idle session until h asks for it", async () => {
     const source = new FakeSource();
     source.rows = [
       view("done001", { name: "build", status: "completed", exitCode: 0 }),
@@ -780,18 +783,19 @@ describe("history, rerun and the output path", () => {
     const { panel, drawn } = openPanel(source);
     await panel.settle();
 
-    // Nothing runs, so the panel shows the past without being asked.
-    expect(drawn()).toContain("build");
-
-    panel.handleInput("h");
-    await panel.settle();
+    // Nothing runs and h was never pressed: the list stays empty and says how
+    // to get the past back, even though the counts already know it exists.
     expect(drawn()).not.toContain("build");
     expect(drawn()).toContain("History is hidden — press h to show it.");
 
-    // A refresh must not undo the reader's choice.
     panel.handleInput("h");
     await panel.settle();
     expect(drawn()).toContain("build");
+
+    // A later refresh must not undo the reader's choice either way.
+    panel.handleInput("h");
+    await panel.settle();
+    expect(drawn()).not.toContain("build");
 
     panel.dispose();
   });
