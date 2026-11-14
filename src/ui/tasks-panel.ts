@@ -1443,9 +1443,10 @@ function dotColour(task: Task): ThemeColor {
   return task.status === "completed" ? "dim" : STATUS_COLOUR[task.status];
 }
 
-/** Exit column: a process has a code, a loop has fires instead. */
+/** Exit column: a process has a code, a loop has fires instead, a chain has steps. */
 function exitText(task: Task): string {
   if (task.kind === "llm-loop") return "";
+  if (task.kind === "chain") return "";
   // A command loop carries the code of its newest fire; the fires themselves are
   // rows in its detail (ADR-0015).
   const code = task.kind === "cmd-loop" ? task.lastExitCode : task.exitCode;
@@ -1462,6 +1463,10 @@ function rightText(row: PanelTaskView, now: number, room = Number.POSITIVE_INFIN
   const elapsed = formatDuration(row.elapsedMs);
   const age = ` · ${formatDuration(Math.max(0, now - task.updatedAt))} ago`;
   if (task.kind === "process") return `${elapsed} ${formatSize(row)}${age}`;
+  // A chain reports its place in the queue: how many steps it has finished and how
+  // many it holds. Its bytes are each step's, and they read on the step's own row.
+  if (task.kind === "chain")
+    return `${elapsed} · ${String(task.cursor)}/${String(task.steps.length)}${age}`;
   // A loop has no exit code and no bytes: it reports the fires it made and how
   // long until the next one, which is the whole question while it is running. A
   // failure streak sits next to the count, and the wait it pushed out is labelled
@@ -1664,7 +1669,7 @@ function singleLine(text: string, maxLength: number): string {
  * Short kind word printed in a row. Search uses the same word, so a reader who
  * sees `llm` can type `llm` and find that row.
  */
-function kindWord(kind: TaskKind): "proc" | "llm" | "cmd" {
+function kindWord(kind: TaskKind): "proc" | "llm" | "cmd" | "chn" {
   switch (kind) {
     case "process":
       return "proc";
@@ -1672,6 +1677,9 @@ function kindWord(kind: TaskKind): "proc" | "llm" | "cmd" {
       return "llm";
     case "cmd-loop":
       return "cmd";
+    case "chain":
+      // The word a reader types to find a chain once the panel gives it a tab (#27).
+      return "chn";
   }
 }
 
@@ -1685,7 +1693,10 @@ function matchesQuery(task: Task, query: string): boolean {
   const fields =
     task.kind === "llm-loop"
       ? [task.name, task.id, task.prompt, task.status, kind]
-      : [task.name, task.id, task.command, task.status, kind];
+      : task.kind === "chain"
+        ? // A chain has no command of its own: its steps hold theirs.
+          [task.name, task.id, task.status, kind]
+        : [task.name, task.id, task.command, task.status, kind];
   return fields.some((field) => field.toLowerCase().includes(needle));
 }
 

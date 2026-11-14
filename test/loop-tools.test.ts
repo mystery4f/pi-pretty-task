@@ -478,7 +478,7 @@ describe("loop tools", () => {
       version: number;
       tasks: Array<{ id: string; kind: string; nextFireAt?: number }>;
     };
-    expect(document.version).toBe(4);
+    expect(document.version).toBe(5);
     expect(document.tasks[0]).toMatchObject({ id: "lp0001", kind: "llm-loop" });
     expect(document.tasks[0]?.nextFireAt).toBeGreaterThan(first);
   });

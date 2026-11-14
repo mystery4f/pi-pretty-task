@@ -39,14 +39,14 @@ const ID_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789";
 const ID_SUFFIX_LENGTH = 5;
 /**
  * The first characters of an id say which kind of task it names, so a quoted id
- * (`bg-1a2cf`, `lp-1a2cf`, `lc-1a2cf`) is readable without the panel in front of
- * you. `cmd-loop` is reserved until its record arm lands, but its prefix exists
- * from the start so no id can be issued without one.
+ * (`bg-1a2cf`, `lp-1a2cf`, `lc-1a2cf`, `ch-1a2cf`) is readable without the panel
+ * in front of you.
  */
 const ID_PREFIX: Record<TaskKind, string> = {
   process: "bg-",
   "llm-loop": "lp-",
   "cmd-loop": "lc-",
+  chain: "ch-",
 };
 
 export class TaskSessions {
