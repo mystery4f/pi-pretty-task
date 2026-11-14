@@ -10,7 +10,7 @@ import { readFile } from "node:fs/promises";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createHarness, type Harness, resultText, type Turn } from "./support/extension-harness.js";
-import { killTree, makeTempDir, isAlive, waitFor, writeScript } from "./support/processes.js";
+import { isAlive, killTree, makeTempDir, waitFor, writeScript } from "./support/processes.js";
 
 interface FireDetails {
   fire: number;
@@ -95,7 +95,11 @@ async function loopDetails(harness: Harness, id: string): Promise<CmdDetails> {
   return detailsOf(await harness.call("loop_list", { id }));
 }
 
-async function fireOf(harness: Harness, id: string, fire: number): Promise<FireDetails | undefined> {
+async function fireOf(
+  harness: Harness,
+  id: string,
+  fire: number,
+): Promise<FireDetails | undefined> {
   const details = await loopDetails(harness, id);
   return details.fireHistory?.find((entry) => entry.fire === fire);
 }
@@ -337,11 +341,7 @@ describe("command loops", () => {
 
   it("backs off after a failed fire, doubling the wait and capping it at an hour", async () => {
     const task = await setup();
-    const script = await writeScript(
-      task.directory.path,
-      "fail.js",
-      "process.exit(1);\n",
-    );
+    const script = await writeScript(task.directory.path, "fail.js", "process.exit(1);\n");
     // A forty-minute schedule doubles past the cap on its first failure.
     const loop = await createCmd(task.harness, { command: script, schedule: "40m" });
 

@@ -6,6 +6,7 @@
  * @author mystery4f <40482524+mystery4f@users.noreply.github.com>
  */
 
+import type { Theme } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it, vi } from "vitest";
 import { formatClockTime } from "../src/tasks/base/format.js";
 import type { OutputTail } from "../src/tasks/base/output.js";
@@ -18,7 +19,6 @@ import {
   type PanelTaskView,
   TasksPanel,
 } from "../src/ui/tasks-panel.js";
-import type { Theme } from "@earendil-works/pi-coding-agent";
 import { fakeTheme } from "./support/extension-harness.js";
 
 const UP = "\u001b[A";
@@ -79,7 +79,6 @@ function loopView(
     ...(untilNextFireMs === undefined ? {} : { untilNextFireMs }),
   };
 }
-
 
 /** True when a rendered row carries this strip cell. */
 function row_shows(row: string, cell: string): boolean {
