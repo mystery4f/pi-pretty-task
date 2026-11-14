@@ -30,7 +30,7 @@ describe("task ids", () => {
     expect(processId).toMatch(/^bg-[a-z0-9]{5}$/);
     expect(loopId).toMatch(/^lp-[a-z0-9]{5}$/);
     // Three characters of prefix plus five of randomness: the example `bg-1a2cf`
-    // is eight cells, whatever a count in the ADR prose says.
+    // is eight cells.
     expect(processId).toHaveLength(8);
     expect(loopId).toHaveLength(8);
     // One namespace per session: the collision check spans the whole id, so the
