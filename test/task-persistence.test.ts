@@ -61,6 +61,27 @@ async function waitForStatus(harness: Harness, id: string, wanted: string): Prom
   return latest;
 }
 
+/**
+ * The in-memory status flips before the record lands: a real restart reads the
+ * file, so waiting on the store alone would race the writer.
+ */
+async function waitForRecorded(
+  cwd: string,
+  sessionId: string,
+  id: string,
+  wanted: string,
+): Promise<void> {
+  const path = taskRecordPath(sessionTaskDirectory(cwd, sessionId));
+  await waitFor(`task ${id} to be recorded as ${wanted}`, async () => {
+    try {
+      const record = JSON.parse(await readFile(path, "utf8")) as { tasks?: Task[] };
+      return record.tasks?.some((task) => task.id === id && task.status === wanted) === true;
+    } catch {
+      return false;
+    }
+  });
+}
+
 describe("history across a restart", () => {
   it("lists a finished task with the same name, id, kind and final output", async () => {
     const cwd = await tempDirectory();
@@ -75,6 +96,7 @@ describe("history across a restart", () => {
       .details as TaskDetails;
     trackPid(started);
     const finished = await waitForStatus(before, started.id, "completed");
+    await waitForRecorded(turn.cwd, turn.sessionId, finished.id, "completed");
 
     const after = createHarness(turn);
 

@@ -416,9 +416,11 @@ export class ProcessTasks {
           ? "the command was terminated by a signal"
           : `exited with code ${exitCode}`;
     }
-    // The exit does not wait on the disk; the notification does not either.
-    void this.persist(session);
-    this.onFinish?.(this.view(session, task));
+    // The record reaches the disk before the notice leaves: a reader who restarts
+    // the session right after the notice has to find the same ending on disk.
+    void this.persist(session).then(() => {
+      this.onFinish?.(this.view(session, task));
+    });
   }
 
   /**

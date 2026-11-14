@@ -788,9 +788,16 @@ export class TasksPanel implements Component {
       return this.listFrame(body, width);
     }
 
+    // One name column for the whole page, so the ids line up and nothing more.
+    const longest = this.rows.reduce(
+      (most, row) => Math.max(most, visibleWidth(row.task.name)),
+      12,
+    );
+    const nameRoom = Math.min(longest, Math.max(12, inner - 62));
+
     const visible = this.rows.slice(this.listTop, this.listTop + LIST_VISIBLE_ROWS);
     visible.forEach((row, offset) => {
-      body.push(this.listRow(row, this.listTop + offset === this.selectedIndex(), inner));
+      body.push(this.listRow(row, this.listTop + offset === this.selectedIndex(), inner, nameRoom));
     });
     if (this.rows.length > LIST_VISIBLE_ROWS) {
       const first = this.listTop + 1;
@@ -815,7 +822,7 @@ export class TasksPanel implements Component {
    * status, then the numbers. Every cell is padded before it is coloured, so the
    * border stays straight whatever the theme does with escapes.
    */
-  private listRow(row: PanelTaskView, selected: boolean, width: number): string {
+  private listRow(row: PanelTaskView, selected: boolean, width: number, nameRoom: number): string {
     const theme = this.theme;
     const task = row.task;
     const pointer = selected ? theme.fg("accent", "›") : " ";
@@ -825,15 +832,18 @@ export class TasksPanel implements Component {
     const status = theme.fg(STATUS_COLOUR[task.status], pad(task.status, 11));
     const exit = exitText(task) === "" ? "" : theme.fg("dim", ` ${exitText(task)}`);
 
-    // The name takes what the numbers do not, the way the panel this replaces
-    // splits its row: a name column that keeps growing would push the numbers
-    // off the edge on a wide terminal.
-    const nameRoom = Math.max(12, width - 78);
+    // The name column is as wide as the longest name, not as wide as the terminal:
+    // a fixed split leaves a canyon between the name and the id on a wide screen.
     const name = theme.fg(nameColour(task), pad(task.name, nameRoom));
     const right = theme.fg("dim", rightText(row));
     const growth = this.growthText(row);
 
-    const line = ` ${pointer} ${dot} ${name} ${id} ${separator} ${status}${exit} ${right}${growth}`;
+    const head = ` ${pointer} ${dot} ${name} ${id} ${separator} ${status}${exit} `;
+    // The numbers sit against the right edge so a column of sizes can be compared
+    // by eye, which is what a reader does with them.
+    const tail = `${right}${growth}`;
+    const gap = Math.max(1, width - 2 - visibleWidth(head) - visibleWidth(tail));
+    const line = `${head}${" ".repeat(gap)}${tail}`;
     // A selected row is washed in one block of background, the way the panel this
     // replaces marks its cursor: the eye finds it without a colour of its own.
     return selected
