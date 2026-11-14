@@ -17,17 +17,18 @@ import type {
   IterationStatus,
 } from "../loop/iteration.js";
 import { previousTaskRecordPath, taskRecordPath } from "./runtime-state.js";
-import type { LoopTask, ProcessTask, Task, TaskStatus } from "./task.js";
+import type { LlmLoopTask, ProcessTask, Task, TaskStatus } from "./task.js";
 
 /**
  * On-disk schema version. One version covers both kinds; a change that older
  * code could not read any more bumps it.
  *
- * Version 2 added `updatedAt` (ADR-0010). A version 1 document still loads: a
- * record from before the field takes its own `createdAt` as the recency, which
- * is the newest change anyone can prove, and the next save writes version 2.
+ * Version 2 added `updatedAt` (ADR-0010). Version 3 split the old `loop` kind
+ * into `llm-loop` and reserved `cmd-loop`, so a version 1 or 2 document still
+ * loads: a record from before recency takes its own `createdAt`, and an old
+ * `loop` reads as an llm loop. The next save writes version 3.
  */
-export const TASK_FILE_VERSION = 2;
+export const TASK_FILE_VERSION = 3;
 
 /** One session's task records as they are stored. */
 export interface TaskFile {
@@ -55,10 +56,15 @@ function isStatus(value: unknown): value is TaskStatus {
 /**
  * One record, checked for everything shared plus the fields of its arm. Both
  * arms are strict here: a loop record without its schedule or prompt is
- * corruption, not an older generation to guess at.
+ * corruption, not an older generation to guess at. `legacyKind` is true only
+ * for a version 1 or 2 document, where `loop` still names what is now an
+ * llm loop.
  */
-function parseTask(value: unknown): Task | undefined {
+function parseTask(value: unknown, legacyKind: boolean): Task | undefined {
   if (!isObject(value)) return undefined;
+  // The old kind is translated before the arm checks so the rest of the parser
+  // only ever sees the current vocabulary.
+  const kind = value.kind === "loop" && legacyKind ? "llm-loop" : value.kind;
   if (typeof value.id !== "string" || value.id.length === 0) return undefined;
   if (typeof value.name !== "string") return undefined;
   if (!isStatus(value.status)) return undefined;
@@ -69,7 +75,7 @@ function parseTask(value: unknown): Task | undefined {
   const updatedAt = isFiniteNumber(value.updatedAt) ? value.updatedAt : value.createdAt;
   if (value.endedAt !== undefined && typeof value.endedAt !== "number") return undefined;
 
-  if (value.kind === "process") {
+  if (kind === "process") {
     if (typeof value.command !== "string") return undefined;
     if (typeof value.cwd !== "string") return undefined;
     if (typeof value.outputPath !== "string") return undefined;
@@ -85,7 +91,7 @@ function parseTask(value: unknown): Task | undefined {
     return { ...value, updatedAt } as unknown as ProcessTask;
   }
 
-  if (value.kind === "loop") {
+  if (kind === "llm-loop") {
     if (typeof value.schedule !== "string" || value.schedule.trim().length === 0) return undefined;
     if (typeof value.prompt !== "string" || value.prompt.trim().length === 0) return undefined;
     if (typeof value.fires !== "number" || !Number.isInteger(value.fires) || value.fires < 0) {
@@ -124,7 +130,7 @@ function parseTask(value: unknown): Task | undefined {
     ) {
       return undefined;
     }
-    return { ...value, updatedAt, iterations } as unknown as Task;
+    return { ...value, kind, updatedAt, iterations } as unknown as Task;
   }
 
   return undefined;
@@ -214,15 +220,19 @@ function parseTaskFile(text: string): Task[] | undefined {
     return undefined;
   }
   if (!isObject(document)) return undefined;
-  // Version 1 is readable because its records only lack `updatedAt`, which
-  // `parseTask` fills from `createdAt`; any other version may mean something
-  // this code cannot see, and the earlier generation is the safer answer.
-  if (document.version !== 1 && document.version !== TASK_FILE_VERSION) return undefined;
+  // Versions 1 and 2 are readable because the only changes since are additive:
+  // `updatedAt` is filled from `createdAt`, and the old `loop` kind is read as
+  // `llm-loop`. A newer, unknown version cannot be guessed at, so the earlier
+  // generation is the safer answer.
+  if (document.version !== 1 && document.version !== 2 && document.version !== TASK_FILE_VERSION) {
+    return undefined;
+  }
   if (!Array.isArray(document.tasks)) return undefined;
+  const legacyKind = document.version !== TASK_FILE_VERSION;
 
   const records: Task[] = [];
   for (const entry of document.tasks) {
-    const record = parseTask(entry);
+    const record = parseTask(entry, legacyKind);
     // One unreadable record makes the whole generation untrustworthy: the
     // fallback copy is a complete earlier document, not a patch.
     if (record === undefined) return undefined;
@@ -269,14 +279,14 @@ export interface TaskStoreOptions {
  * nothing here adopts or signals a pid, and the stale pid is dropped so a later
  * step cannot mistake a reused pid for the old command.
  *
- * A loop record is deliberately left alone: a loop owns no process, so restart
+ * An llm loop is deliberately left alone: it owns no process, so restart
  * does not end it. It keeps its status and next-fire time and resumes when the
  * extension starts pumping again. Its Iterations are different — an iteration is
  * one turn, and no turn survives the process that was running it (see
  * {@link interruptIterations}).
  */
 function interrupt(record: Task, at: number): Task {
-  if (record.kind === "loop") return interruptIterations(record, at);
+  if (record.kind === "llm-loop") return interruptIterations(record, at);
   if (record.status !== "running") return record;
   // A restart that ends a record is a state change like any other, so the
   // recency moves with the ending (ADR-0010).
@@ -291,7 +301,7 @@ function interrupt(record: Task, at: number): Task {
  * Marking it `interrupted`, and stopping the calls it left running, keeps a
  * reader from seeing work that can never finish.
  */
-function interruptIterations(task: LoopTask, at: number): LoopTask {
+function interruptIterations(task: LlmLoopTask, at: number): LlmLoopTask {
   if (!task.iterations.some((iteration) => iteration.status === "running")) return task;
   const iterations = task.iterations.map((iteration) => {
     if (iteration.status !== "running") return iteration;

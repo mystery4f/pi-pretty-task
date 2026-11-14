@@ -66,7 +66,7 @@ describe("LoopTasks", () => {
     });
 
     expect(created.task).toMatchObject({
-      kind: "loop",
+      kind: "llm-loop",
       name: "nightly review",
       schedule: "10m",
       prompt: "review the diff",
@@ -85,7 +85,7 @@ describe("LoopTasks", () => {
     expect(records).toHaveLength(1);
     expect(records[0]).toMatchObject({
       id: created.task.id,
-      kind: "loop",
+      kind: "llm-loop",
       schedule: "10m",
       prompt: "review the diff",
       fires: 0,

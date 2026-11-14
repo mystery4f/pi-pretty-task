@@ -181,7 +181,7 @@ export function createExtension(
    */
   const isDeliverable = (fire: LoopFire): boolean => {
     const task = fire.session.tasks.get(fire.task.id);
-    if (task?.kind !== "loop") return false;
+    if (task?.kind !== "llm-loop") return false;
     return task.status === "running" || fire.final;
   };
 

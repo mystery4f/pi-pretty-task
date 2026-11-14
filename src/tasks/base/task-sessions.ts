@@ -29,6 +29,8 @@ export interface TaskSession {
 export interface TaskSessionsOptions {
   /** Clock seam for tests; defaults to `Date.now`. */
   now?: () => number;
+  /** Random source for id suffixes; tests pin it to prove collisions are skipped. */
+  randomInt?: (max: number) => number;
 }
 
 /** No 0/O/1/l: an id is meant to be retyped by a human into a later message. */
@@ -37,12 +39,19 @@ const ID_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789";
 const ID_SUFFIX_LENGTH = 5;
 /**
  * The first characters of an id say which kind of task it names, so a quoted id
- * (`bg-1a2cf`, `lp-1a2cf`) is readable without the panel in front of you.
+ * (`bg-1a2cf`, `lp-1a2cf`, `lc-1a2cf`) is readable without the panel in front of
+ * you. `cmd-loop` is reserved until its record arm lands, but its prefix exists
+ * from the start so no id can be issued without one.
  */
-const ID_PREFIX: Record<TaskKind, string> = { process: "bg-", loop: "lp-" };
+const ID_PREFIX: Record<TaskKind, string> = {
+  process: "bg-",
+  "llm-loop": "lp-",
+  "cmd-loop": "lc-",
+};
 
 export class TaskSessions {
   private readonly now: () => number;
+  private readonly randomInt: (max: number) => number;
   /**
    * Keyed by state directory, not session id: the directory already encodes cwd
    * and session, and the promise keeps two calls from loading the same history
@@ -52,6 +61,7 @@ export class TaskSessions {
 
   constructor(options: TaskSessionsOptions = {}) {
     this.now = options.now ?? Date.now;
+    this.randomInt = options.randomInt ?? randomInt;
   }
 
   /** The session's records, loaded from disk on first use. */
@@ -78,7 +88,7 @@ export class TaskSessions {
   /**
    * A fresh id that is free in this session, whatever the kind. The prefix
    * carries the kind and the five random characters keep an id short enough to
-   * retype; the collision check spans the whole id, so the two prefixes never
+   * retype; the collision check spans the whole id, so kind prefixes never
    * compete (ADR-0011). Records written before the prefix existed keep their
    * six-character ids: an id is a reference a later message may quote, and
    * rewriting one would break that reference.
@@ -88,7 +98,7 @@ export class TaskSessions {
     for (;;) {
       let id = prefix;
       for (let index = 0; index < ID_SUFFIX_LENGTH; index += 1) {
-        id += ID_ALPHABET.charAt(randomInt(ID_ALPHABET.length));
+        id += ID_ALPHABET.charAt(this.randomInt(ID_ALPHABET.length));
       }
       if (!session.tasks.has(id)) return id;
     }

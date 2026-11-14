@@ -22,7 +22,7 @@ import {
 } from "@earendil-works/pi-tui";
 import { formatBytes, formatClockTime, formatDuration } from "../tasks/base/format.js";
 import type { OutputTail } from "../tasks/base/output.js";
-import type { LoopTask, Task } from "../tasks/base/task.js";
+import type { LlmLoopTask, Task, TaskKind } from "../tasks/base/task.js";
 import type {
   Iteration,
   IterationCall,
@@ -216,7 +216,7 @@ export class TasksPanel implements Component {
       const open = this.detailRow();
       if (
         open === undefined ||
-        open.task.kind !== "loop" ||
+        open.task.kind !== "llm-loop" ||
         this.currentIteration(open.task) === undefined
       ) {
         // The open iteration fell out of the store's history cap, or its loop vanished.
@@ -233,7 +233,7 @@ export class TasksPanel implements Component {
   private applyFilters(): void {
     // The loop filter narrows what the reader sees, never what the store holds.
     const kindRows = this.onlyLoops
-      ? this.allRows.filter((row) => row.task.kind === "loop")
+      ? this.allRows.filter((row) => row.task.kind === "llm-loop")
       : this.allRows;
     const matched =
       this.query.length === 0
@@ -376,7 +376,7 @@ export class TasksPanel implements Component {
 
   private handleDetailInput(data: string): void {
     const row = this.detailRow();
-    if (row?.task.kind === "loop") {
+    if (row?.task.kind === "llm-loop") {
       this.handleLoopDetailInput(data, row.task);
       return;
     }
@@ -415,7 +415,7 @@ export class TasksPanel implements Component {
     if (data === "c") this.showOutputPath();
   }
 
-  private handleLoopDetailInput(data: string, task: LoopTask): void {
+  private handleLoopDetailInput(data: string, task: LlmLoopTask): void {
     if (matchesKey(data, "left")) {
       this.mode = "list";
       this.iterationTop = 0;
@@ -474,7 +474,7 @@ export class TasksPanel implements Component {
   }
 
   /** Walk the newest-first iteration list, keeping the selected row on screen. */
-  private moveIteration(delta: number, task: LoopTask): void {
+  private moveIteration(delta: number, task: LlmLoopTask): void {
     const newestFirst = [...task.iterations].reverse();
     if (newestFirst.length === 0) return;
     const selected = this.currentIteration(task);
@@ -493,7 +493,7 @@ export class TasksPanel implements Component {
 
   private openIteration(): void {
     const row = this.detailRow();
-    if (row === undefined || row.task.kind !== "loop") return;
+    if (row === undefined || row.task.kind !== "llm-loop") return;
     const iteration = this.currentIteration(row.task);
     if (iteration === undefined) {
       this.notice = "No iteration to open yet — this loop has not fired.";
@@ -508,7 +508,7 @@ export class TasksPanel implements Component {
 
   private scrollCalls(delta: number): void {
     const row = this.detailRow();
-    if (row === undefined || row.task.kind !== "loop") return;
+    if (row === undefined || row.task.kind !== "llm-loop") return;
     const iteration = this.currentIteration(row.task);
     if (iteration === undefined) return;
     const oldest = Math.max(0, iteration.calls.length - DETAIL_OUTPUT_LINES);
@@ -542,7 +542,8 @@ export class TasksPanel implements Component {
     this.callTop = 0;
     const row = this.detailRow();
     // A loop opens on its newest iteration; a process opens on the tail of its output.
-    this.iterationFire = row?.task.kind === "loop" ? row.task.iterations.at(-1)?.fire : undefined;
+    this.iterationFire =
+      row?.task.kind === "llm-loop" ? row.task.iterations.at(-1)?.fire : undefined;
     this.iterationTop = 0;
     this.enqueue(async () => {
       await this.readTail();
@@ -704,7 +705,7 @@ export class TasksPanel implements Component {
   }
 
   /** The iteration under the cursor, or the newest one when the store trimmed the pick. */
-  private currentIteration(task: LoopTask): Iteration | undefined {
+  private currentIteration(task: LlmLoopTask): Iteration | undefined {
     if (this.iterationFire !== undefined) {
       const found = task.iterations.find((iteration) => iteration.fire === this.iterationFire);
       if (found !== undefined) return found;
@@ -920,7 +921,7 @@ export class TasksPanel implements Component {
     const separator = theme.fg("dim", "·");
     // Both kinds share one table, so the row has to say which it is: a loop runs
     // nothing and a process wakes nobody, and their numbers mean different things.
-    const kind = theme.fg("muted", task.kind === "loop" ? "loop" : "proc");
+    const kind = theme.fg("muted", kindWord(task.kind));
     const status = theme.fg(STATUS_COLOUR[task.status], pad(task.status, 11));
     const exit = exitText(task) === "" ? "" : theme.fg("dim", ` ${exitText(task)}`);
 
@@ -946,7 +947,7 @@ export class TasksPanel implements Component {
   private renderDetail(width: number): string[] {
     const row = this.detailRow();
     if (row === undefined) return this.renderList(width);
-    return row.task.kind === "loop"
+    return row.task.kind === "llm-loop"
       ? this.renderLoopDetail(row, width)
       : this.renderProcessDetail(width);
   }
@@ -1025,7 +1026,7 @@ export class TasksPanel implements Component {
   private renderLoopDetail(row: PanelTaskView, width: number): string[] {
     const theme = this.theme;
     const task = row.task;
-    if (task.kind !== "loop") return this.renderList(width);
+    if (task.kind !== "llm-loop") return this.renderList(width);
     const colour = STATUS_COLOUR[task.status];
     const body: string[] = [
       this.field("Status", theme.fg(colour, task.status)),
@@ -1084,7 +1085,7 @@ export class TasksPanel implements Component {
   private renderIterationDetail(width: number): string[] {
     const theme = this.theme;
     const row = this.detailRow();
-    if (row === undefined || row.task.kind !== "loop") return this.renderList(width);
+    if (row === undefined || row.task.kind !== "llm-loop") return this.renderList(width);
     const task = row.task;
     const iteration = this.currentIteration(task);
     if (iteration === undefined) return this.renderLoopDetail(row, width);
@@ -1186,7 +1187,7 @@ function dotColour(task: Task): ThemeColor {
 
 /** Exit column: a process has a code, a loop has fires instead. */
 function exitText(task: Task): string {
-  if (task.kind === "loop") return "";
+  if (task.kind === "llm-loop") return "";
   return task.exitCode === undefined ? "" : `exit ${String(task.exitCode)}`;
 }
 
@@ -1258,12 +1259,12 @@ function isCommandCall(call: IterationCall): boolean {
   return COMMAND_TOOLS.has(call.tool);
 }
 
-function firesText(task: LoopTask): string {
+function firesText(task: LlmLoopTask): string {
   if (task.maxFires === undefined) return String(task.fires);
   return `${String(task.fires)} / ${String(task.maxFires)}`;
 }
 
-function nextFireText(task: LoopTask, row: PanelTaskView): string {
+function nextFireText(task: LlmLoopTask, row: PanelTaskView): string {
   if (task.nextFireAt === undefined) return "—";
   const at = formatClockTime(task.nextFireAt);
   return row.untilNextFireMs === undefined
@@ -1272,7 +1273,7 @@ function nextFireText(task: LoopTask, row: PanelTaskView): string {
 }
 
 /** Iteration list heading: kept and dropped counts are both stated, never hidden. */
-function iterationsText(task: LoopTask): string {
+function iterationsText(task: LlmLoopTask): string {
   const dropped = task.droppedIterations ?? 0;
   const kept = task.iterations.length;
   if (kept === 0) {
@@ -1326,15 +1327,32 @@ function singleLine(text: string, maxLength: number): string {
   return truncateToWidth(oneLine, Math.max(1, maxLength), "…", false);
 }
 
+/**
+ * Short kind word printed in a row. Search uses the same word, so a reader who
+ * sees `llm` can type `llm` and find that row.
+ */
+function kindWord(kind: TaskKind): "proc" | "llm" | "cmd" {
+  switch (kind) {
+    case "process":
+      return "proc";
+    case "llm-loop":
+      return "llm";
+    case "cmd-loop":
+      return "cmd";
+  }
+}
+
 /** True when any searchable field of the task contains the query, ignoring case. */
 function matchesQuery(task: Task, query: string): boolean {
   const needle = query.toLowerCase();
-  // The kind word is the one the row prints, so searching `proc` finds the processes
-  // the reader can see; the status word is the string the row colours.
+  // The kind word is the one the row prints, so searching `proc` finds the
+  // processes the reader can see and searching `llm` finds the llm loops; the
+  // status word is the string the row colours.
+  const kind = kindWord(task.kind);
   const fields =
     task.kind === "process"
-      ? [task.name, task.id, task.command, task.status, "proc"]
-      : [task.name, task.id, task.prompt, task.status, "loop"];
+      ? [task.name, task.id, task.command, task.status, kind]
+      : [task.name, task.id, task.prompt, task.status, kind];
   return fields.some((field) => field.toLowerCase().includes(needle));
 }
 
