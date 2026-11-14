@@ -17,18 +17,27 @@ import type {
   IterationStatus,
 } from "../loop/iteration.js";
 import { previousTaskRecordPath, taskRecordPath } from "./runtime-state.js";
-import type { LlmLoopTask, ProcessTask, Task, TaskStatus } from "./task.js";
+import type {
+  CmdLoopTask,
+  FireRecord,
+  LlmLoopTask,
+  ProcessTask,
+  Task,
+  TaskStatus,
+} from "./task.js";
 
 /**
- * On-disk schema version. One version covers both kinds; a change that older
+ * On-disk schema version. One version covers every kind; a change that older
  * code could not read any more bumps it.
  *
  * Version 2 added `updatedAt` (ADR-0010). Version 3 split the old `loop` kind
  * into `llm-loop` and reserved `cmd-loop`, so a version 1 or 2 document still
  * loads: a record from before recency takes its own `createdAt`, and an old
- * `loop` reads as an llm loop. The next save writes version 3.
+ * `loop` reads as an llm loop. Version 4 implements the `cmd-loop` arm with its
+ * fire history and adds the parent link a fire child carries: a version 3 reader
+ * knows neither, so it falls back instead of guessing. Saving writes version 4.
  */
-export const TASK_FILE_VERSION = 3;
+export const TASK_FILE_VERSION = 4;
 
 /** One session's task records as they are stored. */
 export interface TaskFile {
@@ -53,12 +62,74 @@ function isStatus(value: unknown): value is TaskStatus {
   return TASK_STATUSES.some((status) => status === value);
 }
 
+/** A non-negative whole number, the shape every counter in a loop record has. */
+function isCount(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0;
+}
+
 /**
- * One record, checked for everything shared plus the fields of its arm. Both
- * arms are strict here: a loop record without its schedule or prompt is
- * corruption, not an older generation to guess at. `legacyKind` is true only
- * for a version 1 or 2 document, where `loop` still names what is now an
- * llm loop.
+ * The fields every loop arm shares. Both arms check them here, so a cmd loop
+ * cannot drift from the schedule rules an llm loop already follows.
+ */
+function hasLoopFields(value: Record<string, unknown>): boolean {
+  if (typeof value.schedule !== "string" || value.schedule.trim().length === 0) return false;
+  if (!isCount(value.fires)) return false;
+  if (value.maxFires !== undefined && (!isCount(value.maxFires) || value.maxFires < 1))
+    return false;
+  if (value.nextFireAt !== undefined && !isFiniteNumber(value.nextFireAt)) return false;
+  if (value.lastFireAt !== undefined && !isFiniteNumber(value.lastFireAt)) return false;
+  if (value.expiresAt !== undefined && !isFiniteNumber(value.expiresAt)) return false;
+  if (value.missedFires !== undefined && !isCount(value.missedFires)) return false;
+  if (value.consecutiveFailures !== undefined && !isCount(value.consecutiveFailures)) return false;
+  if (value.error !== undefined && typeof value.error !== "string") return false;
+  return true;
+}
+
+const FIRE_OUTCOMES: readonly FireRecord["outcome"][] = [
+  "running",
+  "success",
+  "failed",
+  "skipped",
+  "interrupted",
+];
+
+/**
+ * The fire history of a cmd loop. A record written before the history existed
+ * reads as empty; anything malformed invalidates the generation like the rest.
+ */
+function parseFireHistory(value: unknown): FireRecord[] | undefined {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) return undefined;
+  const fires: FireRecord[] = [];
+  for (const entry of value) {
+    if (!isObject(entry)) return undefined;
+    if (!isCount(entry.fire) || entry.fire < 1) return undefined;
+    if (!isFiniteNumber(entry.at)) return undefined;
+    if (entry.startedAt !== undefined && !isFiniteNumber(entry.startedAt)) return undefined;
+    if (entry.endedAt !== undefined && !isFiniteNumber(entry.endedAt)) return undefined;
+    if (!FIRE_OUTCOMES.some((outcome) => outcome === entry.outcome)) return undefined;
+    if (
+      entry.exitCode !== undefined &&
+      entry.exitCode !== null &&
+      typeof entry.exitCode !== "number"
+    ) {
+      return undefined;
+    }
+    if (entry.durationMs !== undefined && !isFiniteNumber(entry.durationMs)) return undefined;
+    if (entry.outputBytes !== undefined && !isCount(entry.outputBytes)) return undefined;
+    if (entry.taskId !== undefined && typeof entry.taskId !== "string") return undefined;
+    if (entry.error !== undefined && typeof entry.error !== "string") return undefined;
+    fires.push(entry as unknown as FireRecord);
+  }
+  return fires;
+}
+
+/**
+ * One record, checked for everything shared plus the fields of its arm. Every
+ * arm is strict here: a loop record without its schedule, or a cmd loop without
+ * its command, is corruption, not an older generation to guess at. `legacyKind`
+ * is true only for a version 1 or 2 document, where `loop` still names what is
+ * now an llm loop.
  */
 function parseTask(value: unknown, legacyKind: boolean): Task | undefined {
   if (!isObject(value)) return undefined;
@@ -79,46 +150,25 @@ function parseTask(value: unknown, legacyKind: boolean): Task | undefined {
     if (typeof value.command !== "string") return undefined;
     if (typeof value.cwd !== "string") return undefined;
     if (typeof value.outputPath !== "string") return undefined;
-    if (typeof value.outputBytes !== "number" || !Number.isFinite(value.outputBytes)) {
-      return undefined;
-    }
-    if (value.outputBytes < 0) return undefined;
+    if (!isFiniteNumber(value.outputBytes) || value.outputBytes < 0) return undefined;
     if (value.pid !== undefined && typeof value.pid !== "number") return undefined;
     if (value.exitCode !== undefined && value.exitCode !== null) {
       if (typeof value.exitCode !== "number") return undefined;
     }
     if (value.error !== undefined && typeof value.error !== "string") return undefined;
+    // A fire child carries its loop and its fire number together: one without
+    // the other cannot be rendered or attributed (ADR-0016).
+    if ((value.parentId === undefined) !== (value.fire === undefined)) return undefined;
+    if (value.parentId !== undefined) {
+      if (typeof value.parentId !== "string" || value.parentId.length === 0) return undefined;
+    }
+    if (value.fire !== undefined && (!isCount(value.fire) || value.fire < 1)) return undefined;
     return { ...value, updatedAt } as unknown as ProcessTask;
   }
 
   if (kind === "llm-loop") {
-    if (typeof value.schedule !== "string" || value.schedule.trim().length === 0) return undefined;
+    if (!hasLoopFields(value)) return undefined;
     if (typeof value.prompt !== "string" || value.prompt.trim().length === 0) return undefined;
-    if (typeof value.fires !== "number" || !Number.isInteger(value.fires) || value.fires < 0) {
-      return undefined;
-    }
-    if (value.maxFires !== undefined) {
-      if (
-        typeof value.maxFires !== "number" ||
-        !Number.isInteger(value.maxFires) ||
-        value.maxFires < 1
-      ) {
-        return undefined;
-      }
-    }
-    if (value.nextFireAt !== undefined) {
-      if (typeof value.nextFireAt !== "number" || !Number.isFinite(value.nextFireAt))
-        return undefined;
-    }
-    if (value.lastFireAt !== undefined) {
-      if (typeof value.lastFireAt !== "number" || !Number.isFinite(value.lastFireAt))
-        return undefined;
-    }
-    if (value.expiresAt !== undefined) {
-      if (typeof value.expiresAt !== "number" || !Number.isFinite(value.expiresAt))
-        return undefined;
-    }
-    if (value.error !== undefined && typeof value.error !== "string") return undefined;
     const iterations = parseIterations(value.iterations);
     if (iterations === undefined) return undefined;
     const droppedIterations = value.droppedIterations;
@@ -131,6 +181,35 @@ function parseTask(value: unknown, legacyKind: boolean): Task | undefined {
       return undefined;
     }
     return { ...value, kind, updatedAt, iterations } as unknown as Task;
+  }
+
+  if (kind === "cmd-loop") {
+    if (!hasLoopFields(value)) return undefined;
+    if (typeof value.command !== "string" || value.command.trim().length === 0) return undefined;
+    if (value.cwd !== undefined && typeof value.cwd !== "string") return undefined;
+    if (value.env !== undefined) {
+      if (!isObject(value.env)) return undefined;
+      for (const entry of Object.values(value.env)) {
+        if (typeof entry !== "string") return undefined;
+      }
+    }
+    if (value.wakeOnFailure !== undefined && typeof value.wakeOnFailure !== "boolean") {
+      return undefined;
+    }
+    const fireHistory = parseFireHistory(value.fireHistory);
+    if (fireHistory === undefined) return undefined;
+    if (
+      value.lastExitCode !== undefined &&
+      value.lastExitCode !== null &&
+      typeof value.lastExitCode !== "number"
+    ) {
+      return undefined;
+    }
+    if (value.lastOutputPath !== undefined && typeof value.lastOutputPath !== "string") {
+      return undefined;
+    }
+    if (value.lastOutputBytes !== undefined && !isCount(value.lastOutputBytes)) return undefined;
+    return { ...value, kind, updatedAt, fireHistory } as unknown as Task;
   }
 
   return undefined;
@@ -222,13 +301,16 @@ function parseTaskFile(text: string): Task[] | undefined {
   if (!isObject(document)) return undefined;
   // Versions 1 and 2 are readable because the only changes since are additive:
   // `updatedAt` is filled from `createdAt`, and the old `loop` kind is read as
-  // `llm-loop`. A newer, unknown version cannot be guessed at, so the earlier
-  // generation is the safer answer.
-  if (document.version !== 1 && document.version !== 2 && document.version !== TASK_FILE_VERSION) {
+  // `llm-loop`. Version 3 is the shape before cmd loops and reads unchanged. A
+  // newer, unknown version cannot be guessed at, so the earlier generation is
+  // the safer answer.
+  const version = document.version;
+  if (version !== 1 && version !== 2 && version !== 3 && version !== TASK_FILE_VERSION) {
     return undefined;
   }
   if (!Array.isArray(document.tasks)) return undefined;
-  const legacyKind = document.version !== TASK_FILE_VERSION;
+  // Only a document older than version 3 may still spell the kind `loop`.
+  const legacyKind = version < 3;
 
   const records: Task[] = [];
   for (const entry of document.tasks) {
@@ -279,14 +361,17 @@ export interface TaskStoreOptions {
  * nothing here adopts or signals a pid, and the stale pid is dropped so a later
  * step cannot mistake a reused pid for the old command.
  *
- * An llm loop is deliberately left alone: it owns no process, so restart
- * does not end it. It keeps its status and next-fire time and resumes when the
- * extension starts pumping again. Its Iterations are different — an iteration is
- * one turn, and no turn survives the process that was running it (see
- * {@link interruptIterations}).
+ * A loop is deliberately left running: it owns no process of its own, so a
+ * restart does not end its schedule. An llm loop keeps its status and next-fire
+ * time and resumes when the extension starts pumping again. A cmd loop keeps
+ * both too, and its in-flight fire is marked interrupted because the child
+ * process died with the old pi process. Its Iterations are different — an
+ * iteration is one turn, and no turn survives the process that was running it
+ * (see {@link interruptIterations}).
  */
 function interrupt(record: Task, at: number): Task {
   if (record.kind === "llm-loop") return interruptIterations(record, at);
+  if (record.kind === "cmd-loop") return interruptFires(record, at);
   if (record.status !== "running") return record;
   // A restart that ends a record is a state change like any other, so the
   // recency moves with the ending (ADR-0010).
@@ -324,6 +409,27 @@ function interruptIterations(task: LlmLoopTask, at: number): LlmLoopTask {
   // The interrupted turns ended with this restart: that is the loop's newest
   // change, so its row moves up like any other ending (ADR-0010).
   return { ...task, updatedAt: at, iterations };
+}
+
+/**
+ * A cmd loop survives a restart: its schedule belongs to no process, so it
+ * keeps running and fires again. The fire that was in flight does not — the
+ * child process is gone with the old pi process (its own record is interrupted
+ * by {@link interrupt}), so the loop's copy of that fire is marked interrupted
+ * and is never resumed. Marking it ends a fire, so the loop's recency moves.
+ */
+function interruptFires(task: CmdLoopTask, at: number): CmdLoopTask {
+  if (!task.fireHistory.some((fire) => fire.outcome === "running")) return task;
+  const fireHistory = task.fireHistory.map((fire) => {
+    if (fire.outcome !== "running") return fire;
+    return {
+      ...fire,
+      outcome: "interrupted" as const,
+      endedAt: at,
+      durationMs: Math.max(0, at - (fire.startedAt ?? at)),
+    };
+  });
+  return { ...task, updatedAt: at, fireHistory };
 }
 
 /**

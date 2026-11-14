@@ -6,10 +6,11 @@
  * @author mystery4f <40482524+mystery4f@users.noreply.github.com>
  */
 
+import type { Theme } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it, vi } from "vitest";
 import { formatClockTime } from "../src/tasks/base/format.js";
 import type { OutputTail } from "../src/tasks/base/output.js";
-import type { LlmLoopTask, ProcessTask } from "../src/tasks/base/task.js";
+import type { CmdLoopTask, FireRecord, LlmLoopTask, ProcessTask } from "../src/tasks/base/task.js";
 import type { Iteration, IterationCall } from "../src/tasks/loop/iteration.js";
 import {
   DETAIL_OUTPUT_LINES,
@@ -76,6 +77,57 @@ function loopView(
     elapsedMs,
     outputBytes: 0,
     ...(untilNextFireMs === undefined ? {} : { untilNextFireMs }),
+  };
+}
+
+/** True when a rendered row carries this strip cell. */
+function row_shows(row: string, cell: string): boolean {
+  return row.includes(cell);
+}
+
+/** A command loop row: a schedule whose fires are process tasks of their own. */
+function cmdLoopView(
+  id: string,
+  overrides: Partial<CmdLoopTask> = {},
+  elapsedMs = 12_000,
+  untilNextFireMs?: number,
+): PanelTaskView {
+  const created = overrides.createdAt ?? 1_000;
+  const task: CmdLoopTask = {
+    id,
+    kind: "cmd-loop",
+    name: `loop ${id}`,
+    status: "running",
+    createdAt: created,
+    updatedAt: created,
+    schedule: "10s",
+    command: "node watch.js",
+    fires: 0,
+    fireHistory: [],
+    ...overrides,
+  };
+  return {
+    task,
+    elapsedMs,
+    outputBytes: 0,
+    ...(untilNextFireMs === undefined ? {} : { untilNextFireMs }),
+  };
+}
+
+/** One fire, as the loop keeps it: the numbers a fire row prints. */
+function fireOf(fire: number, overrides: Partial<FireRecord> = {}): FireRecord {
+  const at = CLOCK + fire * 10_000;
+  return {
+    fire,
+    at,
+    startedAt: at,
+    endedAt: at + 800,
+    outcome: "success",
+    exitCode: 0,
+    durationMs: 800,
+    outputBytes: 120,
+    taskId: `bg-${String(fire).padStart(5, "0")}`,
+    ...overrides,
   };
 }
 
@@ -148,11 +200,52 @@ interface Opened {
   drawn(): string;
 }
 
-function openPanel(source: FakeSource, now: () => number = () => 13_000): Opened {
+/**
+ * A theme that adds no markup: the panel's width math sees real glyph widths, so
+ * a test can narrow a row and watch what makes way. Colours are asserted through
+ * {@link recordingTheme} instead, where the tag overhead would skew the row.
+ */
+function plainTheme(): Theme {
+  const plain = (_colour: string, text: string): string => text;
+  return {
+    fg: plain,
+    bg: plain,
+    bold: plain,
+    italic: plain,
+    underline: plain,
+    inverse: plain,
+    strikethrough: plain,
+  } as unknown as Theme;
+}
+
+/** A theme that keeps the text plain but records every colour it was asked for. */
+function recordingTheme(): { theme: Theme; painted: Array<{ colour: string; text: string }> } {
+  const painted: Array<{ colour: string; text: string }> = [];
+  const style = (colour: string, text: string): string => {
+    painted.push({ colour, text });
+    return text;
+  };
+  const theme = {
+    fg: style,
+    bg: style,
+    bold: (text: string) => text,
+    italic: (text: string) => text,
+    underline: (text: string) => text,
+    inverse: (text: string) => text,
+    strikethrough: (text: string) => text,
+  } as unknown as Theme;
+  return { theme, painted };
+}
+
+function openPanel(
+  source: FakeSource,
+  now: () => number = () => 13_000,
+  theme: Theme = fakeTheme(),
+): Opened {
   const done = vi.fn();
   const panel = new TasksPanel({
     tui: { requestRender: () => undefined },
-    theme: fakeTheme(),
+    theme,
     done,
     source,
     // Tests advance the panel by hand; the live timer would only add races.
@@ -1085,5 +1178,249 @@ describe("recency and search", () => {
     expect(done).not.toHaveBeenCalled();
 
     panel.dispose();
+  });
+});
+
+describe("command loops in the list and in the detail", () => {
+  it("puts the newest three fires on the row, oldest left, and never shows a fire as a row", async () => {
+    const source = new FakeSource();
+    source.rows = [
+      cmdLoopView(
+        "lc00001",
+        {
+          name: "watch loop",
+          command: "node watch.js",
+          fires: 45,
+          fireHistory: [
+            fireOf(42),
+            fireOf(43),
+            fireOf(44, { outcome: "failed", exitCode: 2 }),
+            fireOf(45, {
+              outcome: "running",
+              exitCode: undefined,
+              durationMs: undefined,
+              outputBytes: undefined,
+              endedAt: undefined,
+            }),
+          ],
+        },
+        30_000,
+        5_000,
+      ),
+      // The fire's own process task is a record, not a row (ADR-0014).
+      view("bg-00001", { name: "watch loop #1", parentId: "lc00001", fire: 1 }),
+    ];
+    // A recording theme keeps every glyph in place and still says what colour the
+    // panel asked for, so the strip can be checked for both order and outcome.
+    const { theme, painted } = recordingTheme();
+    const { panel, drawn } = openPanel(source, () => 13_000, theme);
+    await panel.settle();
+
+    // A wide page fits all three cells; how the strip gives way is the next test.
+    const row = panel
+      .render(160)
+      .join("\n")
+      .split("\n")
+      .find((line) => line.includes("watch loop"));
+    if (row === undefined) throw new Error("the loop row must render");
+    expect(row).not.toContain("#42");
+    expect(row).toContain("45 fires");
+    expect(row).toContain("#43✓ #44✗ #45•");
+    expect(row.indexOf("#43")).toBeLessThan(row.indexOf("#44"));
+    expect(row.indexOf("#44")).toBeLessThan(row.indexOf("#45"));
+    // Each cell is coloured by its own outcome: success, failure, still running.
+    expect(painted).toContainEqual({ colour: "success", text: "#43✓" });
+    expect(painted).toContainEqual({ colour: "error", text: "#44✗" });
+    expect(painted).toContainEqual({ colour: "accent", text: "#45•" });
+    // The child shows only in the loop's own detail, never as a list row.
+    expect(drawn()).not.toContain("watch loop #1");
+
+    panel.dispose();
+  });
+
+  it("drops the oldest strip cells on a narrow row and omits the strip when nothing fits", async () => {
+    const source = new FakeSource();
+    source.rows = [
+      cmdLoopView(
+        "lc00001",
+        {
+          name: "watch loop",
+          fires: 45,
+          fireHistory: [
+            fireOf(43),
+            fireOf(44, { outcome: "failed", exitCode: 2 }),
+            fireOf(45, { outcome: "skipped", exitCode: undefined }),
+          ],
+        },
+        30_000,
+        5_000,
+      ),
+    ];
+    const { panel } = openPanel(source, () => 13_000, plainTheme());
+    await panel.settle();
+
+    const widths = [160, 140, 120, 100, 90, 80, 70, 60, 50, 44, 38];
+    const rows = widths.map((width) => {
+      const line = panel
+        .render(width)
+        .join("\n")
+        .split("\n")
+        .find((candidate) => candidate.includes("watch loop"));
+      if (line === undefined) throw new Error(`the row must render at width ${String(width)}`);
+      return line;
+    });
+    const cells = ["#43✓", "#44✗", "#45–"];
+
+    // The widest row carries all three cells, oldest left.
+    expect(rows[0]).toContain(cells.join(" "));
+    // Narrowing only ever drops cells, and always from the left: a row that shows
+    // an older cell shows every newer one too (ADR-0015).
+    const counts = rows.map((row) => cells.filter((cell) => row.includes(cell)).length);
+    for (const [index, count] of counts.entries()) {
+      if (index > 0) expect(count).toBeLessThanOrEqual(counts[index - 1] ?? 3);
+      if (row_shows(rows[index] ?? "", cells[0] ?? "")) {
+        expect(rows[index]).toContain(cells[1] ?? "");
+        expect(rows[index]).toContain(cells[2] ?? "");
+      }
+      if (row_shows(rows[index] ?? "", cells[1] ?? "")) expect(rows[index]).toContain(cells[2]);
+    }
+    // Too narrow for even one cell: the strip is gone, the row is intact.
+    const omitted = rows.find((row) => !row.includes("#45"));
+    if (omitted === undefined) throw new Error("some width must omit the strip");
+    expect(omitted).toContain("watch loop");
+    expect(omitted).toContain("45 fires");
+
+    panel.dispose();
+  });
+
+  it("lists fires newest first with time, outcome, exit code, duration and bytes", async () => {
+    const source = new FakeSource();
+    source.rows = [
+      cmdLoopView(
+        "lc00001",
+        {
+          name: "watch loop",
+          fires: 46,
+          lastFireAt: CLOCK + 450_000,
+          nextFireAt: CLOCK + 460_000,
+          lastExitCode: 0,
+          lastOutputPath: "/state/bg-00046.output",
+          lastOutputBytes: 120,
+          fireHistory: [
+            fireOf(44),
+            fireOf(45, { outcome: "failed", exitCode: 2 }),
+            fireOf(46, {
+              outcome: "skipped",
+              exitCode: undefined,
+              durationMs: undefined,
+              outputBytes: undefined,
+            }),
+          ],
+        },
+        30_000,
+        5_000,
+      ),
+    ];
+    const { panel, drawn } = openPanel(source);
+    await panel.settle();
+
+    panel.handleInput(ENTER);
+    await panel.settle();
+
+    const screen = drawn();
+    expect(screen).toContain("cmd-loop");
+    expect(screen).toContain("node watch.js");
+    expect(screen).toContain("fires · newest first · 3 kept · 43 older dropped");
+    expect(screen).toContain(formatClockTime(CLOCK + 460_000));
+    expect(screen).toContain("exit 0");
+    expect(screen).toContain("0.8s");
+    expect(screen).toContain("120 B");
+    expect(screen).toContain("skipped");
+    expect(screen.indexOf("#46")).toBeLessThan(screen.indexOf("#45"));
+    expect(screen.indexOf("#45")).toBeLessThan(screen.indexOf("#44"));
+    // A skipped fire never ran, so it prints no exit code.
+    expect(screen).toContain("#46 · ");
+
+    panel.dispose();
+  });
+
+  it("opens a fire's output, returns to the loop with the left arrow, and stops only that fire", async () => {
+    const source = new FakeSource();
+    const child: PanelTaskView = view("bg-00045", {
+      name: "watch loop #45",
+      parentId: "lc00001",
+      fire: 45,
+      createdAt: CLOCK,
+    });
+    source.rows = [
+      cmdLoopView(
+        "lc00001",
+        {
+          name: "watch loop",
+          fires: 45,
+          fireHistory: [fireOf(44), fireOf(45, { taskId: "bg-00045" })],
+        },
+        30_000,
+        5_000,
+      ),
+      child,
+    ];
+    source.tails.set("bg-00045", { text: "hello from fire 45", lines: 1, truncated: false });
+    const { panel, drawn } = openPanel(source);
+    await panel.settle();
+
+    panel.handleInput(ENTER);
+    await panel.settle();
+    // The newest fire sits under the cursor, so one more enter opens its child.
+    panel.handleInput(ENTER);
+    await panel.settle();
+
+    expect(source.tailed).toEqual(["bg-00045"]);
+    expect(plain(drawn())).toContain("hello from fire 45");
+
+    panel.handleInput(LEFT);
+    await panel.settle();
+    expect(plain(drawn())).toContain("fires · newest first");
+
+    panel.handleInput(ENTER);
+    await panel.settle();
+    panel.handleInput("k");
+    await panel.settle();
+    // `k` in a fire detail stops that fire, not the schedule around it.
+    expect(source.stopped).toEqual(["bg-00045"]);
+
+    panel.dispose();
+  });
+
+  it("finds a command loop by its command and by its kind word", async () => {
+    const byCommand = new FakeSource();
+    byCommand.rows = [
+      cmdLoopView("lc00001", { name: "nightly probe", command: "node probe.js" }),
+      cmdLoopView("lc00002", { name: "nightly review" }),
+    ];
+    const first = openPanel(byCommand);
+    await first.panel.settle();
+
+    first.panel.handleInput("/");
+    for (const character of "probe.js") first.panel.handleInput(character);
+    await first.panel.settle();
+    expect(first.drawn()).toContain("nightly probe");
+    expect(first.drawn()).not.toContain("nightly review");
+    first.panel.dispose();
+
+    const byKind = new FakeSource();
+    byKind.rows = [
+      cmdLoopView("lc00001", { name: "nightly probe", command: "node probe.js" }),
+      cmdLoopView("lc00002", { name: "nightly review" }),
+    ];
+    const second = openPanel(byKind);
+    await second.panel.settle();
+
+    second.panel.handleInput("/");
+    for (const character of "cmd") second.panel.handleInput(character);
+    await second.panel.settle();
+    expect(second.drawn()).toContain("nightly probe");
+    expect(second.drawn()).toContain("nightly review");
+    second.panel.dispose();
   });
 });
