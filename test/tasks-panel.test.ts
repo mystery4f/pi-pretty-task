@@ -1355,6 +1355,69 @@ describe("rerun and the output path", () => {
 
     panel.dispose();
   });
+
+  /**
+   * A command loop with one finished fire, plus the child record that fire started.
+   * The child is listed separately, as the store lists it: a detail page resolves it
+   * by id and no page of the list ever shows it (ADR-0014).
+   */
+  function loopWithFire(): FakeSource {
+    const source = new FakeSource();
+    source.rows = [
+      cmdLoopView(
+        "lc00001",
+        { name: "watch loop", fires: 45, fireHistory: [fireOf(44), fireOf(45)] },
+        30_000,
+        5_000,
+      ),
+      view("bg-00045", {
+        name: "watch loop #45",
+        parentId: "lc00001",
+        fire: 45,
+        createdAt: CLOCK,
+      }),
+    ];
+    return source;
+  }
+
+  /** Walk to a fire's own detail page: the list, the loop, then the newest fire. */
+  async function openFireDetail(source: FakeSource): Promise<Opened> {
+    const opened = await openOn("loops", source);
+    await opened.panel.settle();
+    opened.panel.handleInput(ENTER);
+    await opened.panel.settle();
+    opened.panel.handleInput(ENTER);
+    await opened.panel.settle();
+    return opened;
+  }
+
+  it("reruns the fire whose detail page is open, not the loop around it", async () => {
+    const source = loopWithFire();
+    const { panel, drawn } = await openFireDetail(source);
+
+    panel.handleInput("R");
+    await panel.settle();
+
+    // The page belongs to the fire, so the key does too.
+    expect(source.reran).toEqual(["bg-00045"]);
+    expect(drawn()).toContain("ran bg-00045 again as bg-000452");
+    expect(drawn()).not.toContain("A loop is scheduled, not run");
+
+    panel.dispose();
+  });
+
+  it("prints the open fire's own output path with c", async () => {
+    const source = loopWithFire();
+    const { panel, drawn } = await openFireDetail(source);
+
+    panel.handleInput("c");
+    await panel.settle();
+
+    expect(drawn()).toContain("output: /work/.pi/tasks/session/bg-00045.output");
+    expect(drawn()).not.toContain("a loop writes no output file");
+
+    panel.dispose();
+  });
 });
 
 describe("recency and search", () => {

@@ -950,7 +950,9 @@ export class TasksPanel implements Component {
 
   /** `R` runs the selected command again; the old row stays as its own record. */
   private rerunSelected(): void {
-    const row = this.rows[this.selectedIndex()];
+    // The key belongs to the page in front of the reader: an open fire is a process
+    // record of its own, so `R` repeats that fire, not the loop above it (ticket #35).
+    const row = this.mode === "detail" ? this.detailRow() : this.rows[this.selectedIndex()];
     if (row === undefined) {
       this.notice = "No task selected.";
       this.paint();
@@ -968,6 +970,19 @@ export class TasksPanel implements Component {
       // here, so the panel says so instead of starting something the reader did not ask
       // for. Starting the same pipeline again is a `bg_run` with the same `after`.
       this.notice = "A chain is a queue; run its steps again with bg_run.";
+      this.paint();
+      return;
+    }
+    // A step of a chain is a move in its queue, not a command that stands alone:
+    // repeating it here would run work the queue has not reached or has passed. The
+    // reason is said out loud, because `R` on a row that looks like a process would
+    // otherwise seem to have been ignored (ticket #35).
+    if (
+      row.task.kind === "process" &&
+      row.task.parentId !== undefined &&
+      row.task.fire === undefined
+    ) {
+      this.notice = "A chain step runs inside its queue; run the chain again with bg_run.";
       this.paint();
       return;
     }
@@ -999,7 +1014,9 @@ export class TasksPanel implements Component {
 
   /** `c` puts the output path where it can be read, since the panel cannot copy it. */
   private showOutputPath(): void {
-    const row = this.rows[this.selectedIndex()];
+    // As with `R`: the path belongs to the page in front of the reader, so an open
+    // fire names its own file and a loop detail names the loop's (ticket #35).
+    const row = this.mode === "detail" ? this.detailRow() : this.rows[this.selectedIndex()];
     if (row === undefined) {
       this.notice = "No task selected.";
       this.paint();
