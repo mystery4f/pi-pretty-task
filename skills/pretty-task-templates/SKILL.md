@@ -1,12 +1,12 @@
 ---
 name: pretty-task-templates
-description: Add, change or remove a named command template in pretty-task.json for the pi-pretty-task plugin. Use when the user wants `bg_run` to run a command by name, or asks why a template they just wrote is missing.
+description: Add, change or remove a named command template in pretty-task.json for the pi-pretty-task plugin. Use when the user wants `pretty_task_bg_run` to run a command by name, or asks why a template they just wrote is missing.
 ---
 
 # Command templates
 
-A template is a name for a command `bg_run` can run without re-typing it:
-`bg_run({ template: "test" })` is the same call as `bg_run({ command: "npm test" })`
+A template is a name for a command `pretty_task_bg_run` can run without re-typing it:
+`pretty_task_bg_run({ template: "test" })` is the same call as `pretty_task_bg_run({ command: "npm test" })`
 with the template's `cwd` and `timeoutSeconds` filled in.
 
 ## Where the file lives
@@ -41,7 +41,7 @@ call, not to the file, so a template carrying `env` is rejected as malformed.
 - Keep the file valid JSON with 2-space indent and a final newline; the rest of the
   repository is formatted that way.
 - Prefer a short, verb-like name (`test`, `build`, `migrate`) — the names are shown
-  to the model in the `bg_run` description, sorted, with each command cut to 60
+  to the model in the `pretty_task_bg_run` description, sorted, with each command cut to 60
   characters. A long name wastes that budget.
 - Do not delete or rewrite entries the user did not mention.
 
@@ -65,7 +65,7 @@ description all stay until pi reloads.
 
 - The new template becomes usable after `/reload` or in a new session. Write that in
   the reply; do not claim a template works because the file now contains it.
-- The `bg_run` description is part of the prompt prefix a provider caches. A changed
+- The `pretty_task_bg_run` description is part of the prompt prefix a provider caches. A changed
   file changes that text on the next load, so the cached prefix is paid again once.
   Editing templates is therefore a deliberate, occasional action, not something to do
   per turn.

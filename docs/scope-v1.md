@@ -15,21 +15,21 @@
 
 | 能力 | 说明 | 复杂度 | 风险 |
 |---|---|---|---|
-| `bg_run` | 起后台进程，返回 id/PID/输出路径 | 中（Windows `cmd.exe /d /s /c` + POSIX `bash -c`、进程组、输出流） | 中：Windows 参数转义 |
-| `bg_status` | 单条或全部快照 | 低 | 低 |
-| `bg_logs` | 尾部输出拉取（供无 UI 场景与 agent 自查） | 低 | 低：需自带上限，防上下文被灌 |
-| `bg_kill` | 先 SIGTERM/`taskkill /T`，宽限后强杀整棵进程树 | 中 | 中：残留后代进程 |
+| `pretty_task_bg_run` | 起后台进程，返回 id/PID/输出路径 | 中（Windows `cmd.exe /d /s /c` + POSIX `bash -c`、进程组、输出流） | 中：Windows 参数转义 |
+| `pretty_task_bg_status` | 单条或全部快照 | 低 | 低 |
+| `pretty_task_bg_logs` | 尾部输出拉取（供无 UI 场景与 agent 自查） | 低 | 低：需自带上限，防上下文被灌 |
+| `pretty_task_bg_kill` | 先 SIGTERM/`taskkill /T`，宽限后强杀整棵进程树 | 中 | 中：残留后代进程 |
 | 输出落盘 | `.pi/tasks/<sessionId>-<pid>/<taskId>.output` + `.json` | 低 | 低 |
 | 输出上限 | 单任务默认 20MiB（`PI_PRETTY_TASK_OUTPUT_CAP_BYTES` 可配置，启动时校验），超限后截断并以 `output_cap` 终止 | 低 | 低（上游此处有 NaN 缺陷，我们在入口校验） |
-| 运行超时 | `bg_run` 可选 `timeoutSeconds`，到点以 `timeout` 终止；默认不设超时 | 低 | 低：避免误杀验收里的 10 分钟长任务 |
+| 运行超时 | `pretty_task_bg_run` 可选 `timeoutSeconds`，到点以 `timeout` 终止；默认不设超时 | 低 | 低：避免误杀验收里的 10 分钟长任务 |
 | 完成通知 | `registerMessageRenderer` 渲染完成卡片 | 低 | 低 |
 
 ### Task · `kind: "loop"`（定时唤醒）与其子记录 Iteration
 
 | 能力 | 说明 | 复杂度 | 风险 |
 |---|---|---|---|
-| `loop_create` | 间隔触发（`10s`/`5m`）或五段 cron（`0 9 * * 1-5`，按本地时区；六段带秒的写法明确拒绝并指向间隔写法，见 ADR-0006），投 prompt 唤醒 LLM | 中（定时器 + 唤醒投递） | 中：与 agent 忙碌状态交错 |
-| `loop_list` / `loop_update` / `loop_delete` | 增删查改、暂停/恢复、`maxFires`/`expiresIn` | 低 | 低 |
+| `pretty_task_loop_create` | 间隔触发（`10s`/`5m`）或五段 cron（`0 9 * * 1-5`，按本地时区；六段带秒的写法明确拒绝并指向间隔写法，见 ADR-0006），投 prompt 唤醒 LLM | 中（定时器 + 唤醒投递） | 中：与 agent 忙碌状态交错 |
+| `pretty_task_loop_list` / `pretty_task_loop_update` / `pretty_task_loop_delete` | 增删查改、暂停/恢复、`maxFires`/`expiresIn` | 低 | 低 |
 | Iteration 记录 | 每次唤醒生成一条 Iteration，挂该轮全部工具调用（命令、起止时间、结果） | 中（事件订阅 + 归属判定） | 中：并行工具调用顺序 |
 | 排队投递 | 到点时 agent 忙 → 排队到本轮结束（`followUp`） | 低 | 低 |
 | 上限 | Loop ≤ 50、running Task ≤ 20 | 低 | 低 |

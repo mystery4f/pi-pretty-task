@@ -1,10 +1,10 @@
 # 配置与上限
 
-本文档说明当前的配置面：命令在哪个 shell 里跑、输出字节上限、`bg_run` 每次可以自带的运行超时/工作目录/环境变量，以及按名字复用的命令模板。上限与超时都以“终止原因”收尾，见 `GLOSSARY.md` 的 Process task 条目；shell 与解码的决定见 `docs/adr/0008-shell-choice-and-output-decoding.md`。
+本文档说明当前的配置面：命令在哪个 shell 里跑、输出字节上限、`pretty_task_bg_run` 每次可以自带的运行超时/工作目录/环境变量，以及按名字复用的命令模板。上限与超时都以“终止原因”收尾，见 `GLOSSARY.md` 的 Process task 条目；shell 与解码的决定见 `docs/adr/0008-shell-choice-and-output-decoding.md`。
 
 ## 命令在哪个 shell 里跑
 
-`bg_run` 的 `command` 不是一条跨平台的“shell 脚本”，它交给当前平台选定的 shell。默认是各平台的老样子，可以整体换掉，也可以只换一次调用：
+`pretty_task_bg_run` 的 `command` 不是一条跨平台的“shell 脚本”，它交给当前平台选定的 shell。默认是各平台的老样子，可以整体换掉，也可以只换一次调用：
 
 | 平台 | 默认 | 可选 |
 |---|---|---|
@@ -59,13 +59,13 @@ PI_PRETTY_TASK_POSIX_SHELL_PATH is set without PI_PRETTY_TASK_POSIX_SHELL; it on
 
 ### 只换一次调用
 
-`bg_run` 的 `shell` 取 `default`、`cmd`、`bash`、`sh`：`default`（不给也一样）跟随上面的配置，其余取值直接点名一个 shell。平台不支持的取值当场拒绝，信息列出该平台允许的取值，任务不会创建：
+`pretty_task_bg_run` 的 `shell` 取 `default`、`cmd`、`bash`、`sh`：`default`（不给也一样）跟随上面的配置，其余取值直接点名一个 shell。平台不支持的取值当场拒绝，信息列出该平台允许的取值，任务不会创建：
 
 ```
 shell "sh" is not available on win32; use one of: default, cmd, bash
 ```
 
-`inherit` 不在 `bg_run` 的取值里——它是“跟随平台默认”的配置意图，一次调用则应该点名具体 shell。
+`inherit` 不在 `pretty_task_bg_run` 的取值里——它是“跟随平台默认”的配置意图，一次调用则应该点名具体 shell。
 
 ### 编码
 
@@ -81,7 +81,7 @@ shell "sh" is not available on win32; use one of: default, cmd, bash
 | 默认值 | `20971520`（20 MiB） |
 | 合法值 | 大于 0 的安全整数（字节数） |
 
-一个 process task 的输出文件最多写入这么多字节。跨过上限的那个 chunk 会先按剩余空间截断写入，之后到达的 chunk 直接丢弃——文件精确停在上限，超出的内容不会落盘。与此同时，任务按与 `bg_kill` 完全相同的路径终止：先礼后兵，整棵进程树一起处理。任务最终状态为 `killed`，终止原因为 `output_cap`，`bg_status` 与 `bg_logs` 都会显示 `kill reason: output_cap`。
+一个 process task 的输出文件最多写入这么多字节。跨过上限的那个 chunk 会先按剩余空间截断写入，之后到达的 chunk 直接丢弃——文件精确停在上限，超出的内容不会落盘。与此同时，任务按与 `pretty_task_bg_kill` 完全相同的路径终止：先礼后兵，整棵进程树一起处理。任务最终状态为 `killed`，终止原因为 `output_cap`，`pretty_task_bg_status` 与 `pretty_task_bg_logs` 都会显示 `kill reason: output_cap`。
 
 恰好写满上限而没有丢弃任何字节的任务不算超限，照常记 `completed`。
 
@@ -97,7 +97,7 @@ pi 会把这条信息报告为 “Failed to load extension: …”。**不做静
 
 ## 运行超时
 
-`bg_run` 接受可选的 `timeoutSeconds`：正数秒，最多 `2147483.647`（`setTimeout` 能计量的最长延迟，超过会被 Node 折成 1ms，等于立刻超时）。到点后走同一个 `stop` 路径，状态 `killed`，终止原因 `timeout`，`bg_status` 与 `bg_logs` 同样显示 `kill reason: timeout`。非法值（`0`、负数、`NaN`、`Infinity`）在启动进程之前就被拒绝，任务不会创建。
+`pretty_task_bg_run` 接受可选的 `timeoutSeconds`：正数秒，最多 `2147483.647`（`setTimeout` 能计量的最长延迟，超过会被 Node 折成 1ms，等于立刻超时）。到点后走同一个 `stop` 路径，状态 `killed`，终止原因 `timeout`，`pretty_task_bg_status` 与 `pretty_task_bg_logs` 同样显示 `kill reason: timeout`。非法值（`0`、负数、`NaN`、`Infinity`）在启动进程之前就被拒绝，任务不会创建。
 
 **没有默认超时。** v0.1 的验收要求一条 10 分钟的长任务不被杀掉，默认超时与这条验收直接冲突；需要上限的调用方自己给出秒数。
 ## 同时运行的任务上限
@@ -108,17 +108,17 @@ pi 会把这条信息报告为 “Failed to load extension: …”。**不做静
 | 默认值 | `20` |
 | 合法值 | 大于 0 的安全整数（任务数） |
 
-`docs/scope-v1.md` 承诺每个会话同时最多 20 个 running 的 process task，这个键就是那条上限。计数只数记录：一个会话里状态为 `running` 的 process 记录，子任务也算——`bg_run` 的 child、cmd loop 的一次 fire（父任务是一条 loop）、chain 的一个 step（父任务是一条 chain）都是 process 记录，所以它们共享同一个上限（ADR-0014）。loop 的上限（50）数的是调度，不是进程，两者互不抵消。
+`docs/scope-v1.md` 承诺每个会话同时最多 20 个 running 的 process task，这个键就是那条上限。计数只数记录：一个会话里状态为 `running` 的 process 记录，子任务也算——`pretty_task_bg_run` 的 child、cmd loop 的一次 fire（父任务是一条 loop）、chain 的一个 step（父任务是一条 chain）都是 process 记录，所以它们共享同一个上限（ADR-0014）。loop 的上限（50）数的是调度，不是进程，两者互不抵消。
 
 三处入口都要过这道门：
 
-- `bg_run` 在创建记录**之前**被拒绝，错误信息就是这条上限，工具再补一句 `The task was not started.`，所以拒绝不会留下一条说不清来历的记录。
+- `pretty_task_bg_run` 在创建记录**之前**被拒绝，错误信息就是这条上限，工具再补一句 `The task was not started.`，所以拒绝不会留下一条说不清来历的记录。
 - 一次 fire 被拒绝时，fires 历史里那一条记为 `failed`，`error` 是这条上限，并计入连续失败次数；它不会停在 `pending`。
 - 一个 chain step 拿不到名额时，这个 step 记为 `failed`、原因写在它的 `error` 里，chain 随这个 step 结束为 `failed`，原因引用这个 step，后面的 step 记为 `skipped`。
 
-拒绝信息同时给出上限和这个键名：`This session already has 20 running process tasks; the limit is 20 (PI_PRETTY_TASK_MAX_RUNNING_TASKS). Stop one with bg_kill before starting another.` 一条 fire 和一条 step 都在看不见的地方失败，用户读到的就是这条记录，所以它必须自己说清楚是谁拦的、怎么放开。
+拒绝信息同时给出上限和这个键名：`This session already has 20 running process tasks; the limit is 20 (PI_PRETTY_TASK_MAX_RUNNING_TASKS). Stop one with pretty_task_bg_kill before starting another.` 一条 fire 和一条 step 都在看不见的地方失败，用户读到的就是这条记录，所以它必须自己说清楚是谁拦的、怎么放开。
 
-`0`、负数、小数与拼错的值在加载时被拒绝（与其他键同样的报错形状），不会等到第一次 `bg_run` 才暴露：把上限读成 `NaN` 会让比较永远成立，所有任务在开始时就被拒绝，而用户完全看不出是哪个键造成的。
+`0`、负数、小数与拼错的值在加载时被拒绝（与其他键同样的报错形状），不会等到第一次 `pretty_task_bg_run` 才暴露：把上限读成 `NaN` 会让比较永远成立，所有任务在开始时就被拒绝，而用户完全看不出是哪个键造成的。
 
 ## 终端通知
 
@@ -187,14 +187,14 @@ PI_PRETTY_TASK_RETENTION_DAYS must be a positive whole number of days; received 
 
 ## 每次调用的目录与环境变量
 
-`bg_run` 每次调用可以自带 `cwd` 和 `env`，只影响这次派生出来的子进程：
+`pretty_task_bg_run` 每次调用可以自带 `cwd` 和 `env`，只影响这次派生出来的子进程：
 
 | 参数 | 形状 | 作用 |
 |---|---|---|
 | `cwd` | string | 命令在哪个目录里跑 |
 | `env` | `{ [名字]: string }` | 只给这个子进程的环境变量 |
 
-`cwd` 按会话工作目录解析：相对路径拼在会话目录后面，绝对路径原样使用，没给就用会话目录。最终使用的绝对路径写进任务记录，面板与 `bg_status` 都显示它，之后不再重新解析。目录必须存在且确实是目录，否则在创建任务记录之前就拒绝，错误信息带上解析后的路径，例如：
+`cwd` 按会话工作目录解析：相对路径拼在会话目录后面，绝对路径原样使用，没给就用会话目录。最终使用的绝对路径写进任务记录，面板与 `pretty_task_bg_status` 都显示它，之后不再重新解析。目录必须存在且确实是目录，否则在创建任务记录之前就拒绝，错误信息带上解析后的路径，例如：
 
 ```
 Working directory /work/project/no-such-dir does not exist. The task was not started.
@@ -203,7 +203,7 @@ Working directory /work/project/no-such-dir does not exist. The task was not sta
 `env` 合并到扩展自身的 `process.env` 之上，只作用于这个子进程；空字符串也是值，可以把变量清空。`undefined` 或非字符串会被 schema 拒绝。**`env` 不落盘**：名字和值都不写进 `.pi/tasks/<session>/tasks.json`，也没有任何工具会把值打印出来——文件里的记录不是存放 token 的地方，而进程启动时已经拿到了它。
 
 ## 命名模板
-`bg_run` 可以把一组常用参数写成模板，用一个名字代替整条命令。模板来自两个 `pretty-task.json`：项目文件优先，同名模板整个由项目文件覆盖；只写在 agent 文件里的名字照样可用。
+`pretty_task_bg_run` 可以把一组常用参数写成模板，用一个名字代替整条命令。模板来自两个 `pretty-task.json`：项目文件优先，同名模板整个由项目文件覆盖；只写在 agent 文件里的名字照样可用。
 
 | 位置 | 路径 |
 |---|---|
@@ -219,14 +219,14 @@ Working directory /work/project/no-such-dir does not exist. The task was not sta
 ```
 调用时只给模板名，命令、目录和超时都来自模板：
 ```
-bg_run({ "template": "test" })
+pretty_task_bg_run({ "template": "test" })
 ```
-模板字段与 `bg_run` 的同名参数含义相同：`cwd` 仍按会话目录解析，`timeoutSeconds` 仍受上面的上限约束。调用里显式给出的 `command`、`cwd`、`timeoutSeconds` 优先于模板，模板不会悄悄盖掉它们。模板不携带 `env`，需要环境变量的调用自己传。
+模板字段与 `pretty_task_bg_run` 的同名参数含义相同：`cwd` 仍按会话目录解析，`timeoutSeconds` 仍受上面的上限约束。调用里显式给出的 `command`、`cwd`、`timeoutSeconds` 优先于模板，模板不会悄悄盖掉它们。模板不携带 `env`，需要环境变量的调用自己传。
 名字不存在时任务不会创建，错误信息列出当前已知的名字：
 ```
 Unknown template "tset". Known templates: "lint", "test". The task was not started. Templates are read when the extension loads, so a file edited during this session applies only after /reload or a new session.
 ```
-模板文件**只在扩展加载时读一次**。会话进行中改文件，当前会话里名字、命令、`bg_run` 的描述都不会变，新模板要等 `/reload` 或新会话才可用——工具描述与报错都写着这句，避免模型以为写了没生效。描述本身就是提示词前缀的一部分：文件内容一变，下次加载的描述文字就变，那一段缓存要重付一次；内容没变则逐字节相同，重载不花钱。增删流程与校验步骤见插件自带的 `skills/pretty-task-templates/SKILL.md`。
+模板文件**只在扩展加载时读一次**。会话进行中改文件，当前会话里名字、命令、`pretty_task_bg_run` 的描述都不会变，新模板要等 `/reload` 或新会话才可用——工具描述与报错都写着这句，避免模型以为写了没生效。描述本身就是提示词前缀的一部分：文件内容一变，下次加载的描述文字就变，那一段缓存要重付一次；内容没变则逐字节相同，重载不花钱。增删流程与校验步骤见插件自带的 `skills/pretty-task-templates/SKILL.md`。
 任一文件解析失败只影响该文件：错误写到 stderr，带上文件路径和具体位置（例如 `invalid JSON (...)`、`template "test".command must be a non-empty string`），扩展继续加载，另一个文件里的模板照常可用。
 
 ## 为什么配置只从一个地方读
@@ -243,4 +243,4 @@ PI_PRETTY_TASK_NOTIFY_TIMEOUT is not a key this version reads; known keys: PI_PR
 
 ## 上限如何落到进程上
 
-上限与 shell 策略都来自同一个 `Settings`：扩展入口 `src/index.ts` 在注册任何工具之前调用 `readSettings()`，把环境读成 `Settings`，再按 `settings.templatePaths` 读模板文件；`settings.outputCapBytes`、`settings.maxRunningTasks` 与 `settings.shellPolicy` 交给 `ProcessTasks`，输出上限与 shell 进入 supervisor 的输出写入点与 `spawn` 调用，任务上限在 `start` 与 `launch` 之前数一次记录。`bg_run` 的 `shell` 在 `spawn` 之前解析完，不支持的取值不会留下一条跑不起来的记录。超限与超时都不引入第二套终止机制：它们只是带着原因调用 `ProcessTasks.stop()`，与 `bg_kill` 走同一条路。读输出时 `src/tasks/base/decode.ts` 是唯一解码点，`src/tasks/base/output.ts` 的尾巴读取与 `bg_logs` 的整段读取共用它。
+上限与 shell 策略都来自同一个 `Settings`：扩展入口 `src/index.ts` 在注册任何工具之前调用 `readSettings()`，把环境读成 `Settings`，再按 `settings.templatePaths` 读模板文件；`settings.outputCapBytes`、`settings.maxRunningTasks` 与 `settings.shellPolicy` 交给 `ProcessTasks`，输出上限与 shell 进入 supervisor 的输出写入点与 `spawn` 调用，任务上限在 `start` 与 `launch` 之前数一次记录。`pretty_task_bg_run` 的 `shell` 在 `spawn` 之前解析完，不支持的取值不会留下一条跑不起来的记录。超限与超时都不引入第二套终止机制：它们只是带着原因调用 `ProcessTasks.stop()`，与 `pretty_task_bg_kill` 走同一条路。读输出时 `src/tasks/base/decode.ts` 是唯一解码点，`src/tasks/base/output.ts` 的尾巴读取与 `pretty_task_bg_logs` 的整段读取共用它。
