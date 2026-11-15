@@ -25,7 +25,8 @@ Start at [AGENTS.md](AGENTS.md) for the product model and rules, and [GLOSSARY.m
 npm install
 npm run check   # typecheck
 npm run lint    # biome
-npm run test    # vitest
+npm run test    # vitest, both projects
+npm run test:unit  # the pure half only, seconds
 npm run build   # emit dist/
 ```
 
