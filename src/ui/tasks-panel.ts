@@ -145,8 +145,11 @@ export type PanelFilter = "all" | "running" | "failed" | "done";
 /** The pages in the order `1`, `2`, `3` and the `tab` key walk them. */
 export const PANEL_TABS: readonly PanelTab[] = ["processes", "loops", "chains"];
 
-/** The filters in the order `f` walks them, opening on the widest one. */
+/** The filters in the order `f` walks them, starting from the one the panel opens on. */
 export const PANEL_FILTERS: readonly PanelFilter[] = ["all", "running", "failed", "done"];
+
+/** The filter a freshly opened panel starts on: live work, not the archive. */
+export const DEFAULT_PANEL_FILTER: PanelFilter = "running";
 
 /** The word each page is titled with; the glossary's own names (GLOSSARY.md). */
 const TAB_TITLE: Record<PanelTab, string> = {
@@ -216,7 +219,7 @@ export class TasksPanel implements Component {
   /** The page being read; a reopened panel starts on the remembered one (ADR-0012). */
   private tab: PanelTab = rememberedTab;
   /** The status filter `f` cycles, applied inside the open page. */
-  private filter: PanelFilter = "all";
+  private filter: PanelFilter = DEFAULT_PANEL_FILTER;
   /**
    * Whether `o` has brought in the other sessions working in this checkout. Their
    * rows are read-only and tagged, and the counts above never include them.
@@ -1159,20 +1162,35 @@ export class TasksPanel implements Component {
   }
 
   /**
-   * `Processes │ Loops │ Chains · status: running`: the page being read is the one
-   * washed with the selection colour, so the band doubles as where-am-I and as the
-   * list of keys that gets you elsewhere (ADR-0012, `1`/`2`/`3`).
+   * `1 Processes 2 │ 2 Loops 1 │ 3 Chains · filter: running`: each tab carries how
+   * much of its kind is live right now, so a page the reader is not on still says
+   * whether it holds work. The page being read is washed with the selection colour,
+   * so the band doubles as where-am-I and as the keys that get you elsewhere
+   * (ADR-0012, `1`/`2`/`3`).
    */
   private tabBand(): string {
     const theme = this.theme;
     const pages = PANEL_TABS.map((tab, index) => {
+      const live = this.liveCount(tab);
       const title = `${String(index + 1)} ${TAB_TITLE[tab]}`;
+      const badge = theme.fg(live > 0 ? "accent" : "muted", String(live));
       return tab === this.tab
-        ? theme.bg("selectedBg", theme.fg("text", ` ${title} `))
-        : theme.fg("muted", ` ${title} `);
+        ? theme.bg(
+            "selectedBg",
+            `${theme.fg("text", ` ${title} `)}${theme.fg("accent", `${badge} `)}`,
+          )
+        : `${theme.fg("muted", ` ${title} `)}${badge} `;
     });
     const divider = theme.fg("borderMuted", "│");
-    return `${pages.join(divider)}${theme.fg("muted", `· status: ${this.filter}`)}`;
+    return `${pages.join(divider)}${theme.fg("muted", `· filter: ${this.filter}`)}`;
+  }
+
+  /** How many rows on that page are live; a paused loop still counts as owed a turn. */
+  private liveCount(tab: PanelTab): number {
+    return this.allRows.filter(
+      (row) =>
+        inTab(row.task, tab) && (row.task.status === "running" || row.task.status === "paused"),
+    ).length;
   }
 
   /** One `dot label number` per ending, in the order the reader cares about. */
@@ -1264,7 +1282,9 @@ export class TasksPanel implements Component {
           ? TAB_EMPTY[this.tab]
           : this.query.length > 0
             ? "  Nothing on this page matches the search — / , then backspace, widens it."
-            : "  Nothing here matches this status — f moves to the next filter.";
+            : this.filter === "running"
+              ? "  Nothing is running on this page — f shows every status, so finished work is one keypress away."
+              : "  Nothing here matches this status — f moves to the next filter.";
       body.push("", theme.fg("dim", message));
       return this.listFrame(body, width);
     }

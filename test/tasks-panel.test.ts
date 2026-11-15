@@ -20,6 +20,7 @@ import type {
 } from "../src/tasks/base/task.js";
 import type { Iteration, IterationCall } from "../src/tasks/loop/iteration.js";
 import {
+  DEFAULT_PANEL_FILTER,
   DETAIL_OUTPUT_LINES,
   PANEL_FILTERS,
   PANEL_TABS,
@@ -308,7 +309,7 @@ async function openOn(
 
 /**
  * The key that reaches a page or a filter from wherever the panel opens: `1`–`3`
- * for a page, `f` as many times as the filter is from `all`.
+ * for a page, `f` as many times as the filter is from the one the panel opens on.
  */
 function tabKey(choice: PanelTab | PanelFilter): string {
   switch (choice) {
@@ -316,9 +317,18 @@ function tabKey(choice: PanelTab | PanelFilter): string {
     case "loops":
     case "chains":
       return String(PANEL_TABS.indexOf(choice) + 1);
-    default:
-      return "f".repeat(PANEL_FILTERS.indexOf(choice));
+    default: {
+      // The panel opens on DEFAULT_PANEL_FILTER; `f` walks the list in one direction only.
+      const from = PANEL_FILTERS.indexOf(DEFAULT_PANEL_FILTER);
+      const to = PANEL_FILTERS.indexOf(choice);
+      return "f".repeat((to - from + PANEL_FILTERS.length) % PANEL_FILTERS.length);
+    }
   }
+}
+
+/** `f` walks running → failed → done → all, so the archive is three presses away. */
+function showAll(panel: TasksPanel): void {
+  for (let press = 0; press < PANEL_FILTERS.length - 1; press += 1) panel.handleInput("f");
 }
 
 // The remembered page outlives a panel, which is the point of it; each test still
@@ -430,7 +440,7 @@ describe("detail view", () => {
     await panel.settle();
 
     // A finished task is history, so it has to be asked for before Enter can open it.
-    panel.handleInput("h");
+    showAll(panel);
     await panel.settle();
     panel.handleInput(ENTER);
     await panel.settle();
@@ -688,9 +698,13 @@ describe("the three pages", () => {
     panel.handleInput("2");
     expect(drawn()).toContain("nightly review");
     expect(drawn()).not.toContain("web build");
-    // The band washes the open page's label and leaves the others alone.
-    expect(painted).toContainEqual({ colour: "selectedBg", text: " 2 Loops " });
-    expect(painted).not.toContainEqual({ colour: "selectedBg", text: " 1 Processes " });
+    // The band washes the open page's label (with its live count) and leaves the
+    // others alone.
+    const washed = painted
+      .filter((stroke) => stroke.colour === "selectedBg")
+      .map((stroke) => stroke.text);
+    expect(washed.join("")).toContain(" 2 Loops ");
+    expect(washed.join("")).not.toContain(" 1 Processes ");
 
     panel.handleInput("3");
     expect(drawn()).toContain("deploy queue");
@@ -1162,8 +1176,7 @@ describe("the list header", () => {
     // The filter narrows the rows, never the tally: with `failed` on, only `lint`
     // is listed and the header still names all five endings (ADR-0012).
     panel.handleInput("f");
-    panel.handleInput("f");
-    expect(plain(drawn())).toContain("status: failed");
+    expect(plain(drawn())).toContain("filter: failed");
     expect(drawn()).toContain("lint");
     expect(drawn()).not.toContain("server");
 
@@ -1190,31 +1203,27 @@ describe("the status filter", () => {
     const { panel, drawn } = openPanel(byStatus());
     await panel.settle();
 
-    // `all` is where the panel opens: the past is as reachable as the present.
-    expect(plain(drawn())).toContain("status: all");
-    expect(drawn()).toContain("build");
-
-    panel.handleInput("f");
-    expect(plain(drawn())).toContain("status: running");
+    // `running` is where the panel opens: the past is one keypress group away.
+    expect(plain(drawn())).toContain("filter: running");
     expect(drawn()).toContain("server");
     expect(drawn()).not.toContain("lint");
-    expect(drawn()).toContain("showing running");
 
     panel.handleInput("f");
-    expect(plain(drawn())).toContain("status: failed");
+    expect(plain(drawn())).toContain("filter: failed");
     expect(drawn()).toContain("lint");
     expect(drawn()).not.toContain("server");
 
     // A killed task finished without failing, so it is done, not failed.
     panel.handleInput("f");
-    expect(plain(drawn())).toContain("status: done");
+    expect(plain(drawn())).toContain("filter: done");
     expect(drawn()).toContain("watch");
     expect(drawn()).toContain("deploy");
     expect(drawn()).toContain("build");
     expect(drawn()).not.toContain("lint");
 
     panel.handleInput("f");
-    expect(plain(drawn())).toContain("status: all");
+    expect(plain(drawn())).toContain("filter: all");
+    expect(drawn()).toContain("build");
 
     panel.dispose();
   });
@@ -1230,12 +1239,13 @@ describe("the status filter", () => {
 
     panel.handleInput("/");
     for (const character of "dpl") panel.handleInput(character);
+    // The panel opens on `running`, so the failed row is hidden until the filter
+    // asks for it; the query keeps narrowing whatever the filter lets through.
     expect(plain(drawn())).toContain("deploy east");
-    expect(plain(drawn())).toContain("deploy west");
+    expect(plain(drawn())).not.toContain("deploy west");
 
-    // Leaving search keeps the query; `f` then narrows what the query found.
+    // Leaving search keeps the query; `f` then walks the filter under it.
     panel.handleInput("\x1bq");
-    panel.handleInput("f");
     expect(plain(drawn())).toContain("deploy east");
     expect(plain(drawn())).not.toContain("deploy west");
 
@@ -1248,10 +1258,9 @@ describe("the status filter", () => {
 
   it("counts a paused schedule as running, since it is still owed a turn", async () => {
     const { panel, drawn } = await openOn("loops", byStatus());
-    panel.handleInput("f");
 
     expect(drawn()).toContain("review loop");
-    expect(drawn()).toContain("status: running");
+    expect(drawn()).toContain("filter: running");
     expect(drawn()).not.toContain("Nothing");
 
     panel.dispose();
@@ -1263,13 +1272,12 @@ describe("the status filter", () => {
 
     panel.handleInput("f");
     panel.handleInput("f");
-    panel.handleInput("f");
     // Done: the paused loop is not done, so the page empties.
     expect(drawn()).toContain("Nothing here matches this status");
 
     // Processes are untouched by a filter set on the loops page.
     panel.handleInput("1");
-    expect(drawn()).toContain("status: done");
+    expect(drawn()).toContain("filter: done");
     expect(drawn()).toContain("build");
     expect(drawn()).not.toContain("server");
 
@@ -1284,7 +1292,6 @@ describe("the status filter", () => {
     ];
     const { panel, drawn } = await openOn("chains", source);
 
-    panel.handleInput("f");
     expect(drawn()).toContain("ship it");
     expect(drawn()).not.toContain("old news");
 
@@ -1593,6 +1600,8 @@ describe("recency and search", () => {
     const source = searchFixture();
     const { panel, drawn } = openPanel(source);
     await panel.settle();
+    // The fixture keeps a failed row, which the opening `running` filter would hide.
+    showAll(panel);
 
     panel.handleInput("/");
     for (const character of "a1b") panel.handleInput(character);
@@ -1715,7 +1724,8 @@ describe("recency and search", () => {
     const source = searchFixture();
     const { panel, drawn } = openPanel(source);
     await panel.settle();
-
+    // The fixture keeps a failed row, which the opening `running` filter would hide.
+    showAll(panel);
     panel.handleInput("/");
     for (const character of "failed") panel.handleInput(character);
 
