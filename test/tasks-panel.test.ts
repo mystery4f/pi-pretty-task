@@ -31,6 +31,7 @@ import {
   rememberPanelTab,
   TasksPanel,
 } from "../src/ui/tasks-panel.js";
+import { plainTheme } from "./support/extension-harness.js";
 
 const UP = "\u001b[A";
 const DOWN = "\u001b[B";
@@ -251,22 +252,6 @@ interface Opened {
  * a test can narrow a row and watch what makes way. Colours are asserted through
  * {@link recordingTheme} instead, where the tag overhead would skew the row.
  */
-function plainTheme(): Theme {
-  const plain = (_colour: string, text: string): string => text;
-  // A weight or a slant takes the text alone, so it cannot share the two-argument
-  // shape of a colour: a stray colour argument would be read as the text itself.
-  const decorate = (text: string): string => text;
-  return {
-    fg: plain,
-    bg: plain,
-    bold: decorate,
-    italic: decorate,
-    underline: decorate,
-    inverse: decorate,
-    strikethrough: decorate,
-  } as unknown as Theme;
-}
-
 /** A theme that keeps the text plain but records every colour it was asked for. */
 function recordingTheme(): { theme: Theme; painted: Array<{ colour: string; text: string }> } {
   const painted: Array<{ colour: string; text: string }> = [];

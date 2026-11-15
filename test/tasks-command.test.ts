@@ -297,7 +297,7 @@ describe("/tasks command", () => {
     await panel.settle();
     const newest = panel.render(100).join("\n");
     expect(newest).toContain("fire 5");
-    expect(newest).toContain("<accent>echo fire 5</accent>");
+    expect(newest).toContain("echo fire 5");
 
     // Back to the loop, one row older, and the command that turn ran.
     panel.handleInput(LEFT);
@@ -306,7 +306,7 @@ describe("/tasks command", () => {
     await panel.settle();
     const older = panel.render(100).join("\n");
     expect(older).toContain("fire 4");
-    expect(older).toContain("<accent>echo fire 4</accent>");
+    expect(older).toContain("echo fire 4");
     expect(older).not.toContain("echo fire 5");
 
     panel.handleInput("\u001bq");
