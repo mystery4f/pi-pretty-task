@@ -402,7 +402,7 @@ describe("LoopTasks", () => {
     expect(await task.loops.pump(task.now)).toHaveLength(1);
   });
 
-  it("refuses an invalid schedule the way loop_create does and keeps the old one firing", async () => {
+  it("refuses an invalid schedule the way pretty_task_loop_create does and keeps the old one firing", async () => {
     const task = await setup();
     const created = await task.loops.create({
       ...task.scope,

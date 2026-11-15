@@ -1,5 +1,5 @@
 /**
- * `bg_run`, `bg_status`, `bg_logs`, `bg_kill` and `bg_wait`: what the agent can
+ * `pretty_task_bg_run`, `pretty_task_bg_status`, `pretty_task_bg_logs`, `pretty_task_bg_kill` and `pretty_task_bg_wait`: what the agent can
  * do with process tasks.
  *
  * The tools are thin. They translate a turn into a scope, call the store, and
@@ -67,7 +67,7 @@ const RunParameters = Type.Object({
   cwd: Type.Optional(
     Type.String({
       description:
-        "Directory the command runs in. A relative path is resolved against the session's working directory; the resolved absolute path is kept in the task record and shown by the panel and bg_status. The directory must already exist.",
+        "Directory the command runs in. A relative path is resolved against the session's working directory; the resolved absolute path is kept in the task record and shown by the panel and pretty_task_bg_status. The directory must already exist.",
     }),
   ),
   env: Type.Optional(
@@ -164,7 +164,7 @@ const MAX_LOG_LINES = 2000;
 const FULL_MAX_BYTES = 4 * 1024 * 1024;
 const COMMAND_PREVIEW_LENGTH = 80;
 /**
- * One `bg_grep` answer is capped as a whole — header, matching lines and the
+ * One `pretty_task_bg_grep` answer is capped as a whole — header, matching lines and the
  * trailer together — so a noisy pattern cannot flood the context. The trailer is
  * paid for before the search runs, because its length decides how much room the
  * match list gets.
@@ -199,7 +199,7 @@ function patternPreview(pattern: string): string {
     : `${quoted.slice(0, PATTERN_PREVIEW_LENGTH)}…`;
 }
 
-/** One task as a labelled block, the shape both `bg_run` and `bg_status` return. */
+/** One task as a labelled block, the shape both `pretty_task_bg_run` and `pretty_task_bg_status` return. */
 export function describeTask(view: ProcessTaskView, options: { full?: boolean } = {}): string {
   const { task } = view;
   const lines = [
@@ -388,11 +388,11 @@ export function processTaskTools(
     const current = view.task.steps[view.task.cursor];
     return current === undefined
       ? `Task ${id} is a chain and writes no output of its own: every step has its own. A chain spawns nothing, so read a step's output by its id.`
-      : `Task ${id} is a chain and writes no output of its own: every step has its own. Its current step is ${current}; read that with its own id, or bg_status id=${id} for the queue.`;
+      : `Task ${id} is a chain and writes no output of its own: every step has its own. Its current step is ${current}; read that with its own id, or pretty_task_bg_status id=${id} for the queue.`;
   };
 
   const run: ToolDefinition<typeof RunParameters> = {
-    name: "bg_run",
+    name: "pretty_task_bg_run",
     label: "Run in background",
     description: runDescription(templates),
     parameters: RunParameters,
@@ -443,7 +443,7 @@ export function processTaskTools(
         const anchor = params.after.trim();
         if (anchor.length === 0) {
           return text(
-            "Pass the id of the task or chain to queue behind; bg_status lists the ids of this session. The task was not started.",
+            "Pass the id of the task or chain to queue behind; pretty_task_bg_status lists the ids of this session. The task was not started.",
           );
         }
         let queued: QueuedStep;
@@ -482,7 +482,7 @@ export function processTaskTools(
                 "",
                 describeTask(view),
                 "",
-                `Watch the queue with bg_status id=${queued.chain.id}; read this step with bg_logs id=${queued.step.id}.`,
+                `Watch the queue with pretty_task_bg_status id=${queued.chain.id}; read this step with pretty_task_bg_logs id=${queued.step.id}.`,
               ].join("\n"),
             },
           ],
@@ -520,7 +520,7 @@ export function processTaskTools(
               "",
               describeTask(view),
               "",
-              `Read its output with bg_logs id=${task.id}, search it with bg_grep id=${task.id}, check it with bg_status id=${task.id}.`,
+              `Read its output with pretty_task_bg_logs id=${task.id}, search it with pretty_task_bg_grep id=${task.id}, check it with pretty_task_bg_status id=${task.id}.`,
             ].join("\n"),
           },
         ],
@@ -530,7 +530,7 @@ export function processTaskTools(
   };
 
   const status: ToolDefinition<typeof StatusParameters> = {
-    name: "bg_status",
+    name: "pretty_task_bg_status",
     label: "Background task status",
     description:
       "Show background tasks of this session: status, elapsed time and output size. Pass an id for one task, or omit it to list them all.",
@@ -567,7 +567,7 @@ export function processTaskTools(
           content: [
             {
               type: "text",
-              text: "No background tasks in this session yet. Start one with bg_run.",
+              text: "No background tasks in this session yet. Start one with pretty_task_bg_run.",
             },
           ],
           details: { tasks: [] },
@@ -591,7 +591,7 @@ export function processTaskTools(
   };
 
   const logs: ToolDefinition<typeof LogsParameters> = {
-    name: "bg_logs",
+    name: "pretty_task_bg_logs",
     label: "Background task output",
     description:
       "Return the tail of a background task's output, stdout and stderr in emission order. Ask again while it runs to see more, or pass `follow` to get only what arrived since the previous follow call.",
@@ -689,7 +689,7 @@ export function processTaskTools(
       const id = params.id.trim();
       if (id.length === 0) {
         return text(
-          "Pass the id of the task to wait for; bg_status lists the ids of this session.",
+          "Pass the id of the task to wait for; pretty_task_bg_status lists the ids of this session.",
         );
       }
 
@@ -710,7 +710,7 @@ export function processTaskTools(
         return text(
           chain === undefined
             ? `No background task with id ${id} in this session.`
-            : `Task ${id} is a chain; wait for its step instead. bg_status id=${id} names the step at the cursor.`,
+            : `Task ${id} is a chain; wait for its step instead. pretty_task_bg_status id=${id} names the step at the cursor.`,
         );
       }
 
@@ -725,7 +725,7 @@ export function processTaskTools(
     },
   };
   const grep: ToolDefinition<typeof GrepParameters> = {
-    name: "bg_grep",
+    name: "pretty_task_bg_grep",
     label: "Search background task output",
     description:
       "Search a background task's whole output file for a plain substring and return only the matching lines, each prefixed with its line number. Case is ignored unless `ignoreCase` is false. The answer is bounded in lines and bytes, and it says how many matches it left out.",
@@ -733,11 +733,13 @@ export function processTaskTools(
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const id = params.id.trim();
       if (id.length === 0) {
-        return text("Pass the id of the task to search; bg_status lists the ids of this session.");
+        return text(
+          "Pass the id of the task to search; pretty_task_bg_status lists the ids of this session.",
+        );
       }
       if (params.pattern.length === 0) {
         return text(
-          "Pass the text to look for. bg_grep matches a plain substring, and an empty one would match every line.",
+          "Pass the text to look for. pretty_task_bg_grep matches a plain substring, and an empty one would match every line.",
         );
       }
 
@@ -813,7 +815,7 @@ export function processTaskTools(
   };
 
   const kill: ToolDefinition<typeof KillParameters> = {
-    name: "bg_kill",
+    name: "pretty_task_bg_kill",
     label: "Stop a background task",
     description:
       "Stop a background task and every process its command started: a polite signal, a short grace period, then force. A task that already finished is reported as such instead of failing.",
@@ -821,7 +823,9 @@ export function processTaskTools(
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const id = params.id.trim();
       if (id.length === 0) {
-        return text("Pass the id of the task to stop; bg_status lists the ids of this session.");
+        return text(
+          "Pass the id of the task to stop; pretty_task_bg_status lists the ids of this session.",
+        );
       }
 
       const scope = scopeOf(ctx);

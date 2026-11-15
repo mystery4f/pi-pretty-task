@@ -47,16 +47,16 @@ function makeStores(options: Pick<ProcessTasksOptions, "survivedRetryMs">) {
   return { sessions, processes, chainTasks, supervisor };
 }
 
-/** Run `bg_kill` on one id the way the tool does, and return what it said. */
+/** Run `pretty_task_bg_kill` on one id the way the tool does, and return what it said. */
 async function kill(
   stores: ReturnType<typeof makeStores>,
   scope: TaskScope,
   id: string,
 ): Promise<string> {
   const tool = processTaskTools(stores.processes, stores.chainTasks).find(
-    (candidate) => candidate.name === "bg_kill",
+    (candidate) => candidate.name === "pretty_task_bg_kill",
   );
-  if (tool === undefined) throw new Error("bg_kill is not registered");
+  if (tool === undefined) throw new Error("pretty_task_bg_kill is not registered");
   const ctx = {
     cwd: scope.cwd,
     sessionManager: { getSessionId: () => scope.sessionId },
@@ -173,7 +173,7 @@ describe("a stop whose tree survived", () => {
     expect(chain?.task.status).toBe("killed");
   });
 
-  it("says in bg_kill that the chain ended but its step could not be stopped", async () => {
+  it("says in pretty_task_bg_kill that the chain ended but its step could not be stopped", async () => {
     const dir = await makeTempDir();
     cleanup.push(dir.dispose);
     const stores = makeStores({ survivedRetryMs: 60_000 });
@@ -195,7 +195,7 @@ describe("a stop whose tree survived", () => {
     expect(said).not.toContain(`Stopped chain ${queued.chain.id}`);
   });
 
-  it("says in bg_kill that a single task outlived its kill", async () => {
+  it("says in pretty_task_bg_kill that a single task outlived its kill", async () => {
     const dir = await makeTempDir();
     cleanup.push(dir.dispose);
     const stores = makeStores({ survivedRetryMs: 60_000 });

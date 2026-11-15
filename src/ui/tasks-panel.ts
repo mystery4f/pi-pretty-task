@@ -160,9 +160,9 @@ const TAB_TITLE: Record<PanelTab, string> = {
 
 /** What a page says when the session holds nothing of its kind at all. */
 const TAB_EMPTY: Record<PanelTab, string> = {
-  processes: "No processes here — run a command with bg_run and it appears.",
-  loops: "No loops here — a schedule created with loop_create gathers its fires here.",
-  chains: "No chains here — queue a step with bg_run's after and the pipeline appears.",
+  processes: "No processes here — run a command with pretty_task_bg_run and it appears.",
+  loops: "No loops here — a schedule created with pretty_task_loop_create gathers its fires here.",
+  chains: "No chains here — queue a step with pretty_task_bg_run's after and the pipeline appears.",
 };
 
 /**
@@ -777,7 +777,8 @@ export class TasksPanel implements Component {
 
   private openDetail(): void {
     if (this.rows.length === 0) {
-      this.notice = "No tasks to open yet — run a command with bg_run and it appears here.";
+      this.notice =
+        "No tasks to open yet — run a command with pretty_task_bg_run and it appears here.";
       this.paint();
       return;
     }
@@ -971,8 +972,8 @@ export class TasksPanel implements Component {
     if (row.task.kind === "chain") {
       // A chain is a queue, and its steps are the commands: `R` has nothing to repeat
       // here, so the panel says so instead of starting something the reader did not ask
-      // for. Starting the same pipeline again is a `bg_run` with the same `after`.
-      this.notice = "A chain is a queue; run its steps again with bg_run.";
+      // for. Starting the same pipeline again is a `pretty_task_bg_run` with the same `after`.
+      this.notice = "A chain is a queue; run its steps again with pretty_task_bg_run.";
       this.paint();
       return;
     }
@@ -985,7 +986,8 @@ export class TasksPanel implements Component {
       row.task.parentId !== undefined &&
       row.task.fire === undefined
     ) {
-      this.notice = "A chain step runs inside its queue; run the chain again with bg_run.";
+      this.notice =
+        "A chain step runs inside its queue; run the chain again with pretty_task_bg_run.";
       this.paint();
       return;
     }
@@ -2087,7 +2089,7 @@ function messageOf(error: unknown): string {
 }
 
 /** Tools whose subject is a command line, so the panel can make them stand out. */
-const COMMAND_TOOLS: ReadonlySet<string> = new Set(["bash", "bg_run"]);
+const COMMAND_TOOLS: ReadonlySet<string> = new Set(["bash", "pretty_task_bg_run"]);
 
 /** Iteration states, read from the one task-status palette. */
 const ITERATION_COLOUR: Record<IterationStatus, ThemeColor> = {

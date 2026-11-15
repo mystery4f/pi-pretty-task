@@ -66,14 +66,19 @@ function detailsOf(result: { details: unknown }): LoopDetails {
 }
 
 async function createLoop(harness: Harness, params: Record<string, unknown>): Promise<LoopDetails> {
-  return detailsOf(await harness.call("loop_create", { schedule: "10s", ...params }));
+  return detailsOf(await harness.call("pretty_task_loop_create", { schedule: "10s", ...params }));
 }
 
 describe("loop tools", () => {
   it("registers the loop tools and the wake renderer", async () => {
     const task = await setup();
     expect(task.harness.toolNames).toEqual(
-      expect.arrayContaining(["loop_create", "loop_list", "loop_update", "loop_delete"]),
+      expect.arrayContaining([
+        "pretty_task_loop_create",
+        "pretty_task_loop_list",
+        "pretty_task_loop_update",
+        "pretty_task_loop_delete",
+      ]),
     );
     expect(task.harness.rendererTypes).toContain("loop-wake");
   });
@@ -97,7 +102,7 @@ describe("loop tools", () => {
       untilNextFireMs: 10_000,
     });
 
-    const listed = await task.harness.call("loop_list", {});
+    const listed = await task.harness.call("pretty_task_loop_list", {});
     const text = resultText(listed);
     expect(text).toContain("schedule: 10s");
     expect(text).toContain("next fire:");
@@ -106,13 +111,13 @@ describe("loop tools", () => {
     expect(text).toContain("status: running");
     expect(text).toContain("prompt: review the diff");
 
-    const one = await task.harness.call("loop_list", { id: created.id });
+    const one = await task.harness.call("pretty_task_loop_list", { id: created.id });
     expect(detailsOf(one).id).toBe(created.id);
   });
 
   it("rejects a bad schedule with a clear example", async () => {
     const task = await setup();
-    const result = await task.harness.call("loop_create", {
+    const result = await task.harness.call("pretty_task_loop_create", {
       schedule: "10 minutes",
       prompt: "keep going",
     });
@@ -139,7 +144,7 @@ describe("loop tools", () => {
     expect([1, 2, 3, 4, 5]).toContain(next.getDay());
     expect(nextFireAt).toBeGreaterThan(task.now);
 
-    const text = resultText(await task.harness.call("loop_list", {}));
+    const text = resultText(await task.harness.call("pretty_task_loop_list", {}));
     expect(text).toContain("schedule: 0 9 * * 1-5");
     expect(text).toContain(`next fire: ${next.toISOString()}`);
   });
@@ -161,7 +166,7 @@ describe("loop tools", () => {
     expect(await task.harness.pump(task.now)).toHaveLength(1);
     expect(task.harness.messages).toHaveLength(1);
 
-    const listed = detailsOf(await task.harness.call("loop_list", { id: created.id }));
+    const listed = detailsOf(await task.harness.call("pretty_task_loop_list", { id: created.id }));
     expect(listed.fires).toBe(1);
     if (listed.nextFireAt === undefined) throw new Error("the loop must keep a next fire");
     expect(listed.nextFireAt).toBeGreaterThan(first);
@@ -170,7 +175,7 @@ describe("loop tools", () => {
 
   it("refuses a six-field cron expression and points at the interval shorthand", async () => {
     const task = await setup();
-    const result = await task.harness.call("loop_create", {
+    const result = await task.harness.call("pretty_task_loop_create", {
       schedule: "0 0 9 * * 1-5",
       prompt: "keep going",
     });
@@ -185,7 +190,7 @@ describe("loop tools", () => {
 
   it("refuses an invalid cron expression at create time and names both shapes", async () => {
     const task = await setup();
-    const result = await task.harness.call("loop_create", {
+    const result = await task.harness.call("pretty_task_loop_create", {
       schedule: "0 25 * * *",
       prompt: "keep going",
     });
@@ -199,14 +204,14 @@ describe("loop tools", () => {
 
   it("rejects a bad maxFires and a bad expiresIn", async () => {
     const task = await setup();
-    const badMax = await task.harness.call("loop_create", {
+    const badMax = await task.harness.call("pretty_task_loop_create", {
       schedule: "10m",
       prompt: "keep going",
       maxFires: 0,
     });
     expect(resultText(badMax)).toContain("maxFires");
 
-    const badExpiry = await task.harness.call("loop_create", {
+    const badExpiry = await task.harness.call("pretty_task_loop_create", {
       schedule: "10m",
       prompt: "keep going",
       expiresIn: "2d",
@@ -248,7 +253,7 @@ describe("loop tools", () => {
     expect(rendered).toContain("fire 1");
     expect(rendered).toContain("keep working on the refactor");
 
-    const listed = await task.harness.call("loop_list", { id: created.id });
+    const listed = await task.harness.call("pretty_task_loop_list", { id: created.id });
     expect(detailsOf(listed)).toMatchObject({ fires: 1, lastFireAt: task.now });
   });
 
@@ -270,11 +275,14 @@ describe("loop tools", () => {
     ]);
   });
 
-  it("pauses, resumes, completes, and deletes through loop_update and loop_delete", async () => {
+  it("pauses, resumes, completes, and deletes through pretty_task_loop_update and pretty_task_loop_delete", async () => {
     const task = await setup();
     const created = await createLoop(task.harness, { schedule: "10s", prompt: "keep going" });
 
-    const paused = await task.harness.call("loop_update", { id: created.id, action: "pause" });
+    const paused = await task.harness.call("pretty_task_loop_update", {
+      id: created.id,
+      action: "pause",
+    });
     expect(resultText(paused)).toContain("Paused loop");
     expect(detailsOf(paused)).toMatchObject({ status: "paused", outcome: "paused" });
 
@@ -282,7 +290,10 @@ describe("loop tools", () => {
     expect(await task.harness.pump(task.now)).toEqual([]);
     expect(task.harness.messages).toEqual([]);
 
-    const resumed = await task.harness.call("loop_update", { id: created.id, action: "resume" });
+    const resumed = await task.harness.call("pretty_task_loop_update", {
+      id: created.id,
+      action: "resume",
+    });
     expect(resultText(resumed)).toContain("Resumed loop");
     expect(detailsOf(resumed)).toMatchObject({
       status: "running",
@@ -293,7 +304,7 @@ describe("loop tools", () => {
     task.advance(10_000);
     expect(await task.harness.pump(task.now)).toHaveLength(1);
 
-    const completed = await task.harness.call("loop_update", {
+    const completed = await task.harness.call("pretty_task_loop_update", {
       id: created.id,
       action: "complete",
     });
@@ -303,26 +314,29 @@ describe("loop tools", () => {
     task.advance(10_000);
     expect(await task.harness.pump(task.now)).toEqual([]);
 
-    const deleted = await task.harness.call("loop_delete", { id: created.id });
+    const deleted = await task.harness.call("pretty_task_loop_delete", { id: created.id });
     expect(resultText(deleted)).toContain("Deleted loop");
-    expect(resultText(await task.harness.call("loop_list", {}))).toContain("No loops");
+    expect(resultText(await task.harness.call("pretty_task_loop_list", {}))).toContain("No loops");
     task.advance(10_000);
     expect(await task.harness.pump(task.now)).toEqual([]);
     expect(task.harness.messages).toHaveLength(1);
   });
 
-  it("retunes a loop through loop_update and keeps its id, fires and iterations", async () => {
+  it("retunes a loop through pretty_task_loop_update and keeps its id, fires and iterations", async () => {
     const task = await setup();
     const created = await createLoop(task.harness, { schedule: "10s", prompt: "keep going" });
 
     task.advance(10_000);
     await task.harness.pump(task.now);
-    const before = detailsOf(await task.harness.call("loop_list", { id: created.id }));
+    const before = detailsOf(await task.harness.call("pretty_task_loop_list", { id: created.id }));
     expect(before).toMatchObject({ fires: 1, schedule: "10s" });
     expect(before.iterations).toHaveLength(1);
 
     task.advance(5_000);
-    const retuned = await task.harness.call("loop_update", { id: created.id, schedule: "1h" });
+    const retuned = await task.harness.call("pretty_task_loop_update", {
+      id: created.id,
+      schedule: "1h",
+    });
     expect(resultText(retuned)).toContain("Retuned loop");
     expect(detailsOf(retuned)).toMatchObject({
       id: created.id,
@@ -334,7 +348,7 @@ describe("loop tools", () => {
       nextFireAt: task.now + 3_600_000,
     });
 
-    const listed = await task.harness.call("loop_list", { id: created.id });
+    const listed = await task.harness.call("pretty_task_loop_list", { id: created.id });
     expect(resultText(listed)).toContain("schedule: 1h");
     expect(detailsOf(listed).iterations).toEqual(before.iterations);
 
@@ -345,12 +359,15 @@ describe("loop tools", () => {
     expect(await task.harness.pump(task.now)).toHaveLength(1);
   });
 
-  it("retunes a paused loop through loop_update and leaves it paused", async () => {
+  it("retunes a paused loop through pretty_task_loop_update and leaves it paused", async () => {
     const task = await setup();
     const created = await createLoop(task.harness, { schedule: "10s", prompt: "keep going" });
-    await task.harness.call("loop_update", { id: created.id, action: "pause" });
+    await task.harness.call("pretty_task_loop_update", { id: created.id, action: "pause" });
 
-    const retuned = await task.harness.call("loop_update", { id: created.id, schedule: "30m" });
+    const retuned = await task.harness.call("pretty_task_loop_update", {
+      id: created.id,
+      schedule: "30m",
+    });
     expect(resultText(retuned)).toContain("stays paused");
     expect(detailsOf(retuned)).toMatchObject({
       outcome: "rescheduled",
@@ -362,22 +379,25 @@ describe("loop tools", () => {
     task.advance(10_000);
     expect(await task.harness.pump(task.now)).toEqual([]);
 
-    const resumed = await task.harness.call("loop_update", { id: created.id, action: "resume" });
+    const resumed = await task.harness.call("pretty_task_loop_update", {
+      id: created.id,
+      action: "resume",
+    });
     expect(detailsOf(resumed)).toMatchObject({
       status: "running",
       nextFireAt: task.now + 1_800_000,
     });
   });
 
-  it("rejects an invalid schedule on loop_update with the message loop_create gives", async () => {
+  it("rejects an invalid schedule on pretty_task_loop_update with the message pretty_task_loop_create gives", async () => {
     const task = await setup();
     const created = await createLoop(task.harness, { schedule: "10s", prompt: "keep going" });
-    const rejectedCreate = await task.harness.call("loop_create", {
+    const rejectedCreate = await task.harness.call("pretty_task_loop_create", {
       schedule: "10 minutes",
       prompt: "keep going",
     });
 
-    const rejectedUpdate = await task.harness.call("loop_update", {
+    const rejectedUpdate = await task.harness.call("pretty_task_loop_update", {
       id: created.id,
       schedule: "10 minutes",
     });
@@ -385,7 +405,9 @@ describe("loop tools", () => {
     expect(detailsOf(rejectedUpdate).error).toContain('Invalid schedule "10 minutes"');
     expect(detailsOf(rejectedUpdate).id).toBeUndefined();
 
-    const unchanged = detailsOf(await task.harness.call("loop_list", { id: created.id }));
+    const unchanged = detailsOf(
+      await task.harness.call("pretty_task_loop_list", { id: created.id }),
+    );
     expect(unchanged).toMatchObject({
       schedule: "10s",
       status: "running",
@@ -396,17 +418,17 @@ describe("loop tools", () => {
     expect(await task.harness.pump(task.now)).toHaveLength(1);
   });
 
-  it("asks for an action or a schedule when loop_update gets neither", async () => {
+  it("asks for an action or a schedule when pretty_task_loop_update gets neither", async () => {
     const task = await setup();
     const created = await createLoop(task.harness, { schedule: "10s", prompt: "keep going" });
 
-    const result = await task.harness.call("loop_update", { id: created.id });
+    const result = await task.harness.call("pretty_task_loop_update", { id: created.id });
     expect(resultText(result)).toContain("Give an action or a schedule");
     expect(detailsOf(result).outcome).toBeUndefined();
     expect(detailsOf(result).error).toContain("Give an action or a schedule");
 
     // The loop is untouched by the refusal, not merely unchanged in the reply.
-    const listed = detailsOf(await task.harness.call("loop_list", { id: created.id }));
+    const listed = detailsOf(await task.harness.call("pretty_task_loop_list", { id: created.id }));
     expect(listed).toMatchObject({ schedule: "10s", status: "running" });
   });
 
@@ -420,7 +442,7 @@ describe("loop tools", () => {
     const restarted = createHarness(task.turn, { now: () => task.now });
     await restarted.startSession();
 
-    const listed = await restarted.call("loop_list", { id: created.id });
+    const listed = await restarted.call("pretty_task_loop_list", { id: created.id });
     expect(detailsOf(listed)).toMatchObject({
       id: created.id,
       status: "running",
@@ -468,7 +490,7 @@ describe("loop tools", () => {
     expect(await task.harness.pump(task.now)).toHaveLength(1);
     expect(task.harness.messages[0]?.content).toBe("keep reviewing");
 
-    const listed = detailsOf(await task.harness.call("loop_list", { id: "lp0001" }));
+    const listed = detailsOf(await task.harness.call("pretty_task_loop_list", { id: "lp0001" }));
     expect(listed).toMatchObject({
       id: "lp0001",
       kind: "prompt-loop",

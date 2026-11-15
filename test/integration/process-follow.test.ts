@@ -1,5 +1,5 @@
 /**
- * Extension seam: `bg_logs` with `follow` reads only what the caller has not
+ * Extension seam: `pretty_task_bg_logs` with `follow` reads only what the caller has not
  * seen yet. A long task is followed by asking again, so an answer carries the
  * bytes since the previous follow call, says when the task has finished, and
  * never waits for the whole window once new output arrives.
@@ -46,7 +46,7 @@ afterEach(async () => {
   while (cleanup.length > 0) await cleanup.pop()?.();
 });
 
-/** The body of a `bg_logs` answer: everything after the blank line under the header. */
+/** The body of a `pretty_task_bg_logs` answer: everything after the blank line under the header. */
 function body(text: string): string {
   return text.slice(text.indexOf("\n\n") + 2);
 }
@@ -60,7 +60,7 @@ function followAnswer(result: AgentToolResult<unknown>): {
 
 /** Start a command that may outlive the call; the test kills it afterwards. */
 async function startTask(harness: Harness, command: string): Promise<TaskDetails> {
-  const started = await harness.call("bg_run", { command });
+  const started = await harness.call("pretty_task_bg_run", { command });
   const task = started.details as TaskDetails;
   if (task.pid !== undefined) spawned.push(task.pid);
   return task;
@@ -70,13 +70,13 @@ async function startTask(harness: Harness, command: string): Promise<TaskDetails
 async function finishedTask(harness: Harness, command: string): Promise<TaskDetails> {
   const task = await startTask(harness, command);
   await waitFor("the task to finish", async () => {
-    const status = await harness.call("bg_status", { id: task.id });
+    const status = await harness.call("pretty_task_bg_status", { id: task.id });
     return (status.details as TaskDetails).status !== "running";
   });
   return task;
 }
 
-describe("bg_logs following a task", () => {
+describe("pretty_task_bg_logs following a task", () => {
   it("returns the output no follow call has shown yet, and says the task has finished", async () => {
     const dir = await makeTempDir();
     cleanup.push(dir.dispose);
@@ -89,7 +89,7 @@ describe("bg_logs following a task", () => {
     const task = await finishedTask(harness, command);
 
     const { text, details } = followAnswer(
-      await harness.call("bg_logs", { id: task.id, follow: true }),
+      await harness.call("pretty_task_bg_logs", { id: task.id, follow: true }),
     );
 
     expect(body(text)).toBe("first\nsecond\n");
@@ -122,18 +122,22 @@ describe("bg_logs following a task", () => {
     const task = await startTask(harness, command);
 
     await waitFor("the first line", async () => {
-      const status = await harness.call("bg_status", { id: task.id });
+      const status = await harness.call("pretty_task_bg_status", { id: task.id });
       return (status.details as TaskDetails).outputBytes >= 4;
     });
-    const first = followAnswer(await harness.call("bg_logs", { id: task.id, follow: true }));
+    const first = followAnswer(
+      await harness.call("pretty_task_bg_logs", { id: task.id, follow: true }),
+    );
     expect(body(first.text)).toBe("one\n");
 
     await writeFile(trigger, "");
     await waitFor("the second line", async () => {
-      const status = await harness.call("bg_status", { id: task.id });
+      const status = await harness.call("pretty_task_bg_status", { id: task.id });
       return (status.details as TaskDetails).outputBytes >= 8;
     });
-    const second = followAnswer(await harness.call("bg_logs", { id: task.id, follow: true }));
+    const second = followAnswer(
+      await harness.call("pretty_task_bg_logs", { id: task.id, follow: true }),
+    );
 
     expect(body(second.text)).toBe("two\n");
     expect(second.details.from).toBe(4);
@@ -154,7 +158,7 @@ describe("bg_logs following a task", () => {
 
     const startedAt = Date.now();
     const answer = followAnswer(
-      await harness.call("bg_logs", { id: task.id, follow: true, timeoutSeconds: 30 }),
+      await harness.call("pretty_task_bg_logs", { id: task.id, follow: true, timeoutSeconds: 30 }),
     );
     const elapsed = Date.now() - startedAt;
 
@@ -165,11 +169,12 @@ describe("bg_logs following a task", () => {
     // The bytes can arrive a moment before the record is marked ended, so the
     // end is asserted on a follow taken after the task is known to be gone.
     await waitFor("the task to finish", async () => {
-      const status = (await harness.call("bg_status", { id: task.id })).details as TaskDetails;
+      const status = (await harness.call("pretty_task_bg_status", { id: task.id }))
+        .details as TaskDetails;
       return status.status !== "running";
     });
     const after = followAnswer(
-      await harness.call("bg_logs", { id: task.id, follow: true, timeoutSeconds: 5 }),
+      await harness.call("pretty_task_bg_logs", { id: task.id, follow: true, timeoutSeconds: 5 }),
     );
     expect(after.details.finished).toBe(true);
     expect(after.details.timedOut).toBe(false);
@@ -184,7 +189,7 @@ describe("bg_logs following a task", () => {
 
     const startedAt = Date.now();
     const answer = followAnswer(
-      await harness.call("bg_logs", { id: task.id, follow: true, timeoutSeconds: 0.4 }),
+      await harness.call("pretty_task_bg_logs", { id: task.id, follow: true, timeoutSeconds: 0.4 }),
     );
     const elapsed = Date.now() - startedAt;
 
@@ -204,7 +209,7 @@ describe("bg_logs following a task", () => {
 
     const startedAt = Date.now();
     const answer = followAnswer(
-      await harness.call("bg_logs", { id: task.id, follow: true, timeoutSeconds: 30 }),
+      await harness.call("pretty_task_bg_logs", { id: task.id, follow: true, timeoutSeconds: 30 }),
     );
     const elapsed = Date.now() - startedAt;
 
@@ -224,10 +229,12 @@ describe("bg_logs following a task", () => {
     const harness = createHarness({ cwd: dir.path, sessionId: "session-follow-first-again" });
     const task = await finishedTask(harness, command);
 
-    const tail = resultText(await harness.call("bg_logs", { id: task.id, lines: 1 }));
+    const tail = resultText(await harness.call("pretty_task_bg_logs", { id: task.id, lines: 1 }));
     expect(tail).toContain("second");
 
-    const answer = followAnswer(await harness.call("bg_logs", { id: task.id, follow: true }));
+    const answer = followAnswer(
+      await harness.call("pretty_task_bg_logs", { id: task.id, follow: true }),
+    );
 
     expect(body(answer.text)).toBe("first\nsecond\n");
     expect(answer.details.from).toBe(0);

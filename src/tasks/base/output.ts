@@ -2,7 +2,7 @@
  * Reading a task's output file: its tail, or what was appended past a cursor.
  *
  * A tail read is bounded twice — by bytes read from the end of the file and by
- * lines returned — because the same code serves `bg_logs` and the panel, and a
+ * lines returned — because the same code serves `pretty_task_bg_logs` and the panel, and a
  * runaway command must never be able to flood either. A follow read is bounded
  * by the file itself: it returns exactly the bytes the previous follow left.
  *

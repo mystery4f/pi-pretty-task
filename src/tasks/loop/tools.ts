@@ -1,5 +1,5 @@
 /**
- * `loop_create`, `loop_list`, `loop_update` and `loop_delete`: what the agent
+ * `pretty_task_loop_create`, `pretty_task_loop_list`, `pretty_task_loop_update` and `pretty_task_loop_delete`: what the agent
  * can do with loop tasks.
  *
  * Like the process tools these are thin: they turn a turn into a scope, call the
@@ -34,7 +34,7 @@ const CreateParameters = Type.Object({
   command: Type.Optional(
     Type.String({
       description:
-        "Shell command to run as a background process on each fire, exactly like bg_run. Give this or `prompt`, never both. A fire that comes due while the previous one still runs is skipped and shown as skipped, not started twice.",
+        "Shell command to run as a background process on each fire, exactly like pretty_task_bg_run. Give this or `prompt`, never both. A fire that comes due while the previous one still runs is skipped and shown as skipped, not started twice.",
     }),
   ),
   cwd: Type.Optional(
@@ -92,7 +92,7 @@ const UpdateParameters = Type.Object({
   schedule: Type.Optional(
     Type.String({
       description:
-        "New schedule for the same loop, in the forms loop_create accepts. The loop keeps its id, fire count and every recorded iteration; a running loop is re-armed from this update, never from the slot the old schedule had picked. An invalid expression is refused and the old schedule stays in force.",
+        "New schedule for the same loop, in the forms pretty_task_loop_create accepts. The loop keeps its id, fire count and every recorded iteration; a running loop is re-armed from this update, never from the slot the old schedule had picked. An invalid expression is refused and the old schedule stays in force.",
     }),
   ),
 });
@@ -213,7 +213,7 @@ function fireMeta(fire: FireRecord): string {
 
 /**
  * The fire listing for one command loop, newest first: the same rows the panel
- * expands to, so a caller reading `loop_list id=…` sees what the user sees.
+ * expands to, so a caller reading `pretty_task_loop_list id=…` sees what the user sees.
  * A trimmed record says how many older fires it dropped.
  */
 export function describeFires(task: CmdLoopTask): string {
@@ -237,7 +237,7 @@ export function describeFires(task: CmdLoopTask): string {
 
 /**
  * The iteration listing for one loop, newest first, with the tool calls each turn
- * made. This is the listing `loop_list id=…` returns and the panel (#9) draws:
+ * made. This is the listing `pretty_task_loop_list id=…` returns and the panel (#9) draws:
  * an iteration is reachable from the loop, never as a row of its own (ADR-0002).
  * A truncated record says how much it dropped rather than hiding it.
  */
@@ -365,10 +365,10 @@ function updateHeadline(id: string, result: Awaited<ReturnType<LoopTasks["update
 /** The loop-task tools, bound to one store. */
 export function loopTaskTools(loops: LoopTasks): ToolDefinition[] {
   const create: ToolDefinition<typeof CreateParameters> = {
-    name: "loop_create",
+    name: "pretty_task_loop_create",
     label: "Create a loop",
     description:
-      "Schedule something to happen on a recurrence. With `prompt`, each fire sends that message into this session and starts a new agent turn; the wake is delivered when the agent is idle, so a busy agent delays it instead of losing it. With `command`, each fire runs that shell command as an ordinary background process task (like bg_run) and nothing is sent into the session unless the fire fails and wakeOnFailure is on; a fire that comes due while the previous one still runs is skipped and recorded as skipped. Give exactly one of prompt and command. The schedule is an interval (30s, 10m, 2h) or a five-field cron expression in local time (0 9 * * 1-5). Use loop_list to watch it and loop_delete to stop it.",
+      "Schedule something to happen on a recurrence. With `prompt`, each fire sends that message into this session and starts a new agent turn; the wake is delivered when the agent is idle, so a busy agent delays it instead of losing it. With `command`, each fire runs that shell command as an ordinary background process task (like pretty_task_bg_run) and nothing is sent into the session unless the fire fails and wakeOnFailure is on; a fire that comes due while the previous one still runs is skipped and recorded as skipped. Give exactly one of prompt and command. The schedule is an interval (30s, 10m, 2h) or a five-field cron expression in local time (0 9 * * 1-5). Use pretty_task_loop_list to watch it and pretty_task_loop_delete to stop it.",
     parameters: CreateParameters,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       try {
@@ -393,7 +393,7 @@ export function loopTaskTools(loops: LoopTasks): ToolDefinition[] {
                 "",
                 describeLoop(view),
                 "",
-                `Watch it with loop_list id=${view.task.id}; pause it with loop_update id=${view.task.id} action=pause.`,
+                `Watch it with pretty_task_loop_list id=${view.task.id}; pause it with pretty_task_loop_update id=${view.task.id} action=pause.`,
               ].join("\n"),
             },
           ],
@@ -407,7 +407,7 @@ export function loopTaskTools(loops: LoopTasks): ToolDefinition[] {
   };
 
   const list: ToolDefinition<typeof ListParameters> = {
-    name: "loop_list",
+    name: "pretty_task_loop_list",
     label: "List loops",
     description:
       "Show loops of this session with their raw schedule, next fire time, fire count and status. A fire is counted at its scheduled time; for a prompt loop it is delivered only when the agent is idle, and for a command loop it is started immediately or skipped when the previous fire still runs. Pass an id to also get that loop's history, newest first: a prompt loop's iterations with the tool calls each turn made, or a command loop's fires with their time, outcome, exit code, duration and output size. Omit the id to list them all.",
@@ -440,7 +440,9 @@ export function loopTaskTools(loops: LoopTasks): ToolDefinition[] {
 
       const all = await loops.list(scope);
       if (all.length === 0) {
-        return text("No loops in this session yet. Create one with loop_create.", { loops: [] });
+        return text("No loops in this session yet. Create one with pretty_task_loop_create.", {
+          loops: [],
+        });
       }
       return {
         content: [{ type: "text", text: all.map((view) => describeLoop(view)).join("\n\n") }],
@@ -450,7 +452,7 @@ export function loopTaskTools(loops: LoopTasks): ToolDefinition[] {
   };
 
   const update: ToolDefinition<typeof UpdateParameters> = {
-    name: "loop_update",
+    name: "pretty_task_loop_update",
     label: "Pause, resume, complete or retune a loop",
     description:
       "Change a loop without deleting its history: pause stops fires, resume re-arms from now, complete ends it, and schedule retunes when it fires. A retune keeps the id, the fire count and every recorded iteration; a running loop's next fire is computed from this update rather than from the slot the old schedule had already picked, a paused loop keeps the new schedule and arms onto it when resumed, and an invalid expression is refused with the old schedule still in force. Pausing or completing also cancels a wake that is still waiting for the agent to be idle, so the loop will not wake the model after you stop it.",
@@ -458,7 +460,9 @@ export function loopTaskTools(loops: LoopTasks): ToolDefinition[] {
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const id = params.id.trim();
       if (id.length === 0) {
-        return text("Pass the id of the loop to update; loop_list lists the ids of this session.");
+        return text(
+          "Pass the id of the loop to update; pretty_task_loop_list lists the ids of this session.",
+        );
       }
 
       // A retune and a transition may arrive together; the store applies the
@@ -491,15 +495,17 @@ export function loopTaskTools(loops: LoopTasks): ToolDefinition[] {
   };
 
   const remove: ToolDefinition<typeof DeleteParameters> = {
-    name: "loop_delete",
+    name: "pretty_task_loop_delete",
     label: "Delete a loop",
     description:
-      "Delete a loop record and stop its schedule. Use loop_update action=complete instead when the history should remain.",
+      "Delete a loop record and stop its schedule. Use pretty_task_loop_update action=complete instead when the history should remain.",
     parameters: DeleteParameters,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const id = params.id.trim();
       if (id.length === 0) {
-        return text("Pass the id of the loop to delete; loop_list lists the ids of this session.");
+        return text(
+          "Pass the id of the loop to delete; pretty_task_loop_list lists the ids of this session.",
+        );
       }
 
       const removed = await loops.delete(scopeOf(ctx), id);

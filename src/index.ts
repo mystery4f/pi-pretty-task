@@ -168,7 +168,7 @@ export function createExtension(
     historyLimit: options.iterationHistoryLimit,
   });
   // Wakes wait here until the agent is idle: pi's own follow-up queue cannot be
-  // recalled, so sending one mid-turn would survive a `loop_update` (ADR-0009).
+  // recalled, so sending one mid-turn would survive a `pretty_task_loop_update` (ADR-0009).
   const wakes = new LoopWakes();
   let agentIdle = true;
   const loops = new LoopTasks({
@@ -196,7 +196,7 @@ export function createExtension(
     },
     onCommandFire: async (fire) => {
       // A fire is an ordinary process task carrying its loop id and fire number
-      // (ADR-0014), started by the same path `bg_run` uses — never a second spawn.
+      // (ADR-0014), started by the same path `pretty_task_bg_run` uses — never a second spawn.
       const child = await processTasks.start({
         cwd: fire.scope.cwd,
         sessionId: fire.scope.sessionId,
@@ -226,7 +226,7 @@ export function createExtension(
       // the pending iteration must not claim a turn that will not happen.
       for (const fire of wakes.cancel(taskId)) await recordSafely(iterations.drop(fire));
       // A command loop that stops must not leave a fire running: its process is
-      // killed through the same polite-then-force path as `bg_kill` (ADR-0014).
+      // killed through the same polite-then-force path as `pretty_task_bg_kill` (ADR-0014).
       await processTasks.stopChildren(taskId, { reason: "user" });
       publishStatusLine();
     },

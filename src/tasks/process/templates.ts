@@ -1,5 +1,5 @@
 /**
- * Named commands a user writes down once and runs by name through `bg_run`.
+ * Named commands a user writes down once and runs by name through `pretty_task_bg_run`.
  *
  * The file is read from the project first, then the agent settings directory,
  * and the project wins a shared name. A bad file is a loud problem, not a

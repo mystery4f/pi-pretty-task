@@ -13,7 +13,7 @@
  * asking "where does it say this" means, and a regex is one more thing a caller
  * can get subtly wrong. Case folding is the only option.
  *
- * Bytes become text through `decodeOutput`, the decoder `bg_logs`, the panel and
+ * Bytes become text through `decodeOutput`, the decoder `pretty_task_bg_logs`, the panel and
  * the completion notice already share (ADR-0008). It is applied per line, so one
  * file can hold strict UTF-8 and a legacy console's code page side by side. A
  * line longer than one read is walked in segments with a raw-byte carry, so a

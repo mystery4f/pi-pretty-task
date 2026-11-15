@@ -37,14 +37,14 @@ afterEach(async () => {
   while (cleanup.length > 0) await cleanup.pop()?.();
 });
 
-/** The one task `bg_run` reported, as the tool's details carry it. */
+/** The one task `pretty_task_bg_run` reported, as the tool's details carry it. */
 interface StartedTask {
   id: string;
   pid?: number;
   status: string;
 }
 
-/** The one loop `loop_create` reported, as its details carry it. */
+/** The one loop `pretty_task_loop_create` reported, as its details carry it. */
 interface LoopStarted {
   id: string;
   status: string;
@@ -230,13 +230,13 @@ describe("/tasks command", () => {
     );
     const harness = createHarness({ cwd: dir.path, sessionId: "session-stop" });
 
-    const started = (await harness.call("bg_run", { name: "sleepy job", command }))
+    const started = (await harness.call("pretty_task_bg_run", { name: "sleepy job", command }))
       .details as StartedTask;
     const pid = started.pid;
-    if (pid === undefined) throw new Error("bg_run reported no pid");
+    if (pid === undefined) throw new Error("pretty_task_bg_run reported no pid");
     spawned.push(pid);
     await waitFor("the task to print its line", async () => {
-      const logs = await harness.call("bg_logs", { id: started.id, lines: 5 });
+      const logs = await harness.call("pretty_task_bg_logs", { id: started.id, lines: 5 });
       return resultText(logs).includes("waiting for work");
     });
 
@@ -255,7 +255,8 @@ describe("/tasks command", () => {
     panel.handleInput("k");
     await panel.settle();
     await waitFor("the process to die", () => !isAlive(pid));
-    const after = (await harness.call("bg_status", { id: started.id })).details as StartedTask;
+    const after = (await harness.call("pretty_task_bg_status", { id: started.id }))
+      .details as StartedTask;
     expect(after.status).toBe("killed");
 
     panel.handleInput("\u001bq");
@@ -273,7 +274,7 @@ describe("/tasks command", () => {
       { now: () => clock.now },
     );
     const created = (
-      await harness.call("loop_create", {
+      await harness.call("pretty_task_loop_create", {
         name: "review loop",
         schedule: "10s",
         prompt: "review the diff",
@@ -332,7 +333,11 @@ describe("/tasks command", () => {
       { now: () => clock.now },
     );
     const created = (
-      await harness.call("loop_create", { name: "stop me", schedule: "10s", prompt: "keep going" })
+      await harness.call("pretty_task_loop_create", {
+        name: "stop me",
+        schedule: "10s",
+        prompt: "keep going",
+      })
     ).details as LoopStarted;
     await fireLoop(harness, clock, 1);
 
@@ -343,12 +348,14 @@ describe("/tasks command", () => {
     // One key for both kinds: on a loop row `k` ends the schedule, not a process.
     panel.handleInput("k");
     await panel.settle();
-    const stopped = (await harness.call("loop_list", { id: created.id })).details as LoopStarted;
+    const stopped = (await harness.call("pretty_task_loop_list", { id: created.id }))
+      .details as LoopStarted;
     expect(stopped.status).toBe("completed");
     expect(stopped.fires).toBe(1);
 
     await fireLoop(harness, clock, 2);
-    const after = (await harness.call("loop_list", { id: created.id })).details as LoopStarted;
+    const after = (await harness.call("pretty_task_loop_list", { id: created.id }))
+      .details as LoopStarted;
     expect(after.fires).toBe(1);
 
     panel.handleInput("\u001bq");
@@ -367,13 +374,14 @@ describe("/tasks command", () => {
       "edge.js",
       "console.log('edge ok');\nsetTimeout(() => {}, 60000);\n",
     );
-    const started = (await harness.call("bg_run", { name: "edge deploy", command }, theirs))
-      .details as StartedTask;
+    const started = (
+      await harness.call("pretty_task_bg_run", { name: "edge deploy", command }, theirs)
+    ).details as StartedTask;
     const pid = started.pid;
-    if (pid === undefined) throw new Error("bg_run reported no pid");
+    if (pid === undefined) throw new Error("pretty_task_bg_run reported no pid");
     spawned.push(pid);
     await waitFor("the other session's task to print its line", async () => {
-      const logs = await harness.call("bg_logs", { id: started.id, lines: 5 }, theirs);
+      const logs = await harness.call("pretty_task_bg_logs", { id: started.id, lines: 5 }, theirs);
       return resultText(logs).includes("edge ok");
     });
 
@@ -479,7 +487,7 @@ describe("/tasks command", () => {
       const { dir, clock, harness, theirs } = await setup();
       await harness.startSession();
       const mine = (
-        await harness.call("loop_create", {
+        await harness.call("pretty_task_loop_create", {
           name: "my wake",
           schedule: "10s",
           prompt: "keep going",

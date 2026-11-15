@@ -144,7 +144,7 @@ describe("the extension's notification", () => {
     );
     harness.startSession({ cwd: dir.path, sessionId: "session-notify" });
 
-    const result = await harness.call("bg_run", {
+    const result = await harness.call("pretty_task_bg_run", {
       command: script,
       name: "quick one",
     });
@@ -166,7 +166,7 @@ describe("the extension's notification", () => {
       { notificationWrite: (text) => written.push(text) },
     );
 
-    const result = await harness.call("bg_run", {
+    const result = await harness.call("pretty_task_bg_run", {
       command: script,
       name: "quiet one",
     });
@@ -188,7 +188,7 @@ describe("the extension's notification", () => {
     );
     harness.startSession({ cwd: dir.path, sessionId: "session-notify-off" });
 
-    await harness.call("bg_run", {
+    await harness.call("pretty_task_bg_run", {
       command: script,
       name: "silent one",
     });
@@ -207,7 +207,7 @@ describe("the extension's notification", () => {
     );
     harness.startSession({ cwd: dir.path, sessionId: "session-notify-running" });
 
-    const result = await harness.call("bg_run", {
+    const result = await harness.call("pretty_task_bg_run", {
       command: script,
       name: "slow one",
     });
@@ -216,7 +216,7 @@ describe("the extension's notification", () => {
     await new Promise((resolve) => setTimeout(resolve, 300));
     expect(written).toEqual([]);
 
-    await harness.call("bg_kill", { id });
+    await harness.call("pretty_task_bg_kill", { id });
     await waitFor("the escape for the stopped task", () => written.length > 0);
     expect(written).toEqual([`\u001b]9;slow one killed\u0007`]);
   });
@@ -231,7 +231,7 @@ describe("the extension's notification", () => {
     );
     harness.startSession({ cwd: dir.path, sessionId: "session-notify-notice" });
 
-    const result = await harness.call("bg_run", {
+    const result = await harness.call("pretty_task_bg_run", {
       command: script,
       name: "both ways",
     });

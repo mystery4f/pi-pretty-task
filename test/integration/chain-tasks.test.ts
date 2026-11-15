@@ -119,7 +119,7 @@ describe("chain tasks", () => {
     });
     expect(appended.chain.id).toBe(queued.chain.id);
     expect(appended.chain.steps).toHaveLength(3);
-    // `bg_status` never calls a waiting step running.
+    // `pretty_task_bg_status` never calls a waiting step running.
     expect((await stores.processes.get(scope, appended.step.id))?.task.status).toBe("waiting");
   });
 

@@ -389,7 +389,7 @@ describe("task list", () => {
     await panel.settle();
 
     expect(drawn()).toContain("No processes here");
-    expect(drawn()).toContain("bg_run");
+    expect(drawn()).toContain("pretty_task_bg_run");
     expect(
       drawn()
         .split("\n")
@@ -2250,7 +2250,7 @@ describe("chains in the list and in the detail", () => {
 
     panel.handleInput("R");
     await panel.settle();
-    expect(drawn()).toContain("A chain is a queue; run its steps again with bg_run.");
+    expect(drawn()).toContain("A chain is a queue; run its steps again with pretty_task_bg_run.");
     expect(source.reran).toEqual([]);
 
     panel.handleInput("c");

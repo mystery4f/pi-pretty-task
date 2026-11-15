@@ -51,7 +51,11 @@ function detailsOf<T>(result: { details: unknown }): T {
 
 async function createLoop(harness: Harness, params: Record<string, unknown> = {}) {
   return detailsOf<LoopDetails>(
-    await harness.call("loop_create", { schedule: "10s", prompt: "review the diff", ...params }),
+    await harness.call("pretty_task_loop_create", {
+      schedule: "10s",
+      prompt: "review the diff",
+      ...params,
+    }),
   );
 }
 
@@ -66,12 +70,16 @@ describe("reload", () => {
     const reloaded = createHarness(task.turn, { now: () => task.now });
     await reloaded.startSession(task.turn);
     await reloaded.pump(task.now + 1_000);
-    const afterLoad = detailsOf<LoopDetails>(await reloaded.call("loop_list", { id: created.id }));
+    const afterLoad = detailsOf<LoopDetails>(
+      await reloaded.call("pretty_task_loop_list", { id: created.id }),
+    );
     expect(afterLoad.status).toBe("running");
     expect(afterLoad.fires).toBe(0);
 
     await reloaded.pump(task.now + 31_000);
-    const fired = detailsOf<LoopDetails>(await reloaded.call("loop_list", { id: created.id }));
+    const fired = detailsOf<LoopDetails>(
+      await reloaded.call("pretty_task_loop_list", { id: created.id }),
+    );
     expect(fired.fires).toBe(1);
     expect(fired.status).toBe("completed");
   });
@@ -97,7 +105,7 @@ describe("wake delivery", () => {
     const [message] = task.harness.messages;
     expect(message?.details).toMatchObject({ id: created.id, fire: 1 });
     expect(message?.content).toBe("review the diff");
-    expect(resultText(await task.harness.call("loop_list", {}))).toContain("fires: 1");
+    expect(resultText(await task.harness.call("pretty_task_loop_list", {}))).toContain("fires: 1");
   });
 
   it("drops the queued wake when the loop is completed before delivery", async () => {
@@ -110,7 +118,7 @@ describe("wake delivery", () => {
     expect(task.harness.messages).toEqual([]);
 
     const updated = detailsOf<LoopDetails>(
-      await task.harness.call("loop_update", { id: created.id, action: "complete" }),
+      await task.harness.call("pretty_task_loop_update", { id: created.id, action: "complete" }),
     );
     expect(updated.status).toBe("completed");
 
@@ -118,7 +126,9 @@ describe("wake delivery", () => {
 
     expect(task.harness.messages).toEqual([]);
     // The pending iteration went with the wake: no turn happened, so no record.
-    const view = detailsOf<LoopDetails>(await task.harness.call("loop_list", { id: created.id }));
+    const view = detailsOf<LoopDetails>(
+      await task.harness.call("pretty_task_loop_list", { id: created.id }),
+    );
     expect(view.iterationCount ?? 0).toBe(0);
   });
 
@@ -131,8 +141,8 @@ describe("wake delivery", () => {
     task.advance(10_000);
     expect(await task.harness.pump(task.now)).toHaveLength(2);
 
-    await task.harness.call("loop_update", { id: paused.id, action: "pause" });
-    await task.harness.call("loop_delete", { id: deleted.id });
+    await task.harness.call("pretty_task_loop_update", { id: paused.id, action: "pause" });
+    await task.harness.call("pretty_task_loop_delete", { id: deleted.id });
 
     await task.harness.emit({ type: "agent_settled", aborted: false });
 
@@ -161,7 +171,9 @@ describe("wake delivery", () => {
 
     await task.harness.emit({ type: "agent_settled", aborted: false });
     expect(task.harness.messages).toHaveLength(2);
-    const view = detailsOf<LoopDetails>(await task.harness.call("loop_list", { id: created.id }));
+    const view = detailsOf<LoopDetails>(
+      await task.harness.call("pretty_task_loop_list", { id: created.id }),
+    );
     expect(view.status).toBe("completed");
     expect(view.fires).toBe(2);
   });
@@ -181,7 +193,9 @@ describe("wake delivery", () => {
     await task.harness.emit({ type: "agent_settled", aborted: false });
 
     expect(task.harness.messages).toEqual([]);
-    const view = detailsOf<LoopDetails>(await task.harness.call("loop_list", { id: created.id }));
+    const view = detailsOf<LoopDetails>(
+      await task.harness.call("pretty_task_loop_list", { id: created.id }),
+    );
     expect(view.status).toBe("completed");
   });
 });

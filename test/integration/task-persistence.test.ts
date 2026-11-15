@@ -42,13 +42,13 @@ async function tempDirectory(): Promise<string> {
 
 function trackPid(details: TaskDetails): number {
   const { pid } = details;
-  if (pid === undefined) throw new Error("bg_run returned no pid");
+  if (pid === undefined) throw new Error("pretty_task_bg_run returned no pid");
   spawned.push(pid);
   return pid;
 }
 
 async function status(harness: Harness, id: string): Promise<TaskDetails> {
-  const result = await harness.call("bg_status", { id });
+  const result = await harness.call("pretty_task_bg_status", { id });
   return result.details as TaskDetails;
 }
 
@@ -92,7 +92,7 @@ describe("history across a restart", () => {
     );
     const turn = { cwd, sessionId: "session-restart" };
     const before = createHarness(turn);
-    const started = (await before.call("bg_run", { name: "regression run", command }))
+    const started = (await before.call("pretty_task_bg_run", { name: "regression run", command }))
       .details as TaskDetails;
     trackPid(started);
     const finished = await waitForStatus(before, started.id, "completed");
@@ -100,7 +100,7 @@ describe("history across a restart", () => {
 
     const after = createHarness(turn);
 
-    const listed = resultText(await after.call("bg_status", {}));
+    const listed = resultText(await after.call("pretty_task_bg_status", {}));
     expect(listed).toContain(finished.id);
     expect(listed).toContain("regression run");
 
@@ -113,7 +113,7 @@ describe("history across a restart", () => {
       exitCode: 0,
     });
 
-    const logs = resultText(await after.call("bg_logs", { id: finished.id }));
+    const logs = resultText(await after.call("pretty_task_bg_logs", { id: finished.id }));
     expect(logs).toContain("line one");
     expect(logs).toContain("line two");
   });
@@ -123,20 +123,20 @@ describe("history across a restart", () => {
     const command = await writeScript(cwd, "sleeper.js", "setTimeout(() => {}, 30000);\n");
     const first = createHarness({ cwd, sessionId: "session-left" });
     const second = createHarness({ cwd, sessionId: "session-right" });
-    const left = (await first.call("bg_run", { name: "left task", command }))
+    const left = (await first.call("pretty_task_bg_run", { name: "left task", command }))
       .details as TaskDetails;
     trackPid(left);
-    const right = (await second.call("bg_run", { name: "right task", command }))
+    const right = (await second.call("pretty_task_bg_run", { name: "right task", command }))
       .details as TaskDetails;
     trackPid(right);
 
     const restartedLeft = createHarness({ cwd, sessionId: "session-left" });
     const restartedRight = createHarness({ cwd, sessionId: "session-right" });
 
-    const leftIds = (await restartedLeft.call("bg_status", {})).details as {
+    const leftIds = (await restartedLeft.call("pretty_task_bg_status", {})).details as {
       tasks: TaskDetails[];
     };
-    const rightIds = (await restartedRight.call("bg_status", {})).details as {
+    const rightIds = (await restartedRight.call("pretty_task_bg_status", {})).details as {
       tasks: TaskDetails[];
     };
 
@@ -155,11 +155,13 @@ describe("recovery after a crash", () => {
     );
     const turn = { cwd, sessionId: "session-crash" };
     const before = createHarness(turn);
-    const started = (await before.call("bg_run", { name: "long job", command }))
+    const started = (await before.call("pretty_task_bg_run", { name: "long job", command }))
       .details as TaskDetails;
     const pid = trackPid(started);
     await waitFor("the task to write its first line", async () =>
-      resultText(await before.call("bg_logs", { id: started.id })).includes("still alive"),
+      resultText(await before.call("pretty_task_bg_logs", { id: started.id })).includes(
+        "still alive",
+      ),
     );
 
     const after = createHarness(turn);
@@ -173,7 +175,9 @@ describe("recovery after a crash", () => {
     // Startup touched the record and nothing else: the process the earlier
     // instance spawned is still alive.
     expect(() => process.kill(pid, 0)).not.toThrow();
-    expect(resultText(await after.call("bg_logs", { id: started.id }))).toContain("still alive");
+    expect(resultText(await after.call("pretty_task_bg_logs", { id: started.id }))).toContain(
+      "still alive",
+    );
   });
 
   it("falls back to the previous generation when the current record file is corrupt", async () => {
@@ -181,13 +185,13 @@ describe("recovery after a crash", () => {
     const command = await writeScript(cwd, "writer.js", "console.log('final output');\n");
     const turn = { cwd, sessionId: "session-corrupt" };
     const before = createHarness(turn);
-    const started = (await before.call("bg_run", { name: "build", command }))
+    const started = (await before.call("pretty_task_bg_run", { name: "build", command }))
       .details as TaskDetails;
     trackPid(started);
     await waitForStatus(before, started.id, "completed");
 
     // Starting and finishing wrote two generations, so a damaged current file
-    // still has the one written by bg_run behind it. The store writes behind the
+    // still has the one written by pretty_task_bg_run behind it. The store writes behind the
     // in-memory status, so wait for the finished generation to land first — a
     // clobber that races the store's own rename can rotate the damage into .prev
     // and leave nothing to fall back to.
@@ -201,7 +205,9 @@ describe("recovery after a crash", () => {
     const after = createHarness(turn);
     const restored = await status(after, started.id);
     expect(restored).toMatchObject({ id: started.id, name: "build", kind: "process" });
-    expect(resultText(await after.call("bg_logs", { id: started.id }))).toContain("final output");
+    expect(resultText(await after.call("pretty_task_bg_logs", { id: started.id }))).toContain(
+      "final output",
+    );
   });
 
   it("keeps every task when two updates arrive back to back", async () => {
@@ -210,13 +216,15 @@ describe("recovery after a crash", () => {
     const turn = { cwd, sessionId: "session-race" };
     const before = createHarness(turn);
     const results = await Promise.all([
-      before.call("bg_run", { name: "first", command }),
-      before.call("bg_run", { name: "second", command }),
+      before.call("pretty_task_bg_run", { name: "first", command }),
+      before.call("pretty_task_bg_run", { name: "second", command }),
     ]);
     for (const result of results) trackPid(result.details as TaskDetails);
 
     const after = createHarness(turn);
-    const listed = (await after.call("bg_status", {})).details as { tasks: TaskDetails[] };
+    const listed = (await after.call("pretty_task_bg_status", {})).details as {
+      tasks: TaskDetails[];
+    };
 
     expect(listed.tasks.map((task) => task.name).sort()).toEqual(["first", "second"]);
   });
@@ -245,7 +253,7 @@ describe("recovery after a crash", () => {
 
     const harness = createHarness(turn);
     const command = await writeScript(cwd, "writer.js", "console.log('mixed');\n");
-    const started = (await harness.call("bg_run", { name: "build", command }))
+    const started = (await harness.call("pretty_task_bg_run", { name: "build", command }))
       .details as TaskDetails;
     trackPid(started);
     await waitForStatus(harness, started.id, "completed");

@@ -83,7 +83,7 @@ function detailsOf(result: { details: unknown }): CmdDetails {
 }
 
 async function createCmd(harness: Harness, params: Record<string, unknown>): Promise<CmdDetails> {
-  return detailsOf(await harness.call("loop_create", { schedule: "10s", ...params }));
+  return detailsOf(await harness.call("pretty_task_loop_create", { schedule: "10s", ...params }));
 }
 
 /** Advance the pinned clock to the loop's next slot and pump once. */
@@ -97,7 +97,7 @@ async function fireDue(
 }
 
 async function loopDetails(harness: Harness, id: string): Promise<CmdDetails> {
-  return detailsOf(await harness.call("loop_list", { id }));
+  return detailsOf(await harness.call("pretty_task_loop_list", { id }));
 }
 
 async function fireOf(
@@ -134,13 +134,15 @@ function waitUntilNextFire(loop: CmdDetails): number {
 
 /** The pid of a running child, watched so the test can clean it up on failure. */
 async function pidOf(harness: Harness, taskId: string): Promise<number | undefined> {
-  const details = (await harness.call("bg_status", { id: taskId })).details as { pid?: number };
+  const details = (await harness.call("pretty_task_bg_status", { id: taskId })).details as {
+    pid?: number;
+  };
   if (details.pid !== undefined) spawned.push(details.pid);
   return details.pid;
 }
 
 describe("command loops", () => {
-  it("fires a real process and shows it through bg_status and bg_logs", async () => {
+  it("fires a real process and shows it through pretty_task_bg_status and pretty_task_bg_logs", async () => {
     const task = await setup();
     const script = await writeScript(
       task.directory.path,
@@ -166,16 +168,22 @@ describe("command loops", () => {
     expect(running).toMatchObject({ fire: 1, outcome: "running" });
     await pidOf(task.harness, running.taskId);
 
-    const status = resultText(await task.harness.call("bg_status", { id: running.taskId }));
+    const status = resultText(
+      await task.harness.call("pretty_task_bg_status", { id: running.taskId }),
+    );
     expect(status).toContain("name: watcher #1");
     expect(status).toContain("kind: process");
     expect(status).toContain("status: running");
     // A fire is a child record, not a row (ADR-0014): the listing shows roots, so
     // the fire answers by its own id above and nowhere in the list.
-    expect(resultText(await task.harness.call("bg_status", {}))).not.toContain(running.taskId);
+    expect(resultText(await task.harness.call("pretty_task_bg_status", {}))).not.toContain(
+      running.taskId,
+    );
 
     await waitFor("the first output line", async () => {
-      const logs = resultText(await task.harness.call("bg_logs", { id: running.taskId }));
+      const logs = resultText(
+        await task.harness.call("pretty_task_bg_logs", { id: running.taskId }),
+      );
       return logs.includes("fire start");
     });
 
@@ -238,7 +246,7 @@ describe("command loops", () => {
     if (pid === undefined) throw new Error("a running child must have a pid");
 
     const stopped = resultText(
-      await task.harness.call("loop_update", { id: loop.id, action: "complete" }),
+      await task.harness.call("pretty_task_loop_update", { id: loop.id, action: "complete" }),
     );
     expect(stopped).toContain(`Completed loop ${loop.id}`);
 
@@ -258,7 +266,7 @@ describe("command loops", () => {
   it("rejects a loop that asks for both a prompt and a command, and one that asks for neither", async () => {
     const task = await setup();
     const both = resultText(
-      await task.harness.call("loop_create", {
+      await task.harness.call("pretty_task_loop_create", {
         schedule: "10s",
         prompt: "review the diff",
         command: "echo hi",
@@ -267,9 +275,11 @@ describe("command loops", () => {
     expect(both).toContain("either a prompt or a command, not both");
     expect(both).toContain("drop the prompt");
 
-    const neither = resultText(await task.harness.call("loop_create", { schedule: "10s" }));
+    const neither = resultText(
+      await task.harness.call("pretty_task_loop_create", { schedule: "10s" }),
+    );
     expect(neither).toContain("needs a prompt or a command");
-    expect(neither).toContain("bg_run");
+    expect(neither).toContain("pretty_task_bg_run");
   });
 
   it("rejects command-only options on a prompt loop instead of ignoring them", async () => {
@@ -280,7 +290,7 @@ describe("command loops", () => {
       ["wakeOnFailure", true],
     ] as const) {
       const text = resultText(
-        await task.harness.call("loop_create", {
+        await task.harness.call("pretty_task_loop_create", {
           schedule: "10s",
           prompt: "review the diff",
           [option]: value,
@@ -349,7 +359,7 @@ describe("command loops", () => {
       "  step-11",
       "  step-12",
     ]);
-    expect(notice?.content).toContain(`read more: bg_logs id=${String(first.taskId)}`);
+    expect(notice?.content).toContain(`read more: pretty_task_bg_logs id=${String(first.taskId)}`);
     expect(notice?.details).toMatchObject({ outputTruncated: true });
 
     // It is a normal transcript entry: the registered renderer draws it from the
@@ -396,7 +406,7 @@ describe("command loops", () => {
     expect(view.lastExitCode).toBe(3);
     expect(view.consecutiveFailures).toBe(1);
     expect(view.fireHistory?.[0]).toMatchObject({ outcome: "failed", exitCode: 3 });
-    const listed = resultText(await task.harness.call("loop_list", { id: quiet.id }));
+    const listed = resultText(await task.harness.call("pretty_task_loop_list", { id: quiet.id }));
     expect(listed).toContain("wake on failure: off");
     // The row reads `newest #1 failed · exit 3 ...` and the fire listing repeats
     // it per fire, so a silent loop is still a diagnosable one.
@@ -419,10 +429,10 @@ describe("command loops", () => {
     const notice = task.harness.messages[0];
     expect(notice?.content).toContain("exit code: 4");
     // No output means no tail to quote: the notice says nothing it cannot show,
-    // and the child's file is still one `bg_logs` call away.
+    // and the child's file is still one `pretty_task_bg_logs` call away.
     expect(notice?.content).not.toContain("last output:");
     expect(notice?.details).toMatchObject({ outputTail: "", outputTruncated: false });
-    expect(notice?.content).toContain("read more: bg_logs id=");
+    expect(notice?.content).toContain("read more: pretty_task_bg_logs id=");
 
     await task.harness.emit({ type: "agent_settled", aborted: false });
     await task.harness.flushWakes();
@@ -598,7 +608,7 @@ describe("command loops", () => {
     // only ever sees the file, so the wait belongs on the file's own copy.
     let reloaded: CmdDetails | undefined;
     await waitFor("the rewritten file to carry the fire history", async () => {
-      reloaded = detailsOf(await restarted.call("loop_list", { id: loop.id }));
+      reloaded = detailsOf(await restarted.call("pretty_task_loop_list", { id: loop.id }));
       return reloaded.fireHistory?.[0]?.outcome === "success";
     });
     expect(reloaded).toMatchObject({ kind: "cmd-loop", command: script, fires: 1 });

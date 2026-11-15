@@ -179,7 +179,7 @@ function parseRetentionDays(env: NodeJS.ProcessEnv): number {
  * The running-task cap, in whole tasks. An absent key means the documented 20.
  *
  * `0` is refused rather than read as "no tasks": the scope promises a ceiling,
- * and a zero would stop every `bg_run`, every fire and every chain step without
+ * and a zero would stop every `pretty_task_bg_run`, every fire and every chain step without
  * saying which key did it. A fraction and a typo are refused for the reason the
  * other limits are — `Number("many")` is `NaN`, which compares false against
  * every count, so the cap would never be reached and the 20 would silently be

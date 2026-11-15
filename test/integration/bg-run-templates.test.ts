@@ -1,5 +1,5 @@
 /**
- * `bg_run` by name: a template fills in the command, directory and timeout, and
+ * `pretty_task_bg_run` by name: a template fills in the command, directory and timeout, and
  * an unknown name is answered with the names that do exist. These tests drive the
  * registered tool through the harness, so they see exactly what the model sees.
  *
@@ -32,13 +32,13 @@ async function writeConfig(path: string, value: unknown): Promise<void> {
 
 async function waitForEnd(harness: Harness, id: string): Promise<TaskDetails> {
   await waitFor("the task to finish", async () => {
-    const status = await harness.call("bg_status", { id });
+    const status = await harness.call("pretty_task_bg_status", { id });
     return (status.details as TaskDetails).status !== "running";
   });
-  return (await harness.call("bg_status", { id })).details as TaskDetails;
+  return (await harness.call("pretty_task_bg_status", { id })).details as TaskDetails;
 }
 
-describe("bg_run with a template", () => {
+describe("pretty_task_bg_run with a template", () => {
   it("runs the configured command, directory and timeout", async () => {
     const dir = await makeTempDir();
     cleanup.push(dir.dispose);
@@ -55,7 +55,10 @@ describe("bg_run with a template", () => {
     });
     const harness = createHarness({ cwd: dir.path, sessionId: "session-template-run" });
 
-    const started = await harness.call("bg_run", { template: "slow", name: "templated build" });
+    const started = await harness.call("pretty_task_bg_run", {
+      template: "slow",
+      name: "templated build",
+    });
     const task = started.details as TaskDetails;
     trackPid(task);
 
@@ -96,12 +99,14 @@ describe("bg_run with a template", () => {
       { agentDir: join(dir.path, "agent") },
     );
 
-    const first = (await harness.call("bg_run", { template: "test" })).details as TaskDetails;
+    const first = (await harness.call("pretty_task_bg_run", { template: "test" }))
+      .details as TaskDetails;
     trackPid(first);
     expect((await waitForEnd(harness, first.id)).status).toBe("completed");
     expect((await readFile(join(dir.path, "which.txt"), "utf8")).trim()).toBe("project");
 
-    const second = (await harness.call("bg_run", { template: "lint" })).details as TaskDetails;
+    const second = (await harness.call("pretty_task_bg_run", { template: "lint" }))
+      .details as TaskDetails;
     trackPid(second);
     expect((await waitForEnd(harness, second.id)).status).toBe("completed");
     expect((await readFile(join(dir.path, "lint.txt"), "utf8")).trim()).toBe("agent lint");
@@ -117,7 +122,7 @@ describe("bg_run with a template", () => {
     });
     const harness = createHarness({ cwd: dir.path, sessionId: "session-template-described" });
 
-    const description = harness.toolDescription("bg_run");
+    const description = harness.toolDescription("pretty_task_bg_run");
 
     expect(description).toContain("Command templates available here:");
     expect(description).toContain("lint (");
@@ -130,13 +135,13 @@ describe("bg_run with a template", () => {
     // configuration must produce a byte-identical string on every load, or a
     // restart or `/reload` would re-pay for the whole prefix.
     const again = createHarness({ cwd: dir.path, sessionId: "session-template-described-again" });
-    expect(again.toolDescription("bg_run")).toBe(description);
+    expect(again.toolDescription("pretty_task_bg_run")).toBe(description);
   });
 
   it("says so when no template is configured at all", () => {
     const harness = createHarness({ cwd: process.cwd(), sessionId: "session-template-none" });
 
-    expect(harness.toolDescription("bg_run")).toContain(
+    expect(harness.toolDescription("pretty_task_bg_run")).toContain(
       "No command templates are configured, so `template` is rejected.",
     );
   });
@@ -154,14 +159,14 @@ describe("bg_run with a template", () => {
     await writeConfig(paths.projectFile, { templates });
     const harness = createHarness({ cwd: dir.path, sessionId: "session-template-many" });
 
-    const description = harness.toolDescription("bg_run");
+    const description = harness.toolDescription("pretty_task_bg_run");
 
     // 190 characters of base sentence, 27 of lead-in, 300 of list, 145 of reload note.
     expect(description.length).toBeLessThan(700);
     expect(description).toContain("…");
     expect(description).toContain("Command templates available here:");
 
-    const rejected = resultText(await harness.call("bg_run", { template: "nope" }));
+    const rejected = resultText(await harness.call("pretty_task_bg_run", { template: "nope" }));
     expect(rejected).toContain("… (80 in total)");
     expect(rejected.length).toBeLessThan(900);
   });
@@ -176,14 +181,16 @@ describe("bg_run with a template", () => {
     });
     const harness = createHarness({ cwd: dir.path, sessionId: "session-template-unknown" });
 
-    const result = await harness.call("bg_run", { template: "nope" });
+    const result = await harness.call("pretty_task_bg_run", { template: "nope" });
 
     const text = resultText(result);
     expect(text).toContain('Unknown template "nope"');
     expect(text).toContain('"build"');
     expect(text).toContain('"test"');
     expect(text).toContain("The task was not started.");
-    expect(resultText(await harness.call("bg_status", {}))).toContain("No background tasks");
+    expect(resultText(await harness.call("pretty_task_bg_status", {}))).toContain(
+      "No background tasks",
+    );
     await expect(
       readFile(taskRecordPath(sessionTaskDirectory(dir.path, "session-template-unknown")), "utf8"),
     ).rejects.toThrow();
@@ -214,7 +221,7 @@ describe("bg_run with a template", () => {
     });
     const harness = createHarness({ cwd: dir.path, sessionId: "session-template-explicit" });
 
-    const started = await harness.call("bg_run", {
+    const started = await harness.call("pretty_task_bg_run", {
       template: "test",
       command: explicitCommand,
       cwd: "explicit",
@@ -249,12 +256,12 @@ describe("bg_run with a template", () => {
       { agentDir: join(dir.path, "agent") },
     );
 
-    expect(harness.toolNames).toContain("bg_run");
+    expect(harness.toolNames).toContain("pretty_task_bg_run");
     expect(harness.problems).toHaveLength(1);
     expect(harness.problems[0]).toContain(paths.projectFile);
     expect(harness.problems[0]).toContain("invalid JSON");
 
-    const started = await harness.call("bg_run", { template: "lint" });
+    const started = await harness.call("pretty_task_bg_run", { template: "lint" });
     const task = started.details as TaskDetails;
     trackPid(task);
     expect((await waitForEnd(harness, task.id)).status).toBe("completed");
