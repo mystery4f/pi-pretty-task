@@ -30,6 +30,26 @@ export async function writeScript(dir: string, name: string, source: string): Pr
   return `node "${path}"`;
 }
 
+/**
+ * How long a stop lets the polite signal work before forcing, in the tests. The
+ * sequence a stop proves — ask politely, wait, force, confirm the tree is gone —
+ * is the same at twenty milliseconds as at the production three seconds; only the
+ * waiting differs. `test/process-stop` keeps one test on the real default so the
+ * number in the supervisor is still proven, not just quoted.
+ */
+export const TEST_KILL_GRACE_MS = 20;
+/**
+ * How often a follow read looks at the output file, in the tests. The answer is
+ * the bytes appended since the last read either way; this only shortens the tick.
+ */
+export const TEST_FOLLOW_POLL_MS = 5;
+/**
+ * Interval between two looks at the thing a test waits for. Small on purpose: the
+ * predicate is cheap and what is waited for is a real process ending or a record
+ * changing, so a coarse tick buys nothing and costs its own length per step.
+ */
+const WAIT_POLL_MS = 5;
+
 /** Resolve once `predicate` is true, or reject after `timeoutMs`. */
 export async function waitFor(
   what: string,
@@ -39,17 +59,26 @@ export async function waitFor(
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (await predicate()) return;
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await new Promise((resolve) => setTimeout(resolve, WAIT_POLL_MS));
   }
   throw new Error(`timed out after ${String(timeoutMs)}ms waiting for ${what}`);
 }
 
-/** Kill a process and everything it started. Best effort: the test owns it. */
+/**
+ * Kill a process and everything it started. Best effort, and best effort means
+ * bounded: cleanup runs in `afterEach`, where a `taskkill` that hung (the target
+ * already gone, a busy machine) would spend the hook's timeout on a process the
+ * test has already finished asserting about.
+ */
 export async function killTree(pid: number | undefined): Promise<void> {
   if (pid === undefined) return;
   await new Promise<void>((resolve) => {
     if (process.platform === "win32") {
-      execFile("taskkill", ["/PID", String(pid), "/T", "/F"], () => resolve());
+      const timer = setTimeout(resolve, CLEANUP_KILL_TIMEOUT_MS);
+      execFile("taskkill", ["/PID", String(pid), "/T", "/F"], () => {
+        clearTimeout(timer);
+        resolve();
+      });
       return;
     }
     try {
@@ -60,6 +89,9 @@ export async function killTree(pid: number | undefined): Promise<void> {
     resolve();
   });
 }
+
+/** How long cleanup waits on a kill before leaving the process to the runner. */
+const CLEANUP_KILL_TIMEOUT_MS = 4000;
 
 /** True while a process with this pid exists. */
 export function isAlive(pid: number): boolean {

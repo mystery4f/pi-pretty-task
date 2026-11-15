@@ -28,6 +28,9 @@ src/tasks/process/      spawn, process-tree kill, output files, exit codes
 src/tasks/loop/         interval scheduling, pump, fire → sendMessage, iteration recording
 src/ui/                 /tasks overlay (both kinds), detail view, message renderers
 docs/                   scope + ADRs (prose docs in Chinese)
+test/unit/              tests whose subject never leaves the process
+test/integration/       tests that spawn a real child and stop a real tree
+test/support/           harness, temp directories, `waitFor`, process helpers
 .llm-wiki/              project wiki; its synthesis page "pi-pretty-task 文档索引" is the docs index
 ```
 
@@ -48,7 +51,7 @@ Source references from the two upstream plugins are cloned under `.tmp/` (git-ig
 - `npm run check` — typecheck, no emit (`tsconfig.dev.json`, covers `src/` and `test/`).
 - `npm run build` — emit to `dist/` (`tsconfig.json`).
 - `npm run lint` — Biome check; `npm run lint:fix` applies safe fixes.
-- `npm run test` — vitest, `--passWithNoTests` until the first test lands.
+- `npm run test` — vitest over both projects (`unit`, `integration`); `npm run test:unit` runs the pure half in seconds.
 - Acceptance for v0.1 is the five lines at the bottom of `docs/scope-v1.md`. A change that breaks any of them is not done.
 
 ## Git

@@ -155,6 +155,13 @@ export interface ProcessTasksOptions {
    */
   survivedRetryMs?: number;
   /**
+   * How often a follow call looks at the output file while it waits for new
+   * bytes; defaults to 50ms. A test lowers it so the answer comes as soon as the
+   * bytes land instead of on the next tick of a timer, without changing a single
+   * thing the follow answers.
+   */
+  followPollMs?: number;
+  /**
    * Called once for every task that ends, with the record as it stands after
    * the final status was written. Announcing the task — a session message, a
    * panel refresh — is the caller's business, so this store stays silent.
@@ -297,6 +304,8 @@ export class ProcessTasks {
   private readonly supervise: (options: StartProcessOptions) => RunningProcess;
   /** How long a stop that lost to a surviving tree waits before trying again. */
   private readonly survivedRetryMs: number;
+  /** How often a follow read looks at the output file while it waits. */
+  private readonly followPollMs: number;
   private readonly onFinish: ((view: ProcessTaskView) => void) | undefined;
   /** The shell every task starts in, resolved once so a bad config fails at load. */
   private readonly shellPolicy: ShellPolicy;
@@ -314,6 +323,7 @@ export class ProcessTasks {
     this.maxRunningTasks = options.maxRunningTasks ?? DEFAULT_MAX_RUNNING_TASKS;
     this.supervise = options.supervise ?? startProcess;
     this.survivedRetryMs = options.survivedRetryMs ?? SURVIVED_RETRY_MS;
+    this.followPollMs = options.followPollMs ?? FOLLOW_POLL_MS;
     this.onFinish = options.onFinish;
     this.shellPolicy =
       options.shellPolicy ?? resolveShellPolicy({ platform: this.platform, env: this.env });
@@ -617,7 +627,7 @@ export class ProcessTasks {
           timedOut: true,
         };
       }
-      await sleep(Math.min(FOLLOW_POLL_MS, remaining));
+      await sleep(Math.min(this.followPollMs, remaining));
     }
   }
 

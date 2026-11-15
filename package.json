@@ -32,6 +32,8 @@
     "lint:fix": "biome check --fix .",
     "format": "biome format --write .",
     "test": "vitest run --passWithNoTests",
+    "test:unit": "vitest run --project unit --passWithNoTests",
+    "test:integration": "vitest run --project integration --passWithNoTests",
     "test:watch": "vitest"
   },
   "peerDependencies": {

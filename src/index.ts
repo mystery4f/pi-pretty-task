@@ -46,6 +46,26 @@ export interface ExtensionOptions {
   readonly iterationCallLimit?: number;
   /** Iterations one Loop keeps; defaults to ITERATION_HISTORY_LIMIT. */
   readonly iterationHistoryLimit?: number;
+  /**
+   * Grace a stop lets the polite signal have before it forces; defaults to the
+   * supervisor's three seconds. A test passes a few milliseconds: the sequence a
+   * stop proves — ask, wait, force, confirm the tree is gone — is the same, and
+   * three seconds per kill is what made the suite slow (issue #32).
+   */
+  readonly killGraceMs?: number;
+  /** How long a forced kill gets to clear the tree; defaults to the supervisor's five seconds. */
+  readonly killConfirmMs?: number;
+  /**
+   * How often a follow read looks at the output file while it waits for bytes;
+   * defaults to 50ms. A test lowers it so a follow answers the moment the bytes
+   * land instead of on the next tick of a timer.
+   */
+  readonly followPollMs?: number;
+  /**
+   * How long a stop that lost to a surviving tree waits before retrying;
+   * defaults to a second.
+   */
+  readonly survivedRetryMs?: number;
   /** Project root holding `.pi/pretty-task.json`; defaults to `process.cwd()`. */
   readonly projectDir?: string;
   /** Agent settings directory; defaults to `PI_CODING_AGENT_DIR`, then pi's own default. */
@@ -226,6 +246,12 @@ export function createExtension(
     outputCapBytes: settings.outputCapBytes,
     maxRunningTasks: settings.maxRunningTasks,
     shellPolicy: settings.shellPolicy,
+    // The waits a stop and a follow spend are knobs, not policy: the tests lower
+    // them and prove the same sequence without the wall clock (issue #32).
+    killGraceMs: options.killGraceMs,
+    killConfirmMs: options.killConfirmMs,
+    followPollMs: options.followPollMs,
+    survivedRetryMs: options.survivedRetryMs,
     // The store does not await the announcement; a notice outlives the task.
     onFinish: (view) => {
       // Published first, and only here: the store awaited the write before

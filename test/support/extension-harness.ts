@@ -25,6 +25,7 @@ import type { Component, KeybindingsManager, TUI } from "@earendil-works/pi-tui"
 
 import { createExtension } from "../../src/index.js";
 import type { LoopFire } from "../../src/tasks/loop/loop-tasks.js";
+import { TEST_FOLLOW_POLL_MS, TEST_KILL_GRACE_MS } from "./processes.js";
 
 /** One turn's view of the session: its working directory and session id. */
 export interface Turn {
@@ -66,6 +67,22 @@ export interface HarnessOptions {
    * collects them into `problems`; production writes them to stderr.
    */
   readonly reportProblem?: (message: string) => void;
+  /**
+   * Grace a stop gives the polite signal before forcing; defaults to the tests'
+   * twenty milliseconds. The sequence is what a test proves, not the wait; pass
+   * the supervisor's real default to assert it.
+   */
+  readonly killGraceMs?: number;
+  /**
+   * How long a forced kill gets to clear the tree. The harness leaves it at the
+   * supervisor's default: a confirmation window is an upper bound a real force
+   * kill answers in a poll, so narrowing it would only invite a false survivor.
+   */
+  readonly killConfirmMs?: number;
+  /** How often a follow read looks at the output file; defaults to the tests' five milliseconds. */
+  readonly followPollMs?: number;
+  /** How long a stop that lost to a surviving tree waits before retrying. */
+  readonly survivedRetryMs?: number;
   /**
    * Receives the terminal notification bytes. The production writer is silent
    * unless stdout is a TTY, and a test runner's stdout is a pipe.
@@ -340,6 +357,12 @@ export function createHarness(defaultTurn: Turn, options: HarnessOptions = {}): 
       options.reportProblem?.(message);
     },
     writeTerminal: options.notificationWrite,
+    // A stop and a follow are real here — real taskkill, real output file — and
+    // only the waits between their steps are shortened: a suite that spent the
+    // production three seconds per kill was measuring its own patience (#32).
+    killGraceMs: options.killGraceMs ?? TEST_KILL_GRACE_MS,
+    followPollMs: options.followPollMs ?? TEST_FOLLOW_POLL_MS,
+    ...(options.survivedRetryMs === undefined ? {} : { survivedRetryMs: options.survivedRetryMs }),
   });
 
   return {
