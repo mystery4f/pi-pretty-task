@@ -276,7 +276,9 @@ describe("bg_run after", () => {
     const logs = resultText(await harness.call("bg_logs", { id: chainId }));
     expect(logs).toContain(`Task ${chainId} is a chain`);
     expect(logs).toContain(first.id);
-    const wait = resultText(await harness.call("pretty_task_bg_wait", { id: chainId, timeoutSeconds: 1 }));
+    const wait = resultText(
+      await harness.call("pretty_task_bg_wait", { id: chainId, timeoutSeconds: 1 }),
+    );
     expect(wait).toContain(`Task ${chainId} is a chain`);
     // The step's own output is still reachable by its own id.
     await waitForStatus(harness, chainId, "completed");
