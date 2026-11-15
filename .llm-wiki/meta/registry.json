@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "last_updated": "2026-11-15T05:18:54.953Z",
+  "last_updated": "2026-11-15T06:18:29.445Z",
   "pages": {
     "sources/await-state-not-bytes-in-process-tests": {
       "type": "source",
@@ -8,6 +8,15 @@
       "category": "bugfix",
       "status": "insight",
       "slug": "await-state-not-bytes-in-process-tests",
+      "created": "2026-11-15",
+      "updated": "2026-11-15"
+    },
+    "sources/delete-remote-branch-via-gh-api": {
+      "type": "source",
+      "title": "删远端分支走 gh API，git push --delete 会被拦",
+      "category": "devops",
+      "status": "insight",
+      "slug": "delete-remote-branch-via-gh-api",
       "created": "2026-11-15",
       "updated": "2026-11-15"
     },
@@ -45,6 +54,15 @@
       "created": "2026-11-14",
       "updated": "2026-11-14"
     },
+    "sources/pi-git-install-omits-dev-deps-so-ship-ts-entry": {
+      "type": "source",
+      "title": "pi 的 git 安装不带 devDeps，入口要写 .ts 而不是靠 prepare 构建",
+      "category": "devops",
+      "status": "insight",
+      "slug": "pi-git-install-omits-dev-deps-so-ship-ts-entry",
+      "created": "2026-11-15",
+      "updated": "2026-11-15"
+    },
     "sources/slow-suite-timings-not-workers": {
       "type": "source",
       "title": "慢测试先治写死的时长，再谈并行度",
@@ -74,6 +92,13 @@
       "title": "pi-loop 源码调研",
       "created": "2026-11-13",
       "updated": "2026-11-13"
+    },
+    "syntheses/pi-pretty-task-交接v02-收尾状态": {
+      "type": "synthesis",
+      "title": "pi-pretty-task 交接：v0.2 收尾状态",
+      "tags": "handoff, pi-pretty-task",
+      "created": "2026-11-15",
+      "updated": "2026-11-15"
     },
     "syntheses/pi-pretty-task-文档索引": {
       "type": "synthesis",

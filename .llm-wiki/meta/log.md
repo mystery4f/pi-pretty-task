@@ -29,3 +29,12 @@
 ## [2026-11-15T05:18:53.578Z] retro
 - slug: "await-state-not-bytes-in-process-tests", title: "进程类测试要等状态，不要等字节", category: "bugfix"
 
+## [2026-11-15T05:39:16.822Z] retro
+- slug: "pi-git-install-omits-dev-deps-so-ship-ts-entry", title: "pi 的 git 安装不带 devDeps，入口要写 .ts 而不是靠 prepare 构建", category: "devops"
+
+## [2026-11-15T06:05:04.692Z] retro
+- slug: "delete-remote-branch-via-gh-api", title: "删远端分支走 gh API，git push --delete 会被拦", category: "devops"
+
+## [2026-11-15T06:18:29.441Z] ensure_page
+- page_type: "synthesis", title: "pi-pretty-task 交接：v0.2 收尾状态", path: "syntheses/pi-pretty-task-交接v02-收尾状态"
+
