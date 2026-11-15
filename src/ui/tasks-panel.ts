@@ -950,7 +950,9 @@ export class TasksPanel implements Component {
 
   /** `R` runs the selected command again; the old row stays as its own record. */
   private rerunSelected(): void {
-    const row = this.rows[this.selectedIndex()];
+    // The key belongs to the page in front of the reader: an open fire is a process
+    // record of its own, so `R` repeats that fire, not the loop above it (ticket #35).
+    const row = this.mode === "detail" ? this.detailRow() : this.rows[this.selectedIndex()];
     if (row === undefined) {
       this.notice = "No task selected.";
       this.paint();
@@ -968,6 +970,19 @@ export class TasksPanel implements Component {
       // here, so the panel says so instead of starting something the reader did not ask
       // for. Starting the same pipeline again is a `bg_run` with the same `after`.
       this.notice = "A chain is a queue; run its steps again with bg_run.";
+      this.paint();
+      return;
+    }
+    // A step of a chain is a move in its queue, not a command that stands alone:
+    // repeating it here would run work the queue has not reached or has passed. The
+    // reason is said out loud, because `R` on a row that looks like a process would
+    // otherwise seem to have been ignored (ticket #35).
+    if (
+      row.task.kind === "process" &&
+      row.task.parentId !== undefined &&
+      row.task.fire === undefined
+    ) {
+      this.notice = "A chain step runs inside its queue; run the chain again with bg_run.";
       this.paint();
       return;
     }
@@ -999,7 +1014,9 @@ export class TasksPanel implements Component {
 
   /** `c` puts the output path where it can be read, since the panel cannot copy it. */
   private showOutputPath(): void {
-    const row = this.rows[this.selectedIndex()];
+    // As with `R`: the path belongs to the page in front of the reader, so an open
+    // fire names its own file and a loop detail names the loop's (ticket #35).
+    const row = this.mode === "detail" ? this.detailRow() : this.rows[this.selectedIndex()];
     if (row === undefined) {
       this.notice = "No task selected.";
       this.paint();
@@ -1089,11 +1106,18 @@ export class TasksPanel implements Component {
     const theme = this.theme;
     const inner = Math.max(1, width - 2);
     const edge = (glyph: string): string => theme.fg("borderAccent", glyph);
-    // The frame pads but never cuts: every line handed to it was already fitted by the
-    // caller (list cells pad themselves, `field` cuts its value to the frame). Cutting
-    // here as well would double-truncate text that merely carries colour.
-    const padded = (text: string, room: number): string =>
-      text + " ".repeat(Math.max(0, room - visibleWidth(text)));
+    // The frame is the one place the panel's width is guaranteed: whatever a caller
+    // hands it — a cell that already padded itself, a field value, a footer no
+    // candidate could shorten — every line leaves here exactly `inner` columns wide.
+    // A line that would not fit is cut with an ellipsis rather than pushing the
+    // border right (ADR-0017); colouring happens before this, and the cut counts
+    // only the columns a reader sees.
+    const fitted = (text: string, room: number): string =>
+      visibleWidth(text) > room ? truncateToWidth(text, room, "…", false) : text;
+    const padded = (text: string, room: number): string => {
+      const fit = fitted(text, room);
+      return fit + " ".repeat(Math.max(0, room - visibleWidth(fit)));
+    };
     const band = (text: string): string =>
       theme.bg("selectedBg", theme.fg("accent", padded(text, inner)));
     const row = (content = ""): string => `${edge("│")}${padded(content, inner)}${edge("│")}`;
@@ -1193,8 +1217,8 @@ export class TasksPanel implements Component {
   }
 
   /** The list's keys, the same on every page (ADR-0012): one model, three lists. */
-  private listFooter(): string {
-    return "↑/↓ · Enter logs · k stop · f filter · o others · 1/2/3 tabs · / search · R rerun · a stop all · alt+q close";
+  private listFooter(room: number): string {
+    return fittedFooter(LIST_KEYS, room);
   }
 
   /** The box around the rows: the header sits above it, the keys inside the bottom. */
@@ -1202,19 +1226,25 @@ export class TasksPanel implements Component {
     const theme = this.theme;
     const inner = Math.max(1, width - 2);
     const edge = (glyph: string): string => theme.fg("borderAccent", glyph);
-    const padded = (text: string, room: number): string =>
-      text + " ".repeat(Math.max(0, room - visibleWidth(text)));
+    const fitted = (text: string, room: number): string =>
+      visibleWidth(text) > room ? truncateToWidth(text, room, "…", false) : text;
+    const padded = (text: string, room: number): string => {
+      const fit = fitted(text, room);
+      return fit + " ".repeat(Math.max(0, room - visibleWidth(fit)));
+    };
     const row = (content = ""): string => `${edge("│")}${padded(content, inner)}${edge("│")}`;
 
     const lines = [
-      ...this.listHeader(width).map((line) => padded(line, width)),
+      // The bands above the box are full-width lines of their own, so they are cut to
+      // the terminal rather than padded to it: a tally that does not fit loses its
+      // tail instead of pushing the panel wider (ticket #34).
+      ...this.listHeader(width).map((line) => fitted(line, width)),
       edge(`╭${"─".repeat(inner)}╮`),
     ];
     for (const line of body) lines.push(row(line));
-    // The keys are cut while still plain text: cutting a coloured string can slice an
-    // escape in half and leave the border one column off.
-    const keys = this.listFooter();
-    const footer = keys.length <= inner - 1 ? keys : `${keys.slice(0, inner - 2)}…`;
+    // The keys are chosen while still plain text: cutting a coloured string can slice
+    // an escape in half and leave the border one column off.
+    const footer = this.listFooter(inner - 1);
     lines.push(row(), row(theme.fg("dim", ` ${footer}`)));
     lines.push(edge(`╰${"─".repeat(inner)}╯`));
     return lines;
@@ -1607,7 +1637,9 @@ export class TasksPanel implements Component {
       `task: ${task.name}`,
       `${task.id} · ${task.status} · ${live}`,
       body,
-      "↑/↓ scroll · r follow · ← list · k stop · R rerun · c path · alt+q close",
+      // The keys shed whole entries on a narrow terminal: the frame would otherwise
+      // cut the last one in half and leave the border a column off (ticket #34).
+      fittedFooter(PROCESS_KEYS, Math.max(1, width - 3)),
       width,
     );
   }
@@ -1927,7 +1959,9 @@ function rightText(
   // and the runtime alone still fits a narrow terminal (ticket #27).
   if (foreign) {
     const candidates = [`${elapsed}${age}`, elapsed];
-    return candidates.find((candidate) => visibleWidth(candidate) <= room) ?? elapsed;
+    // No candidate fits: the row keeps the room and drops the numbers, because a
+    // number drawn past the border costs more than a missing one (ticket #34).
+    return candidates.find((candidate) => visibleWidth(candidate) <= room) ?? "";
   }
   if (task.kind === "process") {
     // The numbers give way in the order they matter: the age first, then the size,
@@ -1935,7 +1969,7 @@ function rightText(
     // row is never wrapped and never pushed past its border (ADR-0015).
     const size = formatSize(row);
     const candidates = [`${elapsed} ${size}${age}`, `${elapsed} ${size}`, elapsed];
-    return candidates.find((candidate) => visibleWidth(candidate) <= room) ?? elapsed;
+    return candidates.find((candidate) => visibleWidth(candidate) <= room) ?? "";
   }
   if (task.kind === "chain") {
     // A chain reports its place in the queue: the step it is on, and how many it holds.
@@ -1945,7 +1979,7 @@ function rightText(
     // The elapsed time and the queue's place outrank the age, which goes first on a
     // narrow row, so a chain still says where it is when the numbers must give way.
     const candidates = [`${elapsed} · ${place}${age}`, `${elapsed} · ${place}`, place, elapsed];
-    return candidates.find((candidate) => visibleWidth(candidate) <= room) ?? place;
+    return candidates.find((candidate) => visibleWidth(candidate) <= room) ?? "";
   }
   // A loop has no exit code and no bytes: it reports the fires it made and how
   // long until the next one, which is the whole question while it is running. A
@@ -1961,13 +1995,48 @@ function rightText(
       : ` · next ${formatDuration(row.untilNextFireMs)}`;
   // The state the ticket asks the row to carry is the streak and the backoff, so
   // the age gives way first, then the word marking the wait a backoff, then the
-  // wait itself. Nothing is ever cut mid-number and the row never wraps (ADR-0015).
+  // wait itself. The count is the last number to go, and a row too narrow even for
+  // it drops the numbers instead of crossing the border (ADR-0015, ticket #34).
+  const fires = `${firesText(task)} fires`;
   const candidates = [
     `${state}${next ?? ""}${backingOff}${age}`,
     `${state}${next ?? ""}${backingOff}`,
     ...(next === undefined ? [] : [`${state}${next}`, state]),
+    `${fires}${failed}`,
+    fires,
   ];
-  return candidates.find((candidate) => visibleWidth(candidate) <= room) ?? state;
+  return candidates.find((candidate) => visibleWidth(candidate) <= room) ?? "";
+}
+
+/**
+ * The list's keys, widest first (ADR-0012): one model, three lists. A narrow
+ * terminal takes a shorter variant whole rather than a cut-off one, so a reader
+ * near the right edge never meets half a key (ticket #34).
+ */
+const LIST_KEYS: readonly string[] = [
+  "↑/↓ · Enter logs · k stop · f filter · o others · 1/2/3 tabs · / search · R rerun · a stop all · alt+q close",
+  "↑/↓ · Enter logs · k stop · f filter · o others · 1/2/3 · / search · R rerun · alt+q close",
+  "↑/↓ · Enter logs · k stop · f filter · / search · alt+q close",
+  "↑/↓ · Enter · k stop · alt+q close",
+];
+
+/** The keys under a process detail, widest first, for the same reason as `LIST_KEYS`. */
+const PROCESS_KEYS: readonly string[] = [
+  "↑/↓ scroll · r follow · ← list · k stop · R rerun · c path · alt+q close",
+  "↑/↓ scroll · r follow · ← list · k stop · R rerun · c · alt+q",
+  "↑/↓ · r follow · ← list · k stop · alt+q",
+];
+
+/**
+ * The footer that fits the room, taken whole: the first candidate that fits wins,
+ * and only when none does is the shortest cut. Cutting the long one instead would
+ * leave a reader with `alt+q clo` and the border a column off.
+ */
+function fittedFooter(candidates: readonly string[], room: number): string {
+  const fit = candidates.find((candidate) => visibleWidth(candidate) <= room);
+  if (fit !== undefined) return fit;
+  const shortest = candidates.at(-1) ?? "";
+  return truncateToWidth(shortest, Math.max(1, room), "…", false);
 }
 
 function pad(text: string, width: number): string {

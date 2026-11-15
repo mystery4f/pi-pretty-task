@@ -195,6 +195,25 @@ export function fakeTheme(): Theme {
 }
 
 /**
+ * A stand-in `Theme` that draws text exactly as given. The panel measures every line
+ * it draws, so a theme whose styling is not ANSI would be measured as wider than the
+ * terminal and the panel would cut real content to fit a test's markers.
+ */
+export function plainTheme(): Theme {
+  const plain = (_colour: string, text: string): string => text;
+  const decorate = (text: string): string => text;
+  return {
+    fg: plain,
+    bg: plain,
+    bold: decorate,
+    italic: decorate,
+    underline: decorate,
+    inverse: decorate,
+    strikethrough: decorate,
+  } as unknown as Theme;
+}
+
+/**
  * Load the extension against a fake API and return a caller for its tools.
  *
  * The environment is explicit so a test can set a limit without touching the
@@ -234,7 +253,7 @@ export function createHarness(defaultTurn: Turn, options: HarnessOptions = {}): 
           opened = { component, options: options ?? {} };
         };
         try {
-          const produced = factory(fakeTui, fakeTheme(), {} as KeybindingsManager, resolve);
+          const produced = factory(fakeTui, plainTheme(), {} as KeybindingsManager, resolve);
           if (produced instanceof Promise) produced.then(open, reject);
           else open(produced);
         } catch (error) {

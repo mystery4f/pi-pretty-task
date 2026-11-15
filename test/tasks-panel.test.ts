@@ -31,7 +31,7 @@ import {
   rememberPanelTab,
   TasksPanel,
 } from "../src/ui/tasks-panel.js";
-import { fakeTheme } from "./support/extension-harness.js";
+import { plainTheme } from "./support/extension-harness.js";
 
 const UP = "\u001b[A";
 const DOWN = "\u001b[B";
@@ -252,22 +252,6 @@ interface Opened {
  * a test can narrow a row and watch what makes way. Colours are asserted through
  * {@link recordingTheme} instead, where the tag overhead would skew the row.
  */
-function plainTheme(): Theme {
-  const plain = (_colour: string, text: string): string => text;
-  // A weight or a slant takes the text alone, so it cannot share the two-argument
-  // shape of a colour: a stray colour argument would be read as the text itself.
-  const decorate = (text: string): string => text;
-  return {
-    fg: plain,
-    bg: plain,
-    bold: decorate,
-    italic: decorate,
-    underline: decorate,
-    inverse: decorate,
-    strikethrough: decorate,
-  } as unknown as Theme;
-}
-
 /** A theme that keeps the text plain but records every colour it was asked for. */
 function recordingTheme(): { theme: Theme; painted: Array<{ colour: string; text: string }> } {
   const painted: Array<{ colour: string; text: string }> = [];
@@ -290,7 +274,7 @@ function recordingTheme(): { theme: Theme; painted: Array<{ colour: string; text
 function openPanel(
   source: FakeSource,
   now: () => number = () => 13_000,
-  theme: Theme = fakeTheme(),
+  theme: Theme = plainTheme(),
 ): Opened {
   const done = vi.fn();
   const panel = new TasksPanel({
@@ -314,7 +298,7 @@ async function openOn(
   tab: PanelTab | PanelFilter,
   source: FakeSource,
   now: () => number = () => 13_000,
-  theme: Theme = fakeTheme(),
+  theme: Theme = plainTheme(),
 ): Promise<Opened> {
   const opened = openPanel(source, now, theme);
   await opened.panel.settle();
@@ -381,7 +365,7 @@ describe("task list", () => {
     expect(newer).toBeGreaterThan(-1);
     expect(older).toBeGreaterThan(newer);
     expect(drawn()).toContain("newer1");
-    expect(lines[newer]).toContain("<dim>·</dim> <muted>proc</muted> <accent>running");
+    expect(lines[newer]).toContain("· proc running");
     expect(drawn()).toContain("running");
     expect(drawn()).toContain("3.5s");
     expect(drawn()).toContain("1.5 KiB");
@@ -408,11 +392,14 @@ describe("task list", () => {
   it("paints a finished task's status in the theme's own colour", async () => {
     const source = new FakeSource();
     source.rows = [view("done01", { status: "failed" })];
-    const { panel, drawn } = openPanel(source);
+    const { theme, painted } = recordingTheme();
+    const { panel, drawn } = openPanel(source, () => 13_000, theme);
     await panel.settle();
 
-    expect(drawn()).toContain("<error>");
+    // The drawer paints whatever it was asked to; the render is what asks it.
     expectNoHexColour(drawn());
+    // The row's marker and status word take the palette's colour for a failure.
+    expect(painted).toContainEqual({ colour: "error", text: "●" });
 
     panel.dispose();
   });
@@ -694,13 +681,16 @@ describe("the three pages", () => {
   });
 
   it("switches pages on 1, 2 and 3, and washes the open one in the band", async () => {
-    const { panel, drawn } = openPanel(threeKinds());
+    const { theme, painted } = recordingTheme();
+    const { panel, drawn } = openPanel(threeKinds(), () => 13_000, theme);
     await panel.settle();
 
     panel.handleInput("2");
     expect(drawn()).toContain("nightly review");
     expect(drawn()).not.toContain("web build");
-    expect(drawn()).toContain("<selectedBg><text> 2 Loops </text></selectedBg>");
+    // The band washes the open page's label and leaves the others alone.
+    expect(painted).toContainEqual({ colour: "selectedBg", text: " 2 Loops " });
+    expect(painted).not.toContainEqual({ colour: "selectedBg", text: " 1 Processes " });
 
     panel.handleInput("3");
     expect(drawn()).toContain("deploy queue");
@@ -931,7 +921,7 @@ describe("loop tasks in the list", () => {
 
     // A loop keeps no output file, so its row carries the schedule's numbers; the
     // dropped iterations and the last fire's wall-clock time live in the detail.
-    expect(loopRow).toContain("<muted>llm</muted>");
+    expect(loopRow).toContain("llm");
     expect(loopRow).toContain("5 fires");
     expect(loopRow).toContain("next 4.0s");
     expect(loopRow).not.toContain("KiB");
@@ -1041,7 +1031,7 @@ describe("the loop detail view", () => {
     expect(screen).toContain("fire 1");
     expect(screen.indexOf("npm test")).toBeLessThan(screen.indexOf("src/index.ts"));
     expect(screen.indexOf("src/index.ts")).toBeLessThan(screen.indexOf("npm run lint"));
-    expect(screen).toContain("<accent>npm test</accent>");
+    expect(screen).toContain("npm test");
     expect(screen).toContain("biome: 3 errors");
     expect(screen).toContain("+4 earlier calls dropped");
 
@@ -1166,7 +1156,7 @@ describe("the list header", () => {
     const header = drawn().split("\n").slice(0, 2).join("\n");
     expect(header).toContain("Background Tasks");
     for (const label of ["Running", "Succeeded", "Failed", "Timeout", "Killed"]) {
-      expect(header).toContain(`<muted>${label}</muted>`);
+      expect(header).toContain(label);
     }
 
     // The filter narrows the rows, never the tally: with `failed` on, only `lint`
@@ -1350,6 +1340,69 @@ describe("rerun and the output path", () => {
 
     panel.dispose();
   });
+
+  /**
+   * A command loop with one finished fire, plus the child record that fire started.
+   * The child is listed separately, as the store lists it: a detail page resolves it
+   * by id and no page of the list ever shows it (ADR-0014).
+   */
+  function loopWithFire(): FakeSource {
+    const source = new FakeSource();
+    source.rows = [
+      cmdLoopView(
+        "lc00001",
+        { name: "watch loop", fires: 45, fireHistory: [fireOf(44), fireOf(45)] },
+        30_000,
+        5_000,
+      ),
+      view("bg-00045", {
+        name: "watch loop #45",
+        parentId: "lc00001",
+        fire: 45,
+        createdAt: CLOCK,
+      }),
+    ];
+    return source;
+  }
+
+  /** Walk to a fire's own detail page: the list, the loop, then the newest fire. */
+  async function openFireDetail(source: FakeSource): Promise<Opened> {
+    const opened = await openOn("loops", source);
+    await opened.panel.settle();
+    opened.panel.handleInput(ENTER);
+    await opened.panel.settle();
+    opened.panel.handleInput(ENTER);
+    await opened.panel.settle();
+    return opened;
+  }
+
+  it("reruns the fire whose detail page is open, not the loop around it", async () => {
+    const source = loopWithFire();
+    const { panel, drawn } = await openFireDetail(source);
+
+    panel.handleInput("R");
+    await panel.settle();
+
+    // The page belongs to the fire, so the key does too.
+    expect(source.reran).toEqual(["bg-00045"]);
+    expect(drawn()).toContain("ran bg-00045 again as bg-000452");
+    expect(drawn()).not.toContain("A loop is scheduled, not run");
+
+    panel.dispose();
+  });
+
+  it("prints the open fire's own output path with c", async () => {
+    const source = loopWithFire();
+    const { panel, drawn } = await openFireDetail(source);
+
+    panel.handleInput("c");
+    await panel.settle();
+
+    expect(drawn()).toContain("output: /work/.pi/tasks/session/bg-00045.output");
+    expect(drawn()).not.toContain("a loop writes no output file");
+
+    panel.dispose();
+  });
 });
 
 describe("recency and search", () => {
@@ -1421,7 +1474,8 @@ describe("recency and search", () => {
 
   it("filters the page by a command substring as the query is typed", async () => {
     const source = searchFixture();
-    const { panel, drawn } = openPanel(source);
+    const { theme, painted } = recordingTheme();
+    const { panel, drawn } = openPanel(source, () => 13_000, theme);
     await panel.settle();
 
     panel.handleInput("/");
@@ -1432,7 +1486,7 @@ describe("recency and search", () => {
     expect(drawn()).not.toContain("unit tests");
     // The counts still cover every task: the failed lint run is out of the query,
     // not out of the tally.
-    expect(drawn()).toContain("<error>");
+    expect(painted.some(({ colour }) => colour === "error")).toBe(true);
 
     panel.dispose();
   });
@@ -1515,7 +1569,8 @@ describe("recency and search", () => {
   it("lights the characters it matched, and only those, inside the row", async () => {
     const source = new FakeSource();
     source.rows = [view("bg-aaaaa", { name: "deploy-bg" })];
-    const { panel, drawn } = openPanel(source);
+    const { theme, painted } = recordingTheme();
+    const { panel, drawn } = openPanel(source, () => 13_000, theme);
     await panel.settle();
 
     panel.handleInput("/");
@@ -1525,11 +1580,11 @@ describe("recency and search", () => {
       .split("\n")
       .find((line) => line.includes("bg-aaaaa"));
     expect(row).toBeDefined();
-    expect(row).toContain("<bold><accent>d</accent></bold>");
-    expect(row).toContain("<bold><accent>bg</accent></bold>");
+    expect(painted).toContainEqual({ colour: "accent", text: "d" });
+    expect(painted).toContainEqual({ colour: "accent", text: "bg" });
     // The characters between matches keep the name's own colour.
-    expect(row).toContain("<text>eploy-</text>");
-    expect(plain(row ?? "")).toContain("deploy-bg");
+    expect(painted).toContainEqual({ colour: "text", text: "eploy-" });
+    expect(row).toContain("deploy-bg");
 
     panel.dispose();
   });
@@ -2223,7 +2278,8 @@ describe("chains in the list and in the detail", () => {
   it("lights the matched step inside a chain's column", async () => {
     const source = new FakeSource();
     source.rows = chainOf();
-    const { panel, drawn } = await openOn("chains", source);
+    const { theme, painted } = recordingTheme();
+    const { panel, drawn } = await openOn("chains", source, () => 13_000, theme);
     await panel.settle();
 
     panel.handleInput("/");
@@ -2235,8 +2291,9 @@ describe("chains in the list and in the detail", () => {
     expect(row).toBeDefined();
     // `smoke` is a waiting step, so its own colour is muted; only the query's
     // characters take the accent.
-    expect(row).toContain("<bold><accent>smo</accent></bold><muted>ke</muted>");
-    expect(plain(row ?? "")).toContain("build → deploy → smoke");
+    expect(painted).toContainEqual({ colour: "accent", text: "smo" });
+    expect(painted).toContainEqual({ colour: "muted", text: "ke" });
+    expect(row).toContain("build → deploy → smoke");
 
     panel.dispose();
   });
@@ -2367,6 +2424,146 @@ describe("the other sessions sharing a checkout", () => {
     expect(text).toContain(STRANGER);
     expect(source.tailed).toContain("bg-x1x2x");
     expect(source.tailedFrom).toContain(STRANGER);
+
+    panel.dispose();
+  });
+});
+
+/**
+ * One render, with the proof that not a single line crossed the width it was given.
+ * The narrow width is the one ADR-0017 holds the panel to.
+ */
+function expectFits(panel: TasksPanel, width: number): readonly string[] {
+  const lines = panel.render(width);
+  for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+  return lines;
+}
+
+describe("the frame never draws past the terminal", () => {
+  const NARROW = 70;
+
+  it("keeps a long row inside 70 columns and holds its shape", async () => {
+    const source = new FakeSource();
+    source.rows = [
+      view("bg-a1b2c", {
+        name: "a background build whose name runs well past the border",
+        status: "running",
+      }),
+    ];
+    const { panel } = openPanel(source, () => 13_000, plainTheme());
+    await panel.settle();
+
+    const lines = expectFits(panel, NARROW);
+    const row = lines.find((line) => line.includes("›"));
+    expect(row).toBeDefined();
+    // Border, marker, border: the name gives way, the row does not.
+    expect(row?.startsWith("│")).toBe(true);
+    expect(row?.endsWith("│")).toBe(true);
+    expect(row).toContain("bg-a1b2c");
+    expect(row).toContain("running");
+
+    panel.dispose();
+  });
+
+  it("cuts a detail page's title and drops the keys that cannot fit", async () => {
+    const source = new FakeSource();
+    source.rows = [
+      view("bg-a1b2c", {
+        name: "a process whose name is long enough to cross the border of any terminal",
+        command: "npm run build -- --mode production --watch --poll --no-cache --verbose",
+      }),
+    ];
+    const { panel } = openPanel(source, () => 13_000, plainTheme());
+    await panel.settle();
+    panel.handleInput(ENTER);
+    await panel.settle();
+
+    const text = expectFits(panel, NARROW).join("\n");
+    expect(text).toContain("…");
+    // A shortened footer is still a whole list of keys, never one cut mid-word.
+    expect(text).toContain("← list");
+    expect(text).toContain("alt+q");
+
+    panel.dispose();
+  });
+
+  it("keeps a page's empty state inside 70 columns", async () => {
+    const source = new FakeSource();
+    const { panel } = await openOn("loops", source, () => 13_000, plainTheme());
+    await panel.settle();
+
+    const text = expectFits(panel, NARROW).join("\n");
+    expect(text).toContain("No loops here");
+    expect(text).toContain("…");
+
+    panel.dispose();
+  });
+
+  it("keeps a search result and an empty search inside 70 columns", async () => {
+    const source = new FakeSource();
+    source.rows = [
+      view("bg-a1b2c", {
+        name: "a web build whose name runs well past the border of the panel",
+        command: "npm run build",
+      }),
+    ];
+    const { panel } = openPanel(source, () => 13_000, plainTheme());
+    await panel.settle();
+
+    panel.handleInput("/");
+    for (const character of "build") panel.handleInput(character);
+    let text = expectFits(panel, NARROW).join("\n");
+    expect(text).toContain("search: build");
+    // The hit keeps its id and its numbers; the name gives way, as on every row.
+    expect(text).toContain("bg-a1b2c");
+    expect(text).not.toContain("runs well past the border");
+
+    for (const character of "zzz") panel.handleInput(character);
+    text = expectFits(panel, NARROW).join("\n");
+    expect(text).toContain("Nothing on this page matches the search");
+
+    panel.dispose();
+  });
+
+  it("keeps an iteration page inside 70 columns", async () => {
+    const source = new FakeSource();
+    source.rows = [
+      loopView("loop01", {
+        name: "review loop",
+        fires: 1,
+        iterations: [
+          iterationOf(1, [
+            callOf("call-1", "bash", "npm test -- --reporter=verbose --runInBand --silent"),
+          ]),
+        ],
+      }),
+    ];
+    const { panel } = await openOn("loops", source, () => 13_000, plainTheme());
+    await panel.settle();
+    panel.handleInput(ENTER);
+    await panel.settle();
+    panel.handleInput(ENTER);
+    await panel.settle();
+
+    const text = expectFits(panel, NARROW).join("\n");
+    expect(text).toContain("calls");
+
+    panel.dispose();
+  });
+
+  it("drops a row's numbers rather than pushing the border wider", async () => {
+    const source = new FakeSource();
+    source.rows = [loopView("loop01", { name: "review loop", fires: 45 }, 30_000, 40 * 60_000)];
+    const { panel } = await openOn("loops", source, () => 13_000, plainTheme());
+    await panel.settle();
+
+    expect(panel.render(120).join("\n")).toContain("45 fires");
+
+    // Every width keeps the invariant; the numbers go before the row does.
+    for (const width of [70, 60, 50, 44, 38]) expectFits(panel, width);
+    const narrow = panel.render(38).join("\n");
+    expect(narrow).not.toContain("45 fires");
+    expect(narrow).toContain("review loop");
 
     panel.dispose();
   });
