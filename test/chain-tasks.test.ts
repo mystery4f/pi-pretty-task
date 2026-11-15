@@ -13,7 +13,13 @@ import type { TaskScope } from "../src/tasks/base/runtime-state.js";
 import { TaskSessions } from "../src/tasks/base/task-sessions.js";
 import { ChainTasks, type ChainTaskView } from "../src/tasks/chain/chain-tasks.js";
 import { ProcessTasks, type ProcessTaskView } from "../src/tasks/process/process-tasks.js";
-import { killTree, makeTempDir, waitFor, writeScript } from "./support/processes.js";
+import {
+  killTree,
+  makeTempDir,
+  TEST_KILL_GRACE_MS,
+  waitFor,
+  writeScript,
+} from "./support/processes.js";
 
 const cleanup: Array<() => Promise<void>> = [];
 const spawned: number[] = [];
@@ -29,6 +35,9 @@ function makeStores() {
   const chainEndings: ChainTaskView[] = [];
   const processes = new ProcessTasks({
     sessions,
+    // Real children, real stops: only the waits between the steps of a stop are
+    // shortened, so a chain that is killed answers in a tick instead of seconds.
+    killGraceMs: TEST_KILL_GRACE_MS,
     onFinish: (view: ProcessTaskView) => {
       if (view.task.pid !== undefined) spawned.push(view.task.pid);
       void chainTasks.advance(view);
@@ -151,6 +160,9 @@ describe("chain tasks", () => {
       "start three",
       "end three",
     ]);
+    // The chain's own ending is an event of its own, announced after the last
+    // step's: waiting for it is the honest read, not a slower poll slipping in.
+    await waitFor("the chain's ending", () => stores.chainEndings.length > 0);
     expect(stores.chainEndings.map((view) => view.task.status)).toEqual(["completed"]);
   });
 

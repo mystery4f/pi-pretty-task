@@ -589,8 +589,14 @@ describe("command loops", () => {
     await waitForFire(task.harness, loop.id, 1, "success");
 
     const restarted = createHarness(task.turn, { now: () => task.now });
-    const reloaded = detailsOf(await restarted.call("loop_list", { id: loop.id }));
+    // The ending reaches this loop's record and then the file; the second harness
+    // only ever sees the file, so the wait belongs on the file's own copy.
+    let reloaded: CmdDetails | undefined;
+    await waitFor("the rewritten file to carry the fire history", async () => {
+      reloaded = detailsOf(await restarted.call("loop_list", { id: loop.id }));
+      return reloaded.fireHistory?.[0]?.outcome === "success";
+    });
     expect(reloaded).toMatchObject({ kind: "cmd-loop", command: script, fires: 1 });
-    expect(reloaded.fireHistory?.[0]).toMatchObject({ fire: 1, outcome: "success" });
+    expect(reloaded?.fireHistory?.[0]).toMatchObject({ fire: 1, outcome: "success" });
   });
 });

@@ -12,8 +12,20 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { ProcessTasks } from "../src/tasks/process/process-tasks.js";
-import { type RunningProcess, startProcess } from "../src/tasks/process/supervisor.js";
-import { isAlive, killTree, makeTempDir, waitFor, writeScript } from "./support/processes.js";
+import {
+  KILL_CONFIRM_MS,
+  KILL_GRACE_MS,
+  type RunningProcess,
+  startProcess,
+} from "../src/tasks/process/supervisor.js";
+import {
+  isAlive,
+  killTree,
+  makeTempDir,
+  TEST_KILL_GRACE_MS,
+  waitFor,
+  writeScript,
+} from "./support/processes.js";
 
 const cleanup: Array<() => Promise<void>> = [];
 const spawned: number[] = [];
@@ -59,7 +71,9 @@ describe("stop", () => {
     const running = run(command, dir.path);
     const pid = pidOf(running);
 
-    const result = await running.stop({ graceMs: 300, confirmMs: 5000 });
+    const result = await running.stop({
+      graceMs: TEST_KILL_GRACE_MS,
+    });
 
     expect(result.outcome).toBe("stopped");
     expect(isAlive(pid)).toBe(false);
@@ -74,7 +88,9 @@ describe("stop", () => {
     const exit = await running.exit;
     expect(exit.exitCode).toBe(0);
 
-    const result = await running.stop({ graceMs: 300, confirmMs: 5000 });
+    const result = await running.stop({
+      graceMs: TEST_KILL_GRACE_MS,
+    });
 
     expect(result.outcome).toBe("already-exited");
   });
@@ -126,7 +142,9 @@ describe("stop", () => {
     if (grandchild === undefined) throw new Error("the grandchild wrote no pid");
     spawned.push(grandchild);
 
-    const result = await running.stop({ graceMs: 500, confirmMs: 5000 });
+    const result = await running.stop({
+      graceMs: TEST_KILL_GRACE_MS,
+    });
 
     expect(result.outcome).toBe("stopped");
     await waitFor("both processes to disappear", () => !isAlive(pid) && !isAlive(grandchild));
@@ -138,7 +156,9 @@ describe("the store's kill reason", () => {
     const dir = await makeTempDir();
     cleanup.push(dir.dispose);
     const command = await writeScript(dir.path, "forever.js", "setInterval(() => {}, 1000);\n");
-    const tasks = new ProcessTasks({ killGraceMs: 300, killConfirmMs: 5000 });
+    const tasks = new ProcessTasks({
+      killGraceMs: TEST_KILL_GRACE_MS,
+    });
     const scope = { cwd: dir.path, sessionId: "session-timeout-kill" };
 
     const task = await tasks.start({ ...scope, command, name: "timed out" });
@@ -150,5 +170,58 @@ describe("the store's kill reason", () => {
     expect(result?.view.task.status).toBe("killed");
     expect(result?.view.task.killReason).toBe("timeout");
     expect((await tasks.get(scope, task.id))?.task.status).toBe("killed");
+  });
+});
+
+describe("the waits a stop spends", () => {
+  it("gives the polite signal three seconds before forcing when nothing asks otherwise", async () => {
+    // The one test that pays the production wait. Every other stop in the suite
+    // narrows the grace to prove the sequence without it; this is what keeps the
+    // default honest, because a default nobody runs is a comment, not a promise.
+    const dir = await makeTempDir();
+    cleanup.push(dir.dispose);
+    const source =
+      process.platform === "win32"
+        ? "setInterval(() => {}, 1000);\n"
+        : "process.on('SIGTERM', () => {});\nsetInterval(() => {}, 1000);\n";
+    const command = await writeScript(dir.path, "impatient.js", source);
+    const running = run(command, dir.path);
+    const pid = pidOf(running);
+
+    expect(KILL_GRACE_MS).toBe(3000);
+    expect(KILL_CONFIRM_MS).toBe(5000);
+
+    const result = await running.stop();
+
+    expect(result.outcome).toBe("stopped");
+    expect(result.tookMs).toBeGreaterThanOrEqual(KILL_GRACE_MS);
+    expect(isAlive(pid)).toBe(false);
+  });
+
+  it("waits only as long as the store tells it to", async () => {
+    // Same command, same force, same answer: only the grace is narrowed, which is
+    // what every other test in the suite does through the extension's options.
+    const dir = await makeTempDir();
+    cleanup.push(dir.dispose);
+    const source =
+      process.platform === "win32"
+        ? "setInterval(() => {}, 1000);\n"
+        : "process.on('SIGTERM', () => {});\nsetInterval(() => {}, 1000);\n";
+    const command = await writeScript(dir.path, "impatient.js", source);
+    const tasks = new ProcessTasks({
+      killGraceMs: TEST_KILL_GRACE_MS,
+    });
+    const scope = { cwd: dir.path, sessionId: "session-narrow-grace" };
+    const task = await tasks.start({ ...scope, command, name: "narrow" });
+    if (task.pid !== undefined) spawned.push(task.pid);
+
+    const started = Date.now();
+    const result = await tasks.stop(scope, task.id, { reason: "user" });
+
+    expect(result?.outcome).toBe("killed");
+    expect(result?.view.task.status).toBe("killed");
+    // The default would have spent KILL_GRACE_MS waiting before the force; the
+    // store's own setting is what reached the supervisor instead.
+    expect(Date.now() - started).toBeLessThan(KILL_GRACE_MS);
   });
 });

@@ -165,6 +165,9 @@ describe("the running-task cap", () => {
     const ended = await stores.chainTasks.get(scope, queued.chain.id);
     expect(ended?.task.error).toContain(`step ${step.id}`);
     expect(ended?.task.error).toMatch(/limit is 1/);
+    // The chain's ending is announced after the record is written, so it lands a
+    // tick later than the status a reader just saw.
+    await waitFor("the chain's ending", () => stores.chainEndings.length > 0);
     expect(stores.chainEndings.at(-1)?.task.status).toBe("failed");
   });
 });

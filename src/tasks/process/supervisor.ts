@@ -232,10 +232,14 @@ export function startProcess(options: StartProcessOptions): RunningProcess {
   };
 }
 
-/** How long a stop lets the polite signal work before forcing. */
-const KILL_GRACE_MS = 3000;
+/**
+ * How long a stop lets the polite signal work before forcing. Exported because
+ * it is the documented default a caller overrides per stop, not an internal
+ * constant: a test that skips the wait still has to be able to say what it skipped.
+ */
+export const KILL_GRACE_MS = 3000;
 /** How long a stop waits for a forced kill to clear the tree. */
-const KILL_CONFIRM_MS = 5000;
+export const KILL_CONFIRM_MS = 5000;
 /** Distance between two liveness checks while waiting. */
 const KILL_POLL_MS = 50;
 /** A helper that hangs must not hold up the kill. */
