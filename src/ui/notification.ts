@@ -75,7 +75,7 @@ function noticeText(details: FinishedTaskDetails): string {
     lines.push("last output:");
     for (const line of tail) lines.push(`  ${line}`);
   }
-  lines.push(`read more: bg_logs id=${details.id}`);
+  lines.push(`read more: pretty_task_bg_logs id=${details.id}`);
   return lines.join("\n");
 }
 
@@ -148,7 +148,7 @@ export const renderTaskFinished: MessageRenderer<FinishedTaskDetails> = (
     for (const line of tail) lines.push(theme.fg("dim", `  ${line}`));
   }
   if (details.outputTruncated === true) {
-    lines.push(theme.fg("dim", `… older output left out — bg_logs id=${details.id}`));
+    lines.push(theme.fg("dim", `… older output left out — pretty_task_bg_logs id=${details.id}`));
   }
   return new Text(lines.join("\n"), 0, 0);
 };

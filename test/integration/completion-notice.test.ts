@@ -1,6 +1,6 @@
 /**
  * Extension seam: a task that ends announces itself in the session. Every test
- * here starts a real process task through `bg_run`, lets it end, and asserts
+ * here starts a real process task through `pretty_task_bg_run`, lets it end, and asserts
  * what the user sees in the transcript — the message the extension sent and
  * the text its renderer draws.
  *
@@ -30,13 +30,13 @@ afterEach(async () => {
   while (cleanup.length > 0) await cleanup.pop()?.();
 });
 
-/** Start a task, wait until it has ended, and return what `bg_run` reported. */
+/** Start a task, wait until it has ended, and return what `pretty_task_bg_run` reported. */
 async function runToEnd(harness: Harness, command: string, name: string): Promise<TaskDetails> {
-  const result = await harness.call("bg_run", { name, command });
+  const result = await harness.call("pretty_task_bg_run", { name, command });
   const details = result.details as TaskDetails;
   if (details.pid !== undefined) spawned.push(details.pid);
   await waitFor("the task to end", async () => {
-    const status = await harness.call("bg_status", { id: details.id });
+    const status = await harness.call("pretty_task_bg_status", { id: details.id });
     return (status.details as TaskDetails).status !== "running";
   });
   return details;
@@ -132,7 +132,7 @@ describe("finished-task notice", () => {
 
 describe("killed task notice", () => {
   // A kill has no exit code and its reason is a stored fact, not a status name.
-  // Ticket #3 makes `bg_kill` reachable; until then the notice is driven here.
+  // Ticket #3 makes `pretty_task_bg_kill` reachable; until then the notice is driven here.
   it("keeps the same shape and carries the kill reason", () => {
     const harness = createHarness({ cwd: process.cwd(), sessionId: "session-notice-killed" });
     const notice = finishedTaskMessage({

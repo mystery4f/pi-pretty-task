@@ -30,7 +30,7 @@
 - 步骤只能是 `kind: "process"` 的任务。Llm loop 排进队列等于同时受 cron 与队列两套时钟支配，是没想清楚的语义，明确不做。
 - 一次只跑一格。当前格结束：退出码 0 → `cursor + 1` 并启动下一格；非零 → 链 `failed`，余下各格 `skipped`；用户终止 → 余下各格 `stopped`。
 - 步骤是 chain 的子记录：`parentId = <chainId>`。`Chains` 页只列 `kind === "chain"` 的行，`Processes` 页过滤掉 `parentId` 非空的步骤，避免同一件事出现两次。
-- `bg_run({ after })` 双语义：传任务 id 时挂到该任务所属链的队尾，传 `ch-` id 时直接追到该链的队尾（允许在链运行中追加）。
+- `pretty_task_bg_run({ after })` 双语义：传任务 id 时挂到该任务所属链的队尾，传 `ch-` id 时直接追到该链的队尾（允许在链运行中追加）。
 - 没有隐式链：不属于任何链的任务，不会被当成「只含一格的链」展示。
 
 ## 后果

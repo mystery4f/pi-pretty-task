@@ -78,7 +78,11 @@ function detailsOf<T>(result: { details: unknown }): T {
 
 async function createLoop(harness: Harness, params: Record<string, unknown> = {}) {
   const created = detailsOf<LoopDetails>(
-    await harness.call("loop_create", { schedule: "10s", prompt: "review the diff", ...params }),
+    await harness.call("pretty_task_loop_create", {
+      schedule: "10s",
+      prompt: "review the diff",
+      ...params,
+    }),
   );
   return created;
 }
@@ -108,9 +112,9 @@ async function endCall(
   });
 }
 
-/** One loop's iterations as `loop_list id=…` reports them, newest first. */
+/** One loop's iterations as `pretty_task_loop_list id=…` reports them, newest first. */
 async function iterationsOf(harness: Harness, id: string): Promise<IterationDetails[]> {
-  const result = await harness.call("loop_list", { id });
+  const result = await harness.call("pretty_task_loop_list", { id });
   return detailsOf<LoopDetails>(result).iterations ?? [];
 }
 
@@ -149,7 +153,7 @@ describe("iteration recording", () => {
       durationMs: 4,
     });
 
-    const text = resultText(await task.harness.call("loop_list", { id: created.id }));
+    const text = resultText(await task.harness.call("pretty_task_loop_list", { id: created.id }));
     expect(text).toContain("fire 1");
     expect(text).toContain("git status --short");
     expect(text).toContain("src/index.ts");
@@ -243,7 +247,7 @@ describe("iteration recording", () => {
     if (iteration === undefined) throw new Error("no iteration was recorded");
     expect(iteration.droppedCalls).toBe(1);
     expect(iteration.calls.map((call) => call.subject)).toEqual(["second", "third"]);
-    const text = resultText(await task.harness.call("loop_list", { id: created.id }));
+    const text = resultText(await task.harness.call("pretty_task_loop_list", { id: created.id }));
     expect(text).toContain("+1 earlier calls dropped");
   });
 
@@ -260,7 +264,7 @@ describe("iteration recording", () => {
     const iterations = await iterationsOf(task.harness, created.id);
     expect(iterations.map((iteration) => iteration.fire)).toEqual([2]);
     // The loop's own listing says the history is cut, wherever it is read from.
-    const all = resultText(await task.harness.call("loop_list", {}));
+    const all = resultText(await task.harness.call("pretty_task_loop_list", {}));
     expect(all).toContain("iterations: 1 (1 older dropped)");
   });
 

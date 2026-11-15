@@ -16,7 +16,7 @@ updated: 2026-11-14
 | [AGENTS.md](../../AGENTS.md) | 项目规则、产品模型、目录约定、验收标准 | 已定 |
 | [GLOSSARY.md](../../GLOSSARY.md) | 术语：Task（两种 kind：process / loop）/ Iteration / Panel / Status line | 已定 |
 | [scope-v1.md](../../docs/scope-v1.md) | v0.1 范围：做 / 不做 / 延后（含复杂度与风险） | 已定，随实现更新 |
-| [configuration.md](../../docs/configuration.md) | 配置面：`PI_PRETTY_TASK_OUTPUT_CAP_BYTES`（默认 20 MiB，启动校验）与 `bg_run` 的 `timeoutSeconds`；两类终止原因 | 已定 |
+| [configuration.md](../../docs/configuration.md) | 配置面：`PI_PRETTY_TASK_OUTPUT_CAP_BYTES`（默认 20 MiB，启动校验）与 `pretty_task_bg_run` 的 `timeoutSeconds`；两类终止原因 | 已定 |
 
 ## 决策记录（ADR）
 
@@ -29,7 +29,7 @@ updated: 2026-11-14
 | [0005 Task 是 process 与 loop 的上位概念](../../docs/adr/0005-task-is-the-supertype.md) | 一种 Task、多个 kind、一张面板表；Iteration、Fire、Step 都是子记录 |
 | [0006 调度吃间隔简写与五段 cron](../../docs/adr/0006-cron-alongside-intervals.md) | 两种语法共用一个 `nextFire(after)`；六段拒绝 |
 | [0007 Iteration 历史上限与重启修复](../../docs/adr/0007-iteration-history-cap-and-restart-repair.md) | 各留最近 N 条并计数；重启把未完成的标 interrupted |
-| [0008 命令用哪个 shell、输出按什么编码读](../../docs/adr/0008-shell-choice-and-output-decoding.md) | 环境变量定默认 + `bg_run.shell` 覆盖；读取层 UTF-8 → Windows GB18030 回退 |
+| [0008 命令用哪个 shell、输出按什么编码读](../../docs/adr/0008-shell-choice-and-output-decoding.md) | 环境变量定默认 + `pretty_task_bg_run.shell` 覆盖；读取层 UTF-8 → Windows GB18030 回退 |
 | [0009 唤醒等 agent 空闲，Iteration 绑定它唤醒的那一轮](../../docs/adr/0009-wakes-wait-for-idle-and-bind-their-turn.md) | 自建待发队列、只在空闲时投递；open 待定、投递后 bind；pump 单飞 |
 | [0010 Task 的更新时间要落盘](../../docs/adr/0010-task-recency-is-persisted.md) | `updatedAt` 落盘、按它排序；由状态/触发推动，输出增长不算 |
 | [0011 id 自带你是什么](../../docs/adr/0011-ids-carry-their-kind.md) | `bg-`/`lp-`/`lc-`/`ch-` 前缀，模型与人看 id 就知道种类 |

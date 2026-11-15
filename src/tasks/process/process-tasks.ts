@@ -198,7 +198,7 @@ interface SessionTasks extends TaskSession {
   readonly waiters: Map<string, Set<() => void>>;
   /**
    * Where each task's follow read has reached, in output bytes. Follow is the
-   * only reader that moves a cursor, so a plain `bg_logs` tail neither seeds nor
+   * only reader that moves a cursor, so a plain `pretty_task_bg_logs` tail neither seeds nor
    * consumes one; nothing here is persisted because a cursor belongs to the
    * session that asked, not to the task.
    */
@@ -333,7 +333,7 @@ export class ProcessTasks {
   async start(input: StartProcessTaskInput): Promise<ProcessTask> {
     const session = await this.session(input);
     // The ceiling is checked before a record exists: a refused start leaves
-    // nothing behind to explain, and the caller that asked — a `bg_run`, a fire —
+    // nothing behind to explain, and the caller that asked — a `pretty_task_bg_run`, a fire —
     // reports the reason itself.
     const refusal = this.capRefusal(session);
     if (refusal !== undefined) throw new Error(refusal);
@@ -483,7 +483,7 @@ export class ProcessTasks {
    *
    * Counting records rather than calling the supervisor keeps fires and chain
    * steps inside the ceiling: a fire is a process record with a loop for a parent,
-   * a step one with a chain for a parent, and a child of `bg_run` is a record too
+   * a step one with a chain for a parent, and a child of `pretty_task_bg_run` is a record too
    * (ADR-0014). One pass over the loaded records is the count, so nothing has to be
    * kept in step with the running map.
    */
@@ -500,7 +500,7 @@ export class ProcessTasks {
     return (
       `This session already has ${String(running)} running process tasks; the limit is ` +
       `${String(this.maxRunningTasks)} (${MAX_RUNNING_TASKS_ENV}). ` +
-      "Stop one with bg_kill before starting another."
+      "Stop one with pretty_task_bg_kill before starting another."
     );
   }
 
@@ -572,7 +572,7 @@ export class ProcessTasks {
     const task = session.tasks.get(id);
     if (task === undefined || task.kind !== "process") return undefined;
     // Every reader of a task's output comes through here, so one decoder serves
-    // `bg_logs`, the panel and a completion notice alike (ADR-0008).
+    // `pretty_task_bg_logs`, the panel and a completion notice alike (ADR-0008).
     const tail = await readOutputTail(task.outputPath, { ...options, platform: this.platform });
     return { view: this.view(session, task), tail };
   }
@@ -877,8 +877,8 @@ export class ProcessTasks {
 
   /**
    * Say on the record that a kill could not clear its tree. The record is still
-   * running, so this is the only place a reader — the panel, `bg_status`, the next
-   * `bg_kill` — can learn that the task outlived a stop that was already paid for.
+   * running, so this is the only place a reader — the panel, `pretty_task_bg_status`, the next
+   * `pretty_task_bg_kill` — can learn that the task outlived a stop that was already paid for.
    */
   private noteSurvival(session: SessionTasks, task: ProcessTask, detail: string | undefined): void {
     const note = `the process tree could not be stopped: ${

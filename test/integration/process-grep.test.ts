@@ -1,5 +1,5 @@
 /**
- * Extension seam: `bg_grep` answers a question about a task's whole output.
+ * Extension seam: `pretty_task_bg_grep` answers a question about a task's whole output.
  *
  * The command may have written twenty megabytes, and the caller only wants the
  * lines that matched — so the tool walks the whole file, returns numbered
@@ -32,7 +32,7 @@ interface GrepDetails {
   maxMatches: number;
 }
 
-/** The answer cap the spec fixes for one `bg_grep` call. */
+/** The answer cap the spec fixes for one `pretty_task_bg_grep` call. */
 const RESULT_BYTE_CAP = 8 * 1024;
 
 const cleanup: Array<() => Promise<void>> = [];
@@ -43,16 +43,16 @@ afterEach(async () => {
 
 /** Start a command and wait until it has ended, so its output file is settled. */
 async function finishedTask(harness: Harness, command: string): Promise<TaskDetails> {
-  const started = await harness.call("bg_run", { command });
+  const started = await harness.call("pretty_task_bg_run", { command });
   const task = started.details as TaskDetails;
   await waitFor("the task to finish", async () => {
-    const status = await harness.call("bg_status", { id: task.id });
+    const status = await harness.call("pretty_task_bg_status", { id: task.id });
     return (status.details as TaskDetails).status !== "running";
   });
   return task;
 }
 
-/** Lines of a `bg_grep` answer: its first two lines are the header, then a blank. */
+/** Lines of a `pretty_task_bg_grep` answer: its first two lines are the header, then a blank. */
 function bodyLines(text: string): string[] {
   const body = text.slice(text.indexOf("\n\n") + 2);
   if (body.length === 0) return [];
@@ -63,11 +63,11 @@ async function grep(
   harness: Harness,
   params: Record<string, unknown>,
 ): Promise<{ text: string; details: GrepDetails }> {
-  const result = await harness.call("bg_grep", params);
+  const result = await harness.call("pretty_task_bg_grep", params);
   return { text: resultText(result), details: result.details as GrepDetails };
 }
 
-describe("bg_grep over a whole output file", () => {
+describe("pretty_task_bg_grep over a whole output file", () => {
   it("returns only matching lines, each prefixed with its line number", async () => {
     const dir = await makeTempDir();
     cleanup.push(dir.dispose);
@@ -153,15 +153,15 @@ describe("bg_grep over a whole output file", () => {
   });
 });
 
-describe("bg_grep's caps", () => {
+describe("pretty_task_bg_grep's caps", () => {
   /** A file whose lines are long enough that the byte cap bites before the match cap. */
   async function bigTask(harness: Harness): Promise<{ task: TaskDetails; lineCount: number }> {
-    const started = await harness.call("bg_run", {
+    const started = await harness.call("pretty_task_bg_run", {
       command: "node -e \"process.stdout.write('start')\"",
     });
     const task = started.details as TaskDetails;
     await waitFor("the task to finish", async () => {
-      const status = await harness.call("bg_status", { id: task.id });
+      const status = await harness.call("pretty_task_bg_status", { id: task.id });
       return (status.details as TaskDetails).status !== "running";
     });
 
@@ -303,13 +303,13 @@ describe("bg_grep's caps", () => {
     cleanup.push(dir.dispose);
     const harness = createHarness({ cwd: dir.path, sessionId: "session-grep-unknown" });
 
-    const result = await harness.call("bg_grep", { id: "bg-zzzzzz", pattern: "alpha" });
+    const result = await harness.call("pretty_task_bg_grep", { id: "bg-zzzzzz", pattern: "alpha" });
 
     expect(resultText(result)).toContain("No background task with id bg-zzzzzz");
   });
 });
 
-describe("bg_grep on a line longer than one read", () => {
+describe("pretty_task_bg_grep on a line longer than one read", () => {
   it("finds a match beyond the first read of a line that never breaks", async () => {
     const dir = await makeTempDir();
     cleanup.push(dir.dispose);

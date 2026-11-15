@@ -1,6 +1,6 @@
 /**
- * Extension seam: chains as the model meets them — `bg_run` queues behind a task or
- * a chain, `bg_status` reads a queue and its steps, `bg_kill` stops a queue. The
+ * Extension seam: chains as the model meets them — `pretty_task_bg_run` queues behind a task or
+ * a chain, `pretty_task_bg_status` reads a queue and its steps, `pretty_task_bg_kill` stops a queue. The
  * steps are ordinary tasks throughout, so every outcome is read from a task record.
  *
  * @author mystery4f <40482524+mystery4f@users.noreply.github.com>
@@ -48,16 +48,16 @@ const STEP_SCRIPT = [
   "",
 ].join("\n");
 
-/** `bg_run` and return its details, tracking the pid for cleanup. */
+/** `pretty_task_bg_run` and return its details, tracking the pid for cleanup. */
 async function run(harness: Harness, params: Record<string, unknown>): Promise<TaskDetails> {
-  const result = await harness.call("bg_run", params);
+  const result = await harness.call("pretty_task_bg_run", params);
   const details = result.details as TaskDetails;
   if (details.pid !== undefined) spawned.push(details.pid);
   return details;
 }
 
 async function status(harness: Harness, id: string): Promise<TaskDetails> {
-  return (await harness.call("bg_status", { id })).details as TaskDetails;
+  return (await harness.call("pretty_task_bg_status", { id })).details as TaskDetails;
 }
 
 /** Ask for one task's status until its status is one of `statuses`. */
@@ -73,7 +73,7 @@ async function waitForStatus(
   return status(harness, id);
 }
 
-describe("bg_run after", () => {
+describe("pretty_task_bg_run after", () => {
   it("queues the command behind a running task and answers with the queue it joined", async () => {
     const dir = await makeTempDir();
     cleanup.push(dir.dispose);
@@ -88,7 +88,7 @@ describe("bg_run after", () => {
     });
     // A task of no chain stays a process task: it is never a chain of one.
     expect((await status(harness, ahead.id)).kind).toBe("process");
-    const result = await harness.call("bg_run", {
+    const result = await harness.call("pretty_task_bg_run", {
       name: "deploy",
       command,
       after: ahead.id,
@@ -112,7 +112,9 @@ describe("bg_run after", () => {
     const chain = await waitForStatus(harness, chainId, "completed");
     expect(chain.steps).toEqual([ahead.id, queued.id]);
     expect(chain.cursor).toBe(2);
-    const listed = (await harness.call("bg_status", {})).details as { tasks: TaskDetails[] };
+    const listed = (await harness.call("pretty_task_bg_status", {})).details as {
+      tasks: TaskDetails[];
+    };
     const ids = listed.tasks.map((task) => task.id);
     expect(ids).toContain(chainId);
     expect(ids).not.toContain(queued.id);
@@ -146,7 +148,7 @@ describe("bg_run after", () => {
     });
 
     await waitForStatus(harness, chainId, "completed");
-    const queue = resultText(await harness.call("bg_status", { id: chainId }));
+    const queue = resultText(await harness.call("pretty_task_bg_status", { id: chainId }));
     expect(queue).toContain(`kind: chain`);
     expect(queue).toContain(`steps: 3`);
     // Every step reads its own record: status, exit code and output are its own.
@@ -186,7 +188,7 @@ describe("bg_run after", () => {
     const chainId = deploy.parentId ?? "";
 
     await waitForStatus(harness, chainId, "failed");
-    const queue = resultText(await harness.call("bg_status", { id: chainId }));
+    const queue = resultText(await harness.call("pretty_task_bg_status", { id: chainId }));
     expect(queue).toContain("failed");
     expect(queue).toContain("skipped");
     expect(queue).toContain(`parent ${chainId} did not succeed`);
@@ -217,7 +219,7 @@ describe("bg_run after", () => {
     });
     const chainId = behind.parentId ?? "";
 
-    const killed = await harness.call("bg_kill", { id: chainId });
+    const killed = await harness.call("pretty_task_bg_kill", { id: chainId });
     const text = resultText(killed);
     expect(text).toContain(`Stopped chain ${chainId}`);
     expect(text).toContain("killed");
@@ -226,7 +228,7 @@ describe("bg_run after", () => {
     expect((await status(harness, long.id)).status).toBe("killed");
     expect((await status(harness, behind.id)).status).toBe("stopped");
     // Stopping a queue that already ended answers instead of failing.
-    const again = resultText(await harness.call("bg_kill", { id: chainId }));
+    const again = resultText(await harness.call("pretty_task_bg_kill", { id: chainId }));
     expect(again).toContain("already finished");
   });
 
@@ -236,19 +238,24 @@ describe("bg_run after", () => {
     const command = await writeScript(dir.path, "step.js", STEP_SCRIPT);
     const harness = createHarness({ cwd: dir.path, sessionId: "session-chain-refuse" });
 
-    const loop = (await harness.call("loop_create", { schedule: "1h", prompt: "keep going" }))
-      .details as { id: string };
+    const loop = (
+      await harness.call("pretty_task_loop_create", { schedule: "1h", prompt: "keep going" })
+    ).details as { id: string };
     const refused = resultText(
-      await harness.call("bg_run", { command, after: loop.id, name: "never" }),
+      await harness.call("pretty_task_bg_run", { command, after: loop.id, name: "never" }),
     );
     expect(refused).toContain("Only process tasks can be queued");
     expect(refused).toContain("prompt-loop");
     expect(refused).toContain("The task was not started.");
 
-    const missing = resultText(await harness.call("bg_run", { command, after: "bg00000" }));
+    const missing = resultText(
+      await harness.call("pretty_task_bg_run", { command, after: "bg00000" }),
+    );
     expect(missing).toContain("No background task with id bg00000.");
     // Neither refusal left a queue or a step behind.
-    const listed = (await harness.call("bg_status", {})).details as { tasks: TaskDetails[] };
+    const listed = (await harness.call("pretty_task_bg_status", {})).details as {
+      tasks: TaskDetails[];
+    };
     expect(listed.tasks).toHaveLength(0);
   });
 
@@ -273,7 +280,7 @@ describe("bg_run after", () => {
     const chainId = second.parentId ?? "";
 
     // A chain writes nothing itself, so the answer points at the step that does.
-    const logs = resultText(await harness.call("bg_logs", { id: chainId }));
+    const logs = resultText(await harness.call("pretty_task_bg_logs", { id: chainId }));
     expect(logs).toContain(`Task ${chainId} is a chain`);
     expect(logs).toContain(first.id);
     const wait = resultText(
@@ -282,6 +289,8 @@ describe("bg_run after", () => {
     expect(wait).toContain(`Task ${chainId} is a chain`);
     // The step's own output is still reachable by its own id.
     await waitForStatus(harness, chainId, "completed");
-    expect(resultText(await harness.call("bg_logs", { id: second.id }))).toContain("start two");
+    expect(resultText(await harness.call("pretty_task_bg_logs", { id: second.id }))).toContain(
+      "start two",
+    );
   });
 });

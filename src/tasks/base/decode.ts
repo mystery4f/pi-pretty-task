@@ -2,7 +2,7 @@
  * Turning a task's raw output bytes back into text.
  *
  * The file on disk keeps exactly what the process wrote, so this is the one place
- * that decides what a reader — `bg_logs`, the panel, a completion notice — sees.
+ * that decides what a reader — `pretty_task_bg_logs`, the panel, a completion notice — sees.
  * UTF-8 is tried strictly first: output that decodes cleanly is UTF-8 by every
  * platform's default, and a strict attempt cannot invent replacement characters.
  *

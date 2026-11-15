@@ -117,7 +117,7 @@ export interface CreateLoopInput extends TaskScope {
 }
 
 /**
- * What one `loop_update` call asks for: a transition, a retune, or both. The
+ * What one `pretty_task_loop_update` call asks for: a transition, a retune, or both. The
  * retune is applied first, so resuming onto a new schedule is one call.
  */
 export interface UpdateLoopInput extends TaskScope {
@@ -135,7 +135,7 @@ export interface LoopTaskView {
   readonly untilNextFireMs?: number;
 }
 
-/** A transition `loop_update` can apply. A retune travels in `schedule`, not here. */
+/** A transition `pretty_task_loop_update` can apply. A retune travels in `schedule`, not here. */
 export type LoopUpdateAction = "pause" | "resume" | "complete";
 
 export type LoopUpdateOutcome =
@@ -166,7 +166,7 @@ export class LoopInputError extends Error {
 
 /**
  * The one refusal for a schedule that cannot be resolved, worded once so
- * `loop_create` and `loop_update` cannot drift apart (ADR-0006): name both
+ * `pretty_task_loop_create` and `pretty_task_loop_update` cannot drift apart (ADR-0006): name both
  * accepted shapes and one correct example, never guess at what was meant.
  */
 function invalidScheduleError(expression: string, problem: ScheduleProblem): LoopInputError {
@@ -288,7 +288,7 @@ export class LoopTasks {
     }
     if (prompt.length === 0 && command.length === 0) {
       throw new LoopInputError(
-        "A loop needs a prompt or a command: the prompt is the text sent into the session each time it fires, the command is run as a background process like bg_run.",
+        "A loop needs a prompt or a command: the prompt is the text sent into the session each time it fires, the command is run as a background process like pretty_task_bg_run.",
       );
     }
     if (prompt.length > 0) {
@@ -333,7 +333,7 @@ export class LoopTasks {
     );
     if (active.length >= MAX_LOOPS) {
       throw new LoopInputError(
-        `This session already has ${String(MAX_LOOPS)} active loop tasks; complete or delete one with loop_delete before creating another.`,
+        `This session already has ${String(MAX_LOOPS)} active loop tasks; complete or delete one with pretty_task_loop_delete before creating another.`,
       );
     }
 
@@ -411,7 +411,7 @@ export class LoopTasks {
    * schedule had already picked — and only stores the expression on a paused one,
    * which arms onto it when resumed. Nothing is rebuilt, so the id, the fire count
    * and every recorded iteration survive. An unusable expression is refused before
-   * the record changes, on the same message `loop_create` gives (ADR-0006).
+   * the record changes, on the same message `pretty_task_loop_create` gives (ADR-0006).
    */
   async update(input: UpdateLoopInput): Promise<LoopUpdateResult | undefined> {
     this.ownScope(input);

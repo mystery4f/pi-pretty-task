@@ -71,7 +71,7 @@ export interface TaskBase {
 }
 
 /**
- * A background process: the kind `bg_run` starts and the only kind a cmd-loop
+ * A background process: the kind `pretty_task_bg_run` starts and the only kind a cmd-loop
  * fire produces (ADR-0014). A child process carries the link back to its loop
  * and nothing more — its id stays an ordinary process id (ADR-0016).
  */
@@ -143,7 +143,7 @@ export interface FireRecord {
  */
 export interface LoopBase extends TaskBase {
   /**
-   * Raw schedule expression, kept verbatim for listings (ADR-0006). `loop_update`
+   * Raw schedule expression, kept verbatim for listings (ADR-0006). `pretty_task_loop_update`
    * rewrites it in place when the user retunes the loop.
    */
   schedule: string;
@@ -193,7 +193,7 @@ export interface PromptLoopTask extends LoopBase {
  */
 export interface CmdLoopTask extends LoopBase {
   readonly kind: "cmd-loop";
-  /** Command line started on every fire, through the same path as `bg_run`. */
+  /** Command line started on every fire, through the same path as `pretty_task_bg_run`. */
   readonly command: string;
   /** Working directory override; the fire resolves it against the session's cwd. */
   readonly cwd?: string;
@@ -220,8 +220,8 @@ export interface CmdLoopTask extends LoopBase {
  * It is a Task, not a separate record type, so it is stored, listed and stopped
  * through the same seams as everything else. It holds ids rather than copies:
  * each step is an ordinary process task with `parentId` pointing back here, so
- * its output, status and exit code stay readable through `bg_status`, `bg_logs`
- * and `bg_wait` (ADR-0014). A chain owns no command and no output file — the
+ * its output, status and exit code stay readable through `pretty_task_bg_status`, `pretty_task_bg_logs`
+ * and `pretty_task_bg_wait` (ADR-0014). A chain owns no command and no output file — the
  * steps hold both.
  */
 export interface ChainTask extends TaskBase {

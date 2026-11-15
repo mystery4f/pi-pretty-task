@@ -12,7 +12,7 @@ Iteration 与它的 Loop task 存在同一份状态文件里，所以“记多�
 ## Consequences
 
 - 两条上限都是常量：单条 Iteration 最多 100 次调用（`ITERATION_CALL_LIMIT`），单条 Loop 最多 50 条 Iteration（`ITERATION_HISTORY_LIMIT`）。要变成可配置，需要另立 ADR，并说明配置错误的文案与启动校验方式。
-- 截断必须被说出来，不能静默少几条：`droppedCalls` 说明这一轮少了几次调用，`droppedIterations` 说明这条 Loop 的历史少了多少轮。面板与 `loop_list` 都要把它们显示出来，否则读者会把截断当成全部事实。
+- 截断必须被说出来，不能静默少几条：`droppedCalls` 说明这一轮少了几次调用，`droppedIterations` 说明这条 Loop 的历史少了多少轮。面板与 `pretty_task_loop_list` 都要把它们显示出来，否则读者会把截断当成全部事实。
 - 重启修复只碰 Loop task 的 Iteration：Loop 本身没有进程，重启不会结束调度；但那一轮执行已经随进程消失，留着 `running` 只会让状态说谎。
 - Iteration 不再单独生成随机 id：`fire` 编号在同一条 Loop 内唯一，足以标识一轮，也省掉了生成与校验 id 的成本。跨 Loop 引用一条 Iteration 时必须带上 Loop 的 task id。
 - 归属仍然依赖事件顺序：`tool_execution_start` 不带 loop id，只能记进该 session 里最新打开的那条 Iteration。同一 session 同时有两条 Loop 在跑时，后触发的一轮会拿走先触发那轮尚未结束的调用——要修得先让 pi 的事件带上归属，而不是在这里猜。

@@ -103,13 +103,13 @@ function tasksOnDisk(recordPath: string): Task[] {
   return record.tasks ?? [];
 }
 
-/** Start a task through `bg_run` and wait until it has ended. */
+/** Start a task through `pretty_task_bg_run` and wait until it has ended. */
 async function runToEnd(harness: Harness, command: string, name: string): Promise<TaskDetails> {
-  const result = await harness.call("bg_run", { name, command });
+  const result = await harness.call("pretty_task_bg_run", { name, command });
   const details = result.details as TaskDetails;
   if (details.pid !== undefined) spawned.push(details.pid);
   await waitFor("the task to end", async () => {
-    const status = await harness.call("bg_status", { id: details.id });
+    const status = await harness.call("pretty_task_bg_status", { id: details.id });
     return (status.details as TaskDetails).status !== "running";
   });
   return details;
@@ -120,8 +120,9 @@ async function fireCmdLoop(
   task: { advance(ms: number): void; now: number; harness: Harness },
   params: Record<string, unknown>,
 ): Promise<LoopDetails> {
-  const created = (await task.harness.call("loop_create", { schedule: "10s", ...params }))
-    .details as LoopDetails;
+  const created = (
+    await task.harness.call("pretty_task_loop_create", { schedule: "10s", ...params })
+  ).details as LoopDetails;
   task.advance(Math.max(0, (created.nextFireAt ?? task.now) - task.now));
   await task.harness.pump(task.now);
   return created;
@@ -212,7 +213,7 @@ describe("loop-fired event", () => {
   it("names the iteration an prompt-loop fire opened", async () => {
     const task = await setup();
     const created = (
-      await task.harness.call("loop_create", {
+      await task.harness.call("pretty_task_loop_create", {
         schedule: "10s",
         prompt: "keep going",
         name: "ticker",
@@ -239,7 +240,7 @@ describe("loop-fired event", () => {
   it("publishes the fire after the iteration is on disk", async () => {
     const task = await setup();
     const created = (
-      await task.harness.call("loop_create", {
+      await task.harness.call("pretty_task_loop_create", {
         schedule: "10s",
         prompt: "keep going",
         name: "ticker",
@@ -271,7 +272,8 @@ describe("loop-fired event", () => {
 
     expect(task.fired).toHaveLength(1);
     const event = task.fired[0] as LoopFiredEvent;
-    const listed = (await task.harness.call("loop_list", { id: created.id })).details as {
+    const listed = (await task.harness.call("pretty_task_loop_list", { id: created.id }))
+      .details as {
       fireHistory?: FireDetails[];
     };
     const child = listed.fireHistory?.[0]?.taskId;
@@ -286,11 +288,12 @@ describe("loop-fired event", () => {
       taskId: child,
     });
     // The named task is real and reachable through the ordinary task tools.
-    expect(resultText(await task.harness.call("bg_status", { id: child }))).toContain(
+    expect(resultText(await task.harness.call("pretty_task_bg_status", { id: child }))).toContain(
       "kind: process",
     );
     // The child is watched so a failed assertion cannot leave it running.
-    const status = (await task.harness.call("bg_status", { id: child })).details as TaskDetails;
+    const status = (await task.harness.call("pretty_task_bg_status", { id: child }))
+      .details as TaskDetails;
     if (status.pid !== undefined) spawned.push(status.pid);
   });
 });
@@ -308,7 +311,8 @@ describe("a listener that throws", () => {
     const command = await writeScript(task.directory.path, "after.js", "console.log('after');\n");
     const ended = await runToEnd(task.harness, command, "after");
     // The ending is recorded and reported whatever the listener did.
-    const status = (await task.harness.call("bg_status", { id: ended.id })).details as TaskDetails;
+    const status = (await task.harness.call("pretty_task_bg_status", { id: ended.id }))
+      .details as TaskDetails;
     expect(status.status).toBe("completed");
 
     const script = await writeScript(task.directory.path, "repeating.js", "console.log('tick');\n");
@@ -318,7 +322,8 @@ describe("a listener that throws", () => {
     // listener cost the schedule nothing.
     expect(task.fired).toHaveLength(1);
     await waitFor("the first fire to end", async () => {
-      const listed = (await task.harness.call("loop_list", { id: created.id })).details as {
+      const listed = (await task.harness.call("pretty_task_loop_list", { id: created.id }))
+        .details as {
         fireHistory?: FireDetails[];
       };
       return listed.fireHistory?.[0]?.outcome === "success";

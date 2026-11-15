@@ -3,7 +3,7 @@
  *
  * `pi.sendMessage(..., { deliverAs: "followUp" })` sent while an agent run is
  * in flight is queued by pi and delivered only once the run has no more tool
- * calls — and pi offers no way to recall it. A loop stopped by `loop_update` or
+ * calls — and pi offers no way to recall it. A loop stopped by `pretty_task_loop_update` or
  * `maxFires` in the meantime would still wake the model. So the extension keeps
  * its own queue: the pump records a fire here, and only an idle agent receives
  * it. A queued wake whose loop stopped first is dropped before it is ever sent.

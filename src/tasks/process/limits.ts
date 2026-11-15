@@ -16,11 +16,11 @@
 /** The longest delay `setTimeout` honours; a longer one fires immediately. */
 export const MAX_TIMEOUT_MS = 2_147_483_647;
 
-/** Default wait for `bg_wait`, in seconds. */
+/** Default wait for `pretty_task_bg_wait`, in seconds. */
 export const DEFAULT_WAIT_SECONDS = 60;
 
 /**
- * Longest wait `bg_wait` accepts. A wait holds the turn, so its bound is much
+ * Longest wait `pretty_task_bg_wait` accepts. A wait holds the turn, so its bound is much
  * tighter than a task's runtime cap.
  */
 export const MAX_WAIT_SECONDS = 600;
@@ -42,7 +42,7 @@ export function parseTimeoutSeconds(seconds: number): number {
 }
 
 /**
- * Turn a `bg_wait` timeout into milliseconds. Absent means the tool's default;
+ * Turn a `pretty_task_bg_wait` timeout into milliseconds. Absent means the tool's default;
  * an explicit value must stay inside the wait's own, much tighter bound.
  */
 export function parseWaitSeconds(seconds: number | undefined): number {
@@ -56,14 +56,14 @@ export function parseWaitSeconds(seconds: number | undefined): number {
   return timeoutMs;
 }
 
-/** Default window `bg_logs` follows a task's output for, in seconds. */
+/** Default window `pretty_task_bg_logs` follows a task's output for, in seconds. */
 export const DEFAULT_FOLLOW_SECONDS = 10;
 
 /** Longest window a single follow read may hold the turn for. */
 export const MAX_FOLLOW_SECONDS = 60;
 
 /**
- * Turn a `bg_logs` follow window into milliseconds. Absent means the tool's
+ * Turn a `pretty_task_bg_logs` follow window into milliseconds. Absent means the tool's
  * default; an explicit value must stay inside the follow's tighter bound.
  */
 export function parseFollowSeconds(seconds: number | undefined): number {

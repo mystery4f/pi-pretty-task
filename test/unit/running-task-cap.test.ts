@@ -173,7 +173,7 @@ describe("the running-task cap", () => {
 });
 
 describe("the running-task cap through the tools", () => {
-  it("refuses the second bg_run with a message naming the limit", {
+  it("refuses the second pretty_task_bg_run with a message naming the limit", {
     timeout: 40_000,
   }, async () => {
     const dir = await makeTempDir();
@@ -184,17 +184,17 @@ describe("the running-task cap through the tools", () => {
       { env: { [MAX_RUNNING_TASKS_ENV]: "1" } },
     );
 
-    const first = await harness.call("bg_run", { command, name: "holder" });
+    const first = await harness.call("pretty_task_bg_run", { command, name: "holder" });
     const held = first.details as { id: string; pid?: number };
     if (held.pid !== undefined) spawned.push(held.pid);
 
-    const refused = await harness.call("bg_run", { command, name: "second" });
+    const refused = await harness.call("pretty_task_bg_run", { command, name: "second" });
     const drawn = resultText(refused);
     expect(drawn).toContain("already has 1 running process tasks; the limit is 1");
     expect(drawn).toContain(MAX_RUNNING_TASKS_ENV);
     expect(drawn).toContain("The task was not started.");
 
-    const listed = await harness.call("bg_status", {});
+    const listed = await harness.call("pretty_task_bg_status", {});
     expect((listed.details as { tasks: unknown[] }).tasks).toHaveLength(1);
   });
 
@@ -210,11 +210,15 @@ describe("the running-task cap through the tools", () => {
       { now: () => now, env: { [MAX_RUNNING_TASKS_ENV]: "1" } },
     );
 
-    const first = await harness.call("bg_run", { command, name: "holder" });
+    const first = await harness.call("pretty_task_bg_run", { command, name: "holder" });
     const held = first.details as { id: string; pid?: number };
     if (held.pid !== undefined) spawned.push(held.pid);
 
-    const created = await harness.call("loop_create", { schedule: "10s", command, name: "watch" });
+    const created = await harness.call("pretty_task_loop_create", {
+      schedule: "10s",
+      command,
+      name: "watch",
+    });
     const loop = created.details as { id: string; nextFireAt?: number };
     now = loop.nextFireAt ?? now;
     await harness.pump(now);
@@ -226,7 +230,7 @@ describe("the running-task cap through the tools", () => {
     }
     let fire: FireEntry | undefined;
     await waitFor("the refused fire to be recorded", async () => {
-      const listed = await harness.call("loop_list", { id: loop.id });
+      const listed = await harness.call("pretty_task_loop_list", { id: loop.id });
       fire = (listed.details as { fireHistory?: FireEntry[] }).fireHistory?.[0];
       return fire?.outcome === "failed";
     });

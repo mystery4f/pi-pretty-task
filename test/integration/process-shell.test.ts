@@ -43,17 +43,18 @@ async function runAndWait(
   command: string,
 ): Promise<{ id: string; details: TaskDetails; text: string }> {
   const harness = createHarness({ cwd, sessionId: `session-${String(Date.now())}` });
-  const started = await harness.call("bg_run", { name: "shell", command });
+  const started = await harness.call("pretty_task_bg_run", { name: "shell", command });
   const details = started.details as TaskDetails;
   if (details.pid !== undefined) spawned.push(details.pid);
 
   await waitFor("completion", async () => {
-    const status = await harness.call("bg_status", { id: details.id });
+    const status = await harness.call("pretty_task_bg_status", { id: details.id });
     return (status.details as TaskDetails).status !== "running";
   });
 
-  const settled = (await harness.call("bg_status", { id: details.id })).details as TaskDetails;
-  const logged = await harness.call("bg_logs", { id: details.id, full: true });
+  const settled = (await harness.call("pretty_task_bg_status", { id: details.id }))
+    .details as TaskDetails;
+  const logged = await harness.call("pretty_task_bg_logs", { id: details.id, full: true });
   return { id: details.id, details: settled, text: resultText(logged) };
 }
 describe("the shell a command runs in", () => {
@@ -373,10 +374,10 @@ describe("one call's shell override", () => {
 });
 
 /**
- * The same choice, one level up: a `bg_run` call must fail in the turn that asked
+ * The same choice, one level up: a `pretty_task_bg_run` call must fail in the turn that asked
  * for an impossible shell, rather than leaving a task nobody can run.
  */
-describe("bg_run's shell override", () => {
+describe("pretty_task_bg_run's shell override", () => {
   const onWindows = process.platform === "win32";
 
   it("rejects a shell this platform does not have and names the ones it does", async () => {
@@ -388,13 +389,16 @@ describe("bg_run's shell override", () => {
     );
     const refused = onWindows ? "sh" : "cmd";
 
-    const started = await harness.call("bg_run", { command: "echo hi", shell: refused });
+    const started = await harness.call("pretty_task_bg_run", {
+      command: "echo hi",
+      shell: refused,
+    });
     const message = resultText(started);
 
     expect(message).toContain(`"${refused}"`);
     expect(message).toContain(onWindows ? "bash" : "inherit");
     expect(message).toContain("The task was not started.");
-    const listed = await harness.call("bg_status", {});
+    const listed = await harness.call("pretty_task_bg_status", {});
     expect(resultText(listed)).not.toContain("echo hi");
   });
 
@@ -406,7 +410,7 @@ describe("bg_run's shell override", () => {
       sessionId: `session-bash-${String(Date.now())}`,
     });
 
-    const started = await harness.call("bg_run", {
+    const started = await harness.call("pretty_task_bg_run", {
       name: "bash call",
       command: "echo from-bash",
       shell: "bash",
@@ -414,12 +418,15 @@ describe("bg_run's shell override", () => {
     const details = started.details as TaskDetails;
     if (details.pid !== undefined) spawned.push(details.pid);
     await waitFor("completion", async () => {
-      const status = await harness.call("bg_status", { id: details.id });
+      const status = await harness.call("pretty_task_bg_status", { id: details.id });
       return (status.details as TaskDetails).status !== "running";
     });
 
-    const settled = (await harness.call("bg_status", { id: details.id })).details as TaskDetails;
-    const logged = resultText(await harness.call("bg_logs", { id: details.id, full: true }));
+    const settled = (await harness.call("pretty_task_bg_status", { id: details.id }))
+      .details as TaskDetails;
+    const logged = resultText(
+      await harness.call("pretty_task_bg_logs", { id: details.id, full: true }),
+    );
     expect(settled.status).toBe("completed");
     expect(logged).toContain("from-bash");
   });

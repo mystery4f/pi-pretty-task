@@ -42,7 +42,7 @@ afterEach(async () => {
 
 function trackPid(details: TaskDetails): number {
   const { pid } = details;
-  if (pid === undefined) throw new Error("bg_run returned no pid");
+  if (pid === undefined) throw new Error("pretty_task_bg_run returned no pid");
   spawned.push(pid);
   return pid;
 }
@@ -53,7 +53,7 @@ async function startRunning(
   name = "slow build",
   extra: Record<string, unknown> = {},
 ): Promise<TaskDetails> {
-  const result = await harness.call("bg_run", { name, command, ...extra });
+  const result = await harness.call("pretty_task_bg_run", { name, command, ...extra });
   const details = result.details as TaskDetails;
   trackPid(details);
   return details;
@@ -62,13 +62,13 @@ async function startRunning(
 /** Ask for one task's status until it is no longer running. */
 async function waitForEnd(harness: Harness, id: string): Promise<TaskDetails> {
   await waitFor("the task to finish", async () => {
-    const status = await harness.call("bg_status", { id });
+    const status = await harness.call("pretty_task_bg_status", { id });
     return (status.details as TaskDetails).status !== "running";
   });
-  return (await harness.call("bg_status", { id })).details as TaskDetails;
+  return (await harness.call("pretty_task_bg_status", { id })).details as TaskDetails;
 }
 
-describe("bg_run", () => {
+describe("pretty_task_bg_run", () => {
   it("returns a short task id without waiting for the command to finish", async () => {
     const dir = await makeTempDir();
     cleanup.push(dir.dispose);
@@ -76,7 +76,7 @@ describe("bg_run", () => {
     const harness = createHarness({ cwd: dir.path, sessionId: "session-run" });
 
     const started = Date.now();
-    const result = await harness.call("bg_run", { name: "slow build", command });
+    const result = await harness.call("pretty_task_bg_run", { name: "slow build", command });
     const elapsed = Date.now() - started;
 
     const details = result.details as TaskDetails;
@@ -95,7 +95,7 @@ describe("bg_run", () => {
   });
 });
 
-describe("bg_run output", () => {
+describe("pretty_task_bg_run output", () => {
   it("captures stdout and stderr in one file, in emission order and without loss", async () => {
     const dir = await makeTempDir();
     cleanup.push(dir.dispose);
@@ -115,11 +115,11 @@ describe("bg_run output", () => {
 
     const task = await startRunning(harness, command, "interleaved");
     await waitFor("the task to finish", async () => {
-      const status = await harness.call("bg_status", { id: task.id });
+      const status = await harness.call("pretty_task_bg_status", { id: task.id });
       return (status.details as TaskDetails).status === "completed";
     });
 
-    const logged = await harness.call("bg_logs", { id: task.id, lines: 1000 });
+    const logged = await harness.call("pretty_task_bg_logs", { id: task.id, lines: 1000 });
     const text = resultText(logged);
     const captured = text.slice(text.indexOf("\n\n") + 2).split("\n");
 
@@ -138,7 +138,7 @@ describe("bg_run output", () => {
   });
 });
 
-describe("bg_run's directory and environment", () => {
+describe("pretty_task_bg_run's directory and environment", () => {
   it("resolves a relative cwd from the session directory and runs the child there", async () => {
     const dir = await makeTempDir();
     cleanup.push(dir.dispose);
@@ -157,7 +157,9 @@ describe("bg_run's directory and environment", () => {
 
     // The record keeps the absolute path, resolved once against the session.
     expect(task.cwd).toBe(resolve(dir.path, "nested", "work"));
-    expect(resultText(await harness.call("bg_status", { id: task.id }))).toContain(task.cwd);
+    expect(resultText(await harness.call("pretty_task_bg_status", { id: task.id }))).toContain(
+      task.cwd,
+    );
 
     const done = await waitForEnd(harness, task.id);
     expect(done.status).toBe("completed");
@@ -174,11 +176,14 @@ describe("bg_run's directory and environment", () => {
     await writeFile(file, "file\n", "utf8");
     const harness = createHarness({ cwd: dir.path, sessionId: "session-cwd-invalid" });
 
-    const missing = await harness.call("bg_run", { command: "echo hi", cwd: "no-such-dir" });
+    const missing = await harness.call("pretty_task_bg_run", {
+      command: "echo hi",
+      cwd: "no-such-dir",
+    });
     expect(resultText(missing)).toContain(resolve(dir.path, "no-such-dir"));
     expect(resultText(missing)).toContain("The task was not started.");
 
-    const notDirectory = await harness.call("bg_run", {
+    const notDirectory = await harness.call("pretty_task_bg_run", {
       command: "echo hi",
       cwd: "not-a-directory.txt",
     });
@@ -186,7 +191,9 @@ describe("bg_run's directory and environment", () => {
     expect(resultText(notDirectory)).toContain("is not a directory");
     expect(resultText(notDirectory)).toContain("The task was not started.");
 
-    expect(resultText(await harness.call("bg_status", {}))).toContain("No background tasks");
+    expect(resultText(await harness.call("pretty_task_bg_status", {}))).toContain(
+      "No background tasks",
+    );
     // Not even a half-written record: the rejection happens before the first save.
     await expect(
       readFile(taskRecordPath(sessionTaskDirectory(dir.path, "session-cwd-invalid")), "utf8"),
@@ -212,7 +219,7 @@ describe("bg_run's directory and environment", () => {
       env: { PI_PRETTY_TASK_TEST: secret },
     });
     await waitForEnd(harness, withEnv.id);
-    expect(resultText(await harness.call("bg_logs", { id: withEnv.id }))).toContain(
+    expect(resultText(await harness.call("pretty_task_bg_logs", { id: withEnv.id }))).toContain(
       `value=${secret}`,
     );
 
@@ -221,13 +228,13 @@ describe("bg_run's directory and environment", () => {
       env: { PI_PRETTY_TASK_TEST: "" },
     });
     await waitForEnd(harness, blanked.id);
-    const blankedText = resultText(await harness.call("bg_logs", { id: blanked.id }));
+    const blankedText = resultText(await harness.call("pretty_task_bg_logs", { id: blanked.id }));
     expect(blankedText.split("\n").filter((line) => line.startsWith("value="))).toEqual(["value="]);
 
     // The next call does not inherit the previous call's variables.
     const without = await startRunning(harness, command, "without env");
     await waitForEnd(harness, without.id);
-    expect(resultText(await harness.call("bg_logs", { id: without.id }))).toContain(
+    expect(resultText(await harness.call("pretty_task_bg_logs", { id: without.id }))).toContain(
       "value=undefined",
     );
 
@@ -251,15 +258,17 @@ describe("bg_run's directory and environment", () => {
     const record = await readFile(recordPath, "utf8");
     expect(record).not.toContain(secret);
     expect(record).not.toContain("PI_PRETTY_TASK_TEST");
-    expect(resultText(await harness.call("bg_status", { id: withEnv.id }))).not.toContain(secret);
+    expect(
+      resultText(await harness.call("pretty_task_bg_status", { id: withEnv.id })),
+    ).not.toContain(secret);
   });
 
   it("accepts env only as string values, at the schema seam", () => {
     const processes = new ProcessTasks();
     const run = processTaskTools(processes, new ChainTasks({ processes: () => processes })).find(
-      (tool) => tool.name === "bg_run",
+      (tool) => tool.name === "pretty_task_bg_run",
     );
-    if (run === undefined) throw new Error("bg_run is not registered");
+    if (run === undefined) throw new Error("pretty_task_bg_run is not registered");
     const accepts = (env: unknown): boolean =>
       Value.Check(run.parameters, { command: "echo hi", env });
 
@@ -271,7 +280,7 @@ describe("bg_run's directory and environment", () => {
   });
 });
 
-describe("bg_status", () => {
+describe("pretty_task_bg_status", () => {
   it("reports name, id, kind, status, elapsed time and output size for every task", async () => {
     const dir = await makeTempDir();
     cleanup.push(dir.dispose);
@@ -282,7 +291,7 @@ describe("bg_status", () => {
     const second = await startRunning(harness, command, "second task");
 
     const started = Date.now();
-    const listed = await harness.call("bg_status", {});
+    const listed = await harness.call("pretty_task_bg_status", {});
     const elapsed = Date.now() - started;
     const text = resultText(listed);
 
@@ -297,7 +306,7 @@ describe("bg_status", () => {
     expect(elapsed).toBeLessThan(1000);
 
     // A single task can be asked about on its own.
-    const one = await harness.call("bg_status", { id: second.id });
+    const one = await harness.call("pretty_task_bg_status", { id: second.id });
     const oneText = resultText(one);
     expect(oneText).toContain(second.id);
     expect(oneText).not.toContain(first.id);
@@ -322,18 +331,21 @@ describe("bg_status", () => {
     const harness = createHarness({ cwd: dir.path, sessionId: "session-size" });
 
     const task = await startRunning(harness, command, "ticker");
-    const first = (await harness.call("bg_status", { id: task.id })).details as TaskDetails;
+    const first = (await harness.call("pretty_task_bg_status", { id: task.id }))
+      .details as TaskDetails;
 
     await waitFor("more output to arrive", async () => {
-      const later = (await harness.call("bg_status", { id: task.id })).details as TaskDetails;
+      const later = (await harness.call("pretty_task_bg_status", { id: task.id }))
+        .details as TaskDetails;
       return later.outputBytes > first.outputBytes + 40;
     });
-    const later = (await harness.call("bg_status", { id: task.id })).details as TaskDetails;
+    const later = (await harness.call("pretty_task_bg_status", { id: task.id }))
+      .details as TaskDetails;
     expect(later.outputBytes).toBeGreaterThan(first.outputBytes + 40);
   });
 });
 
-describe("bg_logs", () => {
+describe("pretty_task_bg_logs", () => {
   it("grows the tail while the task runs", async () => {
     const dir = await makeTempDir();
     cleanup.push(dir.dispose);
@@ -354,16 +366,20 @@ describe("bg_logs", () => {
 
     const task = await startRunning(harness, command, "slow writer");
     await waitFor("three lines", async () => {
-      const text = resultText(await harness.call("bg_logs", { id: task.id, lines: 40 }));
+      const text = resultText(
+        await harness.call("pretty_task_bg_logs", { id: task.id, lines: 40 }),
+      );
       return text.split("\n").filter((line) => line.startsWith("line ")).length >= 3;
     });
 
-    const early = resultText(await harness.call("bg_logs", { id: task.id, lines: 40 }));
+    const early = resultText(await harness.call("pretty_task_bg_logs", { id: task.id, lines: 40 }));
     await waitFor("five more lines", async () => {
-      const text = resultText(await harness.call("bg_logs", { id: task.id, lines: 40 }));
+      const text = resultText(
+        await harness.call("pretty_task_bg_logs", { id: task.id, lines: 40 }),
+      );
       return text.split("\n").filter((line) => line.startsWith("line ")).length >= 6;
     });
-    const later = resultText(await harness.call("bg_logs", { id: task.id, lines: 40 }));
+    const later = resultText(await harness.call("pretty_task_bg_logs", { id: task.id, lines: 40 }));
 
     const counted = (text: string): number =>
       text.split("\n").filter((line) => line.startsWith("line ")).length;
@@ -387,11 +403,11 @@ describe("bg_logs", () => {
 
     const task = await startRunning(harness, command, "many lines");
     await waitFor("the task to finish", async () => {
-      const status = await harness.call("bg_status", { id: task.id });
+      const status = await harness.call("pretty_task_bg_status", { id: task.id });
       return (status.details as TaskDetails).status === "completed";
     });
 
-    const logged = await harness.call("bg_logs", { id: task.id, lines: 10 });
+    const logged = await harness.call("pretty_task_bg_logs", { id: task.id, lines: 10 });
     const text = resultText(logged);
     const tail = text.slice(text.indexOf("\n\n") + 2).split("\n");
     expect(tail).toHaveLength(10);
@@ -400,7 +416,7 @@ describe("bg_logs", () => {
   });
 });
 
-describe("bg_run lifetime", () => {
+describe("pretty_task_bg_run lifetime", () => {
   it("keeps running across turns, then reports completion with an exit code", async () => {
     const dir = await makeTempDir();
     cleanup.push(dir.dispose);
@@ -417,19 +433,23 @@ describe("bg_run lifetime", () => {
     const task = await startRunning(harness, command, "short job");
 
     // A later turn, simulated by asking again from the same session.
-    const stillRunning = (await harness.call("bg_status", { id: task.id })).details as TaskDetails;
+    const stillRunning = (await harness.call("pretty_task_bg_status", { id: task.id }))
+      .details as TaskDetails;
     expect(stillRunning.status).toBe("running");
 
     await waitFor("completion", async () => {
-      const status = await harness.call("bg_status", { id: task.id });
+      const status = await harness.call("pretty_task_bg_status", { id: task.id });
       return (status.details as TaskDetails).status === "completed";
     });
-    const done = (await harness.call("bg_status", { id: task.id })).details as TaskDetails;
+    const done = (await harness.call("pretty_task_bg_status", { id: task.id }))
+      .details as TaskDetails;
 
     expect(done.status).toBe("completed");
     expect(done.exitCode).toBe(0);
     expect(done.elapsedMs).toBeGreaterThanOrEqual(300);
-    expect(resultText(await harness.call("bg_logs", { id: task.id }))).toContain("working");
+    expect(resultText(await harness.call("pretty_task_bg_logs", { id: task.id }))).toContain(
+      "working",
+    );
   });
 
   it("does not leak one session's tasks into another's list", async () => {
@@ -440,9 +460,11 @@ describe("bg_run lifetime", () => {
     const other = createHarness({ cwd: dir.path, sessionId: "session-b" });
     const task = await startRunning(mine, command, "only mine");
 
-    const listed = (await other.call("bg_status", {})).details as { tasks: TaskDetails[] };
+    const listed = (await other.call("pretty_task_bg_status", {})).details as {
+      tasks: TaskDetails[];
+    };
     expect(listed.tasks).toHaveLength(0);
-    const text = resultText(await other.call("bg_status", { id: task.id }));
+    const text = resultText(await other.call("pretty_task_bg_status", { id: task.id }));
     expect(text).toContain("No background task");
   });
 
@@ -465,22 +487,22 @@ describe("bg_run lifetime", () => {
     const task = await startRunning(harness, command, "full record");
 
     await waitFor("completion", async () => {
-      const status = await harness.call("bg_status", { id: task.id });
+      const status = await harness.call("pretty_task_bg_status", { id: task.id });
       return (status.details as TaskDetails).status === "completed";
     });
 
     // `full` is how a finished task is read: nothing is abbreviated, nothing is cut.
-    const prompt = resultText(await harness.call("bg_status", { id: task.id }));
+    const prompt = resultText(await harness.call("pretty_task_bg_status", { id: task.id }));
     expect(prompt).toContain("…");
     expect(prompt).not.toContain(padding);
 
-    const complete = await harness.call("bg_status", { id: task.id, full: true });
+    const complete = await harness.call("pretty_task_bg_status", { id: task.id, full: true });
     const completeText = resultText(complete);
     expect(completeText).toContain(padding);
     expect(completeText).not.toContain("…");
     expect(completeText).toContain("exit code: 0");
 
-    const logged = await harness.call("bg_logs", { id: task.id, full: true });
+    const logged = await harness.call("pretty_task_bg_logs", { id: task.id, full: true });
     const lines = resultText(logged)
       .slice(resultText(logged).indexOf("\n\n") + 2)
       .split("\n");
@@ -503,16 +525,19 @@ describe("bg_run lifetime", () => {
     const task = await startRunning(harness, command, "bad job");
 
     await waitFor("failure", async () => {
-      const status = await harness.call("bg_status", { id: task.id });
+      const status = await harness.call("pretty_task_bg_status", { id: task.id });
       return (status.details as TaskDetails).status !== "running";
     });
-    const failed = (await harness.call("bg_status", { id: task.id })).details as TaskDetails;
-    const text = resultText(await harness.call("bg_status", { id: task.id }));
+    const failed = (await harness.call("pretty_task_bg_status", { id: task.id }))
+      .details as TaskDetails;
+    const text = resultText(await harness.call("pretty_task_bg_status", { id: task.id }));
 
     expect(failed.status).toBe("failed");
     expect(failed.exitCode).toBe(3);
     expect(text).toContain("exit code: 3");
-    expect(resultText(await harness.call("bg_logs", { id: task.id }))).toContain("boom");
+    expect(resultText(await harness.call("pretty_task_bg_logs", { id: task.id }))).toContain(
+      "boom",
+    );
   });
 });
 
@@ -579,7 +604,7 @@ describe("pretty_task_bg_wait", () => {
     const elapsed = Date.now() - started;
     const details = result.details as TaskDetails & { waited: boolean };
 
-    // A deadline is an answer: the same view bg_status gives, plus `waited`.
+    // A deadline is an answer: the same view pretty_task_bg_status gives, plus `waited`.
     expect(details.status).toBe("running");
     expect(details.waited).toBe(false);
     expect(elapsed).toBeGreaterThanOrEqual(250);
@@ -626,7 +651,7 @@ describe("pretty_task_bg_wait", () => {
   });
 });
 
-describe("bg_kill", () => {
+describe("pretty_task_bg_kill", () => {
   it("stops the command, records it as killed by the user, and keeps the record readable", async () => {
     const dir = await makeTempDir();
     cleanup.push(dir.dispose);
@@ -639,7 +664,7 @@ describe("bg_kill", () => {
     const task = await startRunning(harness, command, "long job");
     const pid = trackPid(task);
 
-    const killed = await harness.call("bg_kill", { id: task.id });
+    const killed = await harness.call("pretty_task_bg_kill", { id: task.id });
     const details = killed.details as TaskDetails & { stopOutcome: string };
 
     expect(details.stopOutcome).toBe("killed");
@@ -652,10 +677,13 @@ describe("bg_kill", () => {
     expect(text).toContain("kill reason: user");
 
     // The record survives the kill: status and captured output are still readable.
-    const status = (await harness.call("bg_status", { id: task.id })).details as TaskDetails;
+    const status = (await harness.call("pretty_task_bg_status", { id: task.id }))
+      .details as TaskDetails;
     expect(status.status).toBe("killed");
     expect(status.killReason).toBe("user");
-    expect(resultText(await harness.call("bg_logs", { id: task.id }))).toContain("waiting");
+    expect(resultText(await harness.call("pretty_task_bg_logs", { id: task.id }))).toContain(
+      "waiting",
+    );
   });
 
   it("stops a grandchild as well as the command that started it", async () => {
@@ -691,7 +719,7 @@ describe("bg_kill", () => {
     const grandchild = Number((await readFile(pidFile, "utf8")).trim());
     spawned.push(grandchild);
 
-    const killed = await harness.call("bg_kill", { id: task.id });
+    const killed = await harness.call("pretty_task_bg_kill", { id: task.id });
 
     expect((killed.details as TaskDetails).status).toBe("killed");
     await waitFor("both processes to disappear", () => !isAlive(pid) && !isAlive(grandchild));
@@ -705,11 +733,11 @@ describe("bg_kill", () => {
     const task = await startRunning(harness, command, "quick job");
 
     await waitFor("completion", async () => {
-      const status = await harness.call("bg_status", { id: task.id });
+      const status = await harness.call("pretty_task_bg_status", { id: task.id });
       return (status.details as TaskDetails).status === "completed";
     });
 
-    const answer = await harness.call("bg_kill", { id: task.id });
+    const answer = await harness.call("pretty_task_bg_kill", { id: task.id });
     const details = answer.details as TaskDetails & { stopOutcome: string };
 
     expect(details.stopOutcome).toBe("already-finished");
@@ -723,7 +751,7 @@ describe("bg_kill", () => {
     cleanup.push(dir.dispose);
     const harness = createHarness({ cwd: dir.path, sessionId: "session-kill-unknown" });
 
-    const answer = await harness.call("bg_kill", { id: "nope00" });
+    const answer = await harness.call("pretty_task_bg_kill", { id: "nope00" });
 
     expect(resultText(answer)).toContain("No background task with id nope00");
   });

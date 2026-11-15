@@ -8,7 +8,7 @@ Two jobs, one package: run long-lived shell commands in the background (`Task`),
 
 - **Loop** — a schedule. On fire it sends a stored prompt into the session via `pi.sendMessage(prompt, { deliverAs: "followUp", triggerTurn: true })`. A Loop never spawns a process and holds no `command` field.
 - **Iteration** — one agent turn produced by one Loop fire. It records every tool call made in that turn through `pi.on("tool_execution_start")` / `tool_execution_end`, keyed by tool call id.
-- **Task** — one background process record, either started by the user's `bg_run` or by a tool call inside an Iteration (carrying `iterationId`).
+- **Task** — one background process record, either started by the user's `pretty_task_bg_run` or by a tool call inside an Iteration (carrying `iterationId`).
 - **Panel** — the `/tasks` overlay listing Iterations and Tasks; closing it leaves one status-line summary.
 
 Decisions with rationale live in `docs/adr/`. `GLOSSARY.md` holds the vocabulary; use its terms in code, docs and replies.

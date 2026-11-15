@@ -52,7 +52,7 @@ function trackPid(details: TaskDetails): void {
 }
 
 async function status(harness: Harness, id: string): Promise<TaskDetails> {
-  const result = await harness.call("bg_status", { id });
+  const result = await harness.call("pretty_task_bg_status", { id });
   return result.details as TaskDetails;
 }
 
@@ -121,7 +121,7 @@ describe("the output cap", () => {
       { env: { [OUTPUT_CAP_ENV]: String(cap) } },
     );
 
-    const started = await harness.call("bg_run", { command, name: "flood" });
+    const started = await harness.call("pretty_task_bg_run", { command, name: "flood" });
     const task = started.details as TaskDetails;
     trackPid(task);
 
@@ -137,9 +137,9 @@ describe("the output cap", () => {
     });
     if (task.pid !== undefined) expect(isAlive(task.pid)).toBe(false);
 
-    const drawn = resultText(await harness.call("bg_status", { id: task.id }));
+    const drawn = resultText(await harness.call("pretty_task_bg_status", { id: task.id }));
     expect(drawn).toContain("kill reason: output_cap");
-    const logged = resultText(await harness.call("bg_logs", { id: task.id }));
+    const logged = resultText(await harness.call("pretty_task_bg_logs", { id: task.id }));
     expect(logged).toContain("kill reason: output_cap");
   });
 
@@ -157,7 +157,7 @@ describe("the output cap", () => {
       { env: { [OUTPUT_CAP_ENV]: String(cap) } },
     );
 
-    const started = await harness.call("bg_run", { command, name: "exact" });
+    const started = await harness.call("pretty_task_bg_run", { command, name: "exact" });
     const task = started.details as TaskDetails;
     trackPid(task);
 
@@ -177,7 +177,7 @@ describe("the runtime cap", () => {
     const command = await writeScript(dir.path, "sleeper.js", "setInterval(() => {}, 1000);\n");
     const harness = createHarness({ cwd: dir.path, sessionId: "session-runtime-cap" }, {});
 
-    const started = await harness.call("bg_run", {
+    const started = await harness.call("pretty_task_bg_run", {
       command,
       name: "slow build",
       timeoutSeconds: 0.3,
@@ -191,9 +191,9 @@ describe("the runtime cap", () => {
     expect(ended.elapsedMs).toBeGreaterThanOrEqual(300);
     if (task.pid !== undefined) expect(isAlive(task.pid)).toBe(false);
 
-    const drawn = resultText(await harness.call("bg_status", { id: task.id }));
+    const drawn = resultText(await harness.call("pretty_task_bg_status", { id: task.id }));
     expect(drawn).toContain("kill reason: timeout");
-    const logged = resultText(await harness.call("bg_logs", { id: task.id }));
+    const logged = resultText(await harness.call("pretty_task_bg_logs", { id: task.id }));
     expect(logged).toContain("kill reason: timeout");
   });
 
@@ -203,7 +203,10 @@ describe("the runtime cap", () => {
     const harness = createHarness({ cwd: dir.path, sessionId: "session-bad-runtime" }, {});
 
     for (const bad of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
-      const result = await harness.call("bg_run", { command: "echo hi", timeoutSeconds: bad });
+      const result = await harness.call("pretty_task_bg_run", {
+        command: "echo hi",
+        timeoutSeconds: bad,
+      });
       const drawn = resultText(result);
       expect(drawn).toContain("timeoutSeconds");
       expect(drawn).toContain("positive number of seconds");
@@ -211,7 +214,7 @@ describe("the runtime cap", () => {
       expect(drawn).toContain("not started");
     }
 
-    const listed = await harness.call("bg_status", {});
+    const listed = await harness.call("pretty_task_bg_status", {});
     expect((listed.details as { tasks: TaskDetails[] }).tasks).toHaveLength(0);
   });
 });

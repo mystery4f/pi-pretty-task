@@ -13,7 +13,7 @@ ADR 0012 定了「三页、只列根」。但没有写清一个推论：一次 c
 
 - 一次触发 = 一个 `kind: "process"` 的 Task，`parentId` 指向所属循环；一格链步骤同理，指向所属链。它有独立 id、独立输出文件、独立退出码与 kill 原因。
 - 它们**不进任何页的列表**：`Processes` 页过滤掉所有 `parentId` 非空的 Task，`Loops` 页列出 `cmd-loop`/`prompt-loop` 根，`Chains` 页列出 `chain` 根。
-- 它们**能被直接查询**：`bg_status`、`bg_logs`、`bg_grep`、`bg_wait` 接受触发/步骤的 id，与普通任务完全一样。展开只是给人看的入口，不是唯一入口。
+- 它们**能被直接查询**：`pretty_task_bg_status`、`pretty_task_bg_logs`、`pretty_task_bg_grep`、`pretty_task_bg_wait` 接受触发/步骤的 id，与普通任务完全一样。展开只是给人看的入口，不是唯一入口。
 - **计数包含子记录**：正在跑的触发算进 `Running`，失败的触发算进 `Failed`。否则「Failed 0」会掩盖一个每十秒失败一次的循环。
 - **`k` 是级联的**：在循环行上按 `k`，先让循环不再排下一次，再停当下正在跑的那次触发；在链行上按 `k`，从正在跑的那格起，把余下各格标为 `stopped`。
 - **展开的选中位置不参与排序**：刷新时根行顺序按 `updatedAt` 排，展开里选中的那一条按 id 保持，不因新触发到来而跳走。

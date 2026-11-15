@@ -214,7 +214,7 @@ async function openPanel(
 ): Promise<void> {
   if (ctx.mode !== "tui" || !ctx.hasUI) {
     ctx.ui.notify(
-      "The task panel needs the interactive UI; use bg_status and bg_logs here.",
+      "The task panel needs the interactive UI; use pretty_task_bg_status and pretty_task_bg_logs here.",
       "warning",
     );
     return;
