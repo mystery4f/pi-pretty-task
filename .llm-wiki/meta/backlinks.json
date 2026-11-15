@@ -1,11 +1,22 @@
 {
+  "sources/await-state-not-bytes-in-process-tests": [],
   "sources/obs-2026-11-14-kill-path-skipped-persist-and-notice-in-pi-pretty-task": [],
   "sources/obs-2026-11-14-loop-wake-backlog-storms-after-a-long-turn": [],
+  "sources/slow-suite-timings-not-workers": [
+    "sources/await-state-not-bytes-in-process-tests"
+  ],
+  "sources/windows-taskkill-t-needs-force-for-console-node": [
+    "sources/slow-suite-timings-not-workers"
+  ],
   "syntheses/pi-background-tasks-源码调研": [
     "syntheses/pi-pretty-task-文档索引"
   ],
   "syntheses/pi-loop-源码调研": [
     "syntheses/pi-pretty-task-文档索引"
   ],
-  "syntheses/pi-pretty-task-文档索引": []
+  "syntheses/pi-pretty-task-文档索引": [
+    "sources/await-state-not-bytes-in-process-tests",
+    "sources/slow-suite-timings-not-workers",
+    "sources/windows-taskkill-t-needs-force-for-console-node"
+  ]
 }

@@ -1,7 +1,16 @@
 {
   "version": "1.0",
-  "last_updated": "2026-11-14T09:44:52.902Z",
+  "last_updated": "2026-11-15T05:18:54.953Z",
   "pages": {
+    "sources/await-state-not-bytes-in-process-tests": {
+      "type": "source",
+      "title": "进程类测试要等状态，不要等字节",
+      "category": "bugfix",
+      "status": "insight",
+      "slug": "await-state-not-bytes-in-process-tests",
+      "created": "2026-11-15",
+      "updated": "2026-11-15"
+    },
     "sources/obs-2026-11-14-kill-path-skipped-persist-and-notice-in-pi-pretty-task": {
       "type": "source",
       "title": "Observation: Kill path skipped persist and notice in pi-pretty-task",
@@ -35,6 +44,24 @@
       "source_context": "Supervising pi-pretty-task v0.2 implementers with the plugin's own loop feature",
       "created": "2026-11-14",
       "updated": "2026-11-14"
+    },
+    "sources/slow-suite-timings-not-workers": {
+      "type": "source",
+      "title": "慢测试先治写死的时长，再谈并行度",
+      "category": "devops",
+      "status": "insight",
+      "slug": "slow-suite-timings-not-workers",
+      "created": "2026-11-15",
+      "updated": "2026-11-15"
+    },
+    "sources/windows-taskkill-t-needs-force-for-console-node": {
+      "type": "source",
+      "title": "Windows 上 taskkill /T 不加 /F 停不下控制台 node",
+      "category": "bugfix",
+      "status": "insight",
+      "slug": "windows-taskkill-t-needs-force-for-console-node",
+      "created": "2026-11-15",
+      "updated": "2026-11-15"
     },
     "syntheses/pi-background-tasks-源码调研": {
       "type": "synthesis",

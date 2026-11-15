@@ -4,3 +4,6 @@
 {"page_type":"synthesis","title":"pi-loop 源码调研","path":"syntheses/pi-loop-源码调研","timestamp":"2026-11-13T14:34:50.266Z","kind":"ensure_page"}
 {"slug":"obs-2026-11-14-kill-path-skipped-persist-and-notice-in-pi-pretty-task","title":"Kill path skipped persist and notice in pi-pretty-task","relevance":"high","timestamp":"2026-11-14T05:03:57.149Z","kind":"observe"}
 {"slug":"obs-2026-11-14-loop-wake-backlog-storms-after-a-long-turn","title":"Loop wake backlog storms after a long turn","relevance":"medium","timestamp":"2026-11-14T09:44:52.898Z","kind":"observe"}
+{"slug":"windows-taskkill-t-needs-force-for-console-node","title":"Windows 上 taskkill /T 不加 /F 停不下控制台 node","category":"bugfix","timestamp":"2026-11-15T05:18:37.570Z","kind":"retro"}
+{"slug":"slow-suite-timings-not-workers","title":"慢测试先治写死的时长，再谈并行度","category":"devops","timestamp":"2026-11-15T05:18:45.286Z","kind":"retro"}
+{"slug":"await-state-not-bytes-in-process-tests","title":"进程类测试要等状态，不要等字节","category":"bugfix","timestamp":"2026-11-15T05:18:53.578Z","kind":"retro"}
