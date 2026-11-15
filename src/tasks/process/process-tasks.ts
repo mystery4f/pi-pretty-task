@@ -14,13 +14,23 @@
 
 import { stat } from "node:fs/promises";
 import { resolve } from "node:path";
-import { type OutputTail, readOutputTail } from "../base/output.js";
+import { setTimeout as sleep } from "node:timers/promises";
+import { type OutputTail, readOutputFrom, readOutputTail } from "../base/output.js";
 import { processOutputPath, sessionTaskDirectory, type TaskScope } from "../base/runtime-state.js";
-import type { KillReason, ProcessTask, Task } from "../base/task.js";
+import {
+  DEFAULT_MAX_RUNNING_TASKS,
+  DEFAULT_OUTPUT_CAP_BYTES,
+  MAX_RUNNING_TASKS_ENV,
+} from "../base/settings.js";
+import type { KillReason, ProcessTask, Task, TaskStatus } from "../base/task.js";
 import { type TaskSession, TaskSessions } from "../base/task-sessions.js";
-import { DEFAULT_OUTPUT_CAP_BYTES } from "./limits.js";
 import { resolveShellPolicy, type ShellChoice, type ShellPolicy } from "./shell.js";
-import { type RunningProcess, type StopOutcome, startProcess } from "./supervisor.js";
+import {
+  type RunningProcess,
+  type StartProcessOptions,
+  type StopOutcome,
+  startProcess,
+} from "./supervisor.js";
 
 export type { TaskScope };
 
@@ -45,6 +55,13 @@ export interface StartProcessTaskInput extends TaskScope {
    * has what it needs.
    */
   env?: Record<string, string>;
+  /**
+   * The cmd loop whose fire starts this process (ADR-0014). The child keeps an
+   * ordinary process id and carries the link in its record, never in the id.
+   */
+  parentId?: string;
+  /** One-based fire number of the owning loop; always given with `parentId`. */
+  fire?: number;
 }
 
 /** A task as it looks right now: the record plus the values that keep moving. */
@@ -78,6 +95,35 @@ export interface StopTaskResult {
   detail?: string;
 }
 
+/** How a wait answered: the record, and whether the wait caught the end. */
+export interface WaitTaskResult {
+  /** The record as it stood when the wait returned. */
+  view: ProcessTaskView;
+  /**
+   * True when the task ended before the deadline, false when the deadline
+   * passed first and the view is still running. A deadline is not an error.
+   */
+  waited: boolean;
+}
+
+/** What a follow read answered: the new bytes, and where the cursor now sits. */
+export interface FollowTaskResult {
+  /** The record as it stood when the read returned. */
+  view: ProcessTaskView;
+  /** Output appended since this task's previous follow read, decoded as text. */
+  delta: string;
+  /** Offset the read started at. */
+  from: number;
+  /** Offset just past the bytes read; the next follow read starts here. */
+  offset: number;
+  /** Bytes in `delta`. */
+  deltaBytes: number;
+  /** True when the task has ended and the file has been read to its end. */
+  finished: boolean;
+  /** True when the window passed with no new bytes; the task may still be running. */
+  timedOut: boolean;
+}
+
 export interface ProcessTasksOptions {
   platform?: NodeJS.Platform;
   env?: NodeJS.ProcessEnv;
@@ -89,6 +135,25 @@ export interface ProcessTasksOptions {
   killConfirmMs?: number;
   /** Bytes a task's output may hold; defaults to the documented 20 MiB. */
   outputCapBytes?: number;
+  /**
+   * How many process tasks one session may run at once, children included:
+   * defaults to the documented 20. A fire and a chain step are records of this
+   * store too, so they meet the same ceiling (ADR-0014).
+   */
+  maxRunningTasks?: number;
+  /**
+   * How a spawned command is supervised. Absent, the supervisor spawns a real
+   * process and signals a real tree. A test supplies a fake so it can answer a
+   * stop with `tree-survived` — a real `taskkill /T /F` nearly always wins, so
+   * the surviving tree has no other deterministic seam.
+   */
+  supervise?: (options: StartProcessOptions) => RunningProcess;
+  /**
+   * How long a stop that lost to a surviving tree waits before it is tried again;
+   * defaults to a second. A kill that could not clear the tree has not ended the
+   * task, so the wait between attempts is what keeps the record honest.
+   */
+  survivedRetryMs?: number;
   /**
    * Called once for every task that ends, with the record as it stands after
    * the final status was written. Announcing the task — a session message, a
@@ -119,6 +184,33 @@ interface SessionTasks extends TaskSession {
   readonly limitReasons: Map<string, KillReason>;
   /** Pending runtime caps, kept so a natural end can cancel its timer. */
   readonly runtimeCaps: Map<string, ReturnType<typeof setTimeout>>;
+  /**
+   * Pending waits on a task's end, keyed by task id. `finish` resolves them, so
+   * a wait is woken by the end event instead of polling the record.
+   */
+  readonly waiters: Map<string, Set<() => void>>;
+  /**
+   * Where each task's follow read has reached, in output bytes. Follow is the
+   * only reader that moves a cursor, so a plain `bg_logs` tail neither seeds nor
+   * consumes one; nothing here is persisted because a cursor belongs to the
+   * session that asked, not to the task.
+   */
+  readonly followOffsets: Map<string, number>;
+  /**
+   * How a queued step will start, keyed by task id. A record holds what is
+   * durable; a per-call shell, variables and runtime cap are not, so they wait
+   * here between the queue and the launch. Nothing is persisted, and that is
+   * enough: a restart settles every waiting step, so no step is ever launched
+   * from a plan older than the process that holds it (ADR-0013).
+   */
+  readonly queued: Map<string, QueuedLaunch>;
+}
+
+/** The launch-time half of a step: what a record has no field for. */
+interface QueuedLaunch {
+  env?: Record<string, string>;
+  shell?: ShellChoice;
+  timeoutMs?: number;
 }
 
 const NAME_LIMIT = 48;
@@ -128,6 +220,20 @@ const NAME_LIMIT = 48;
  * gone. Past that, the stop settles the record itself.
  */
 const EXIT_WAIT_MS = 2000;
+
+/**
+ * How long a stop that could not clear its tree waits before trying the kill
+ * again. A survivor is not an ending, so the reason and the deadline stay with the
+ * record, and the retry is what eventually honours them.
+ */
+const SURVIVED_RETRY_MS = 1000;
+
+/**
+ * How often a follow read looks at the output file while it waits for new
+ * bytes. Small enough that a line shows up promptly, large enough that a
+ * minute-long follow is a few thousand stats, not a busy loop.
+ */
+const FOLLOW_POLL_MS = 50;
 
 /** Map the supervisor's answer onto the store's, which speaks of tasks. */
 const STOP_OUTCOMES: Record<StopOutcome, StopTaskOutcome> = {
@@ -186,6 +292,11 @@ export class ProcessTasks {
   private readonly killGraceMs: number | undefined;
   private readonly killConfirmMs: number | undefined;
   private readonly outputCapBytes: number;
+  /** The ceiling `docs/scope-v1.md` promises, and the key that moves it. */
+  private readonly maxRunningTasks: number;
+  private readonly supervise: (options: StartProcessOptions) => RunningProcess;
+  /** How long a stop that lost to a surviving tree waits before trying again. */
+  private readonly survivedRetryMs: number;
   private readonly onFinish: ((view: ProcessTaskView) => void) | undefined;
   /** The shell every task starts in, resolved once so a bad config fails at load. */
   private readonly shellPolicy: ShellPolicy;
@@ -200,6 +311,9 @@ export class ProcessTasks {
     this.killGraceMs = options.killGraceMs;
     this.killConfirmMs = options.killConfirmMs;
     this.outputCapBytes = options.outputCapBytes ?? DEFAULT_OUTPUT_CAP_BYTES;
+    this.maxRunningTasks = options.maxRunningTasks ?? DEFAULT_MAX_RUNNING_TASKS;
+    this.supervise = options.supervise ?? startProcess;
+    this.survivedRetryMs = options.survivedRetryMs ?? SURVIVED_RETRY_MS;
     this.onFinish = options.onFinish;
     this.shellPolicy =
       options.shellPolicy ?? resolveShellPolicy({ platform: this.platform, env: this.env });
@@ -208,57 +322,186 @@ export class ProcessTasks {
   /** Start a command in the background and return its record immediately. */
   async start(input: StartProcessTaskInput): Promise<ProcessTask> {
     const session = await this.session(input);
-    // The directory is settled before the record exists: a cwd that cannot be
-    // used rejects the call instead of leaving a task that never started.
+    // The ceiling is checked before a record exists: a refused start leaves
+    // nothing behind to explain, and the caller that asked — a `bg_run`, a fire —
+    // reports the reason itself.
+    const refusal = this.capRefusal(session);
+    if (refusal !== undefined) throw new Error(refusal);
+    const task = await this.record(session, input, "running");
+    session.tasks.set(task.id, task);
+
+    let running: RunningProcess;
+    try {
+      running = this.spawn(session, task, input);
+    } catch (error) {
+      session.tasks.delete(task.id);
+      throw error instanceof Error ? error : new Error(errorMessage(error));
+    }
+
+    this.book(session, task, running);
+    // The id is about to reach the model, so the record reaches the disk first:
+    // an extension that crashes right after this turn still knows the task.
+    await this.persist(session);
+    this.scheduleRuntimeCap(session, task.id, input.timeoutMs);
+
+    return task;
+  }
+
+  /**
+   * Queue a step without starting it (ADR-0013): a chain owns the queue and says
+   * when a step's turn comes. The record exists right away so the caller can quote
+   * its id and a reader can see what is ahead, but nothing is spawned until
+   * `launch`. A queued step is `waiting` and carries its chain in `parentId`, which
+   * is also what keeps it out of the processes list (ADR-0014).
+   */
+  async queueStep(input: StartProcessTaskInput): Promise<ProcessTask> {
+    const session = await this.session(input);
+    const task = await this.record(session, input, "waiting");
+    session.tasks.set(task.id, task);
+    session.queued.set(task.id, {
+      env: input.env,
+      shell: input.shell,
+      timeoutMs: input.timeoutMs,
+    });
+    await this.persist(session);
+    return task;
+  }
+
+  /**
+   * Start a queued step now. Undefined means there was nothing to launch: the
+   * session has no such task, or the step is no longer `waiting` because it has
+   * already run or a stop settled it. A step that cannot be spawned ends `failed`
+   * here instead of staying `waiting`, because the chain behind it is waiting for
+   * an end, not for a process.
+   */
+  async launch(session: TaskSession, id: string): Promise<ProcessTask | undefined> {
+    const runtime = await this.attached(session);
+    const task = runtime.tasks.get(id);
+    if (task === undefined || task.kind !== "process" || task.status !== "waiting")
+      return undefined;
+
+    const plan = runtime.queued.get(id) ?? {};
+    runtime.queued.delete(id);
+    const refusal = this.capRefusal(runtime);
+    if (refusal !== undefined) {
+      // A launch has no caller to throw at: the chain reads the step's record, so
+      // the refusal is written there as the step's own failure. The record keeps
+      // its place in the queue and ends `failed`, which ends the chain with this
+      // reason rather than leaving a step `waiting` forever.
+      this.finish(runtime, task, undefined, null, refusal);
+      return task;
+    }
+    const at = this.now();
+    task.status = "running";
+    task.updatedAt = at;
+
+    let running: RunningProcess;
+    try {
+      running = this.spawn(runtime, task, plan);
+    } catch (error) {
+      this.finish(runtime, task, undefined, null, errorMessage(error));
+      return task;
+    }
+
+    this.book(runtime, task, running);
+    await this.persist(runtime);
+    this.scheduleRuntimeCap(runtime, id, plan.timeoutMs);
+    return task;
+  }
+
+  /**
+   * Build a process record. The directory is settled before the record exists: a
+   * cwd that cannot be used rejects the call instead of leaving a task that never
+   * started.
+   */
+  private async record(
+    session: SessionTasks,
+    input: StartProcessTaskInput,
+    status: TaskStatus,
+  ): Promise<ProcessTask> {
     const cwd = await this.resolveWorkingDirectory(input.cwd, input.workingDirectory);
     const id = this.createId(session);
     const name = input.name?.trim();
     const createdAt = this.now();
-    const task: ProcessTask = {
+    return {
       id,
       kind: "process",
       name: name !== undefined && name.length > 0 ? name : deriveTaskName(input.command),
-      status: "running",
+      status,
       createdAt,
       updatedAt: createdAt,
       command: input.command,
       cwd,
       outputPath: processOutputPath(session.directory, id),
       outputBytes: 0,
+      ...(input.parentId !== undefined ? { parentId: input.parentId } : {}),
+      ...(input.fire !== undefined ? { fire: input.fire } : {}),
     };
+  }
 
-    session.tasks.set(id, task);
+  /**
+   * Hand one command to the supervisor. The shell, the variables and the cap are
+   * not part of a record (a task file is no place for a token), so they arrive here
+   * as the plan the caller kept: `start` builds one from its input, a queued step
+   * keeps one until its turn comes.
+   */
+  private spawn(session: SessionTasks, task: ProcessTask, plan: QueuedLaunch): RunningProcess {
+    return this.supervise({
+      command: task.command,
+      cwd: task.cwd,
+      outputPath: task.outputPath,
+      maxOutputBytes: this.outputCapBytes,
+      onOutputCap: () => {
+        // The reason is recorded here, before the stop is asked for: a command
+        // can exit on the same tick as the dropped byte, and that exit must
+        // not turn a capped task back into a completed one.
+        session.limitReasons.set(task.id, "output_cap");
+        // The session is in hand, so the stop needs no scope to find it again.
+        void this.stopRecord(session, task, { reason: "output_cap" });
+      },
+      platform: this.platform,
+      env: this.env,
+      envOverrides: plan.env,
+      shellPolicy: this.shellPolicy,
+      shell: plan.shell,
+    });
+  }
 
-    let running: RunningProcess;
-    try {
-      running = startProcess({
-        command: task.command,
-        cwd: task.cwd,
-        outputPath: task.outputPath,
-        maxOutputBytes: this.outputCapBytes,
-        onOutputCap: () => {
-          // The reason is recorded here, before the stop is asked for: a command
-          // can exit on the same tick as the dropped byte, and that exit must
-          // not turn a capped task back into a completed one.
-          session.limitReasons.set(id, "output_cap");
-          void this.stop(input, id, { reason: "output_cap" });
-        },
-        platform: this.platform,
-        env: this.env,
-        envOverrides: input.env,
-        shellPolicy: this.shellPolicy,
-        shell: input.shell,
-      });
-    } catch (error) {
-      session.tasks.delete(id);
-      throw error instanceof Error ? error : new Error(errorMessage(error));
+  /**
+   * The refusal a start gets when the session already runs as many process tasks
+   * as it may, or `undefined` when there is room.
+   *
+   * Counting records rather than calling the supervisor keeps fires and chain
+   * steps inside the ceiling: a fire is a process record with a loop for a parent,
+   * a step one with a chain for a parent, and a child of `bg_run` is a record too
+   * (ADR-0014). One pass over the loaded records is the count, so nothing has to be
+   * kept in step with the running map.
+   */
+  private capRefusal(session: SessionTasks): string | undefined {
+    let running = 0;
+    for (const task of session.tasks.values()) {
+      if (task.kind === "process" && task.status === "running") running += 1;
     }
+    if (running < this.maxRunningTasks) return undefined;
+    // The message is the report: a fire and a chain step fail out of sight, and
+    // the recorded error is the only place their reason is read. It names the
+    // ceiling and the key that moves it, because "too many tasks" without either
+    // leaves the reader unable to act.
+    return (
+      `This session already has ${String(running)} running process tasks; the limit is ` +
+      `${String(this.maxRunningTasks)} (${MAX_RUNNING_TASKS_ENV}). ` +
+      "Stop one with bg_kill before starting another."
+    );
+  }
 
+  /**
+   * Attach the supervisor to a record: the pid, the running entry, and the exit
+   * that ends the task. `start` and `launch` both end here, so a step's end is
+   * booked exactly like the end of a task the user started.
+   */
+  private book(session: SessionTasks, task: ProcessTask, running: RunningProcess): void {
     task.pid = running.pid;
-    session.running.set(id, running);
-    // The id is about to reach the model, so the record reaches the disk first:
-    // an extension that crashes right after this turn still knows the task.
-    await this.persist(session);
+    session.running.set(task.id, running);
     void running.exit.then(
       (exit) => {
         this.finish(session, task, running, exit.exitCode);
@@ -267,9 +510,6 @@ export class ProcessTasks {
         this.finish(session, task, running, null, errorMessage(error));
       },
     );
-    this.scheduleRuntimeCap(session, input, id, input.timeoutMs);
-
-    return task;
   }
   /**
    * Start one task's command again as a new record. The old row stays: rerunning
@@ -287,12 +527,23 @@ export class ProcessTasks {
     });
     return this.view(await this.session(scope), task);
   }
-  /** Every process task of the session, oldest first, including loaded history. */
-  async list(scope: TaskScope): Promise<ProcessTaskView[]> {
+  /**
+   * Every process record of the session, children included, oldest first. The panel
+   * counts them (ADR-0014) and resolves a chain's steps through it; a row still
+   * stands for a root only.
+   */
+  async listAll(scope: TaskScope): Promise<ProcessTaskView[]> {
     const session = await this.session(scope);
     return [...session.tasks.values()]
       .filter((task): task is ProcessTask => task.kind === "process")
       .map((task) => this.view(session, task));
+  }
+
+  /** Every root process task of the session, oldest first, including loaded history. */
+  async list(scope: TaskScope): Promise<ProcessTaskView[]> {
+    // A child is a record, not a row: a loop's fire and a chain's step read through
+    // their own tools, and only the parent they belong to is listed (ADR-0014).
+    return (await this.listAll(scope)).filter((view) => view.task.parentId === undefined);
   }
 
   async get(scope: TaskScope, id: string): Promise<ProcessTaskView | undefined> {
@@ -317,6 +568,95 @@ export class ProcessTasks {
   }
 
   /**
+   * The output appended to a task's file since this task's previous follow read.
+   * Undefined when the session has no such task. The cursor is in memory and
+   * belongs to the session: it starts at the beginning of the file, moves only
+   * past bytes an answer actually carried, and a plain tail read leaves it
+   * alone. `finished` says the record has ended, so no later read will grow.
+   * A read waits up to `timeoutMs` for new bytes and returns as soon as some
+   * arrive; an empty delta with `timedOut` is an answer, not an error.
+   */
+  async follow(
+    scope: TaskScope,
+    id: string,
+    timeoutMs: number,
+  ): Promise<FollowTaskResult | undefined> {
+    const session = await this.session(scope);
+    const task = session.tasks.get(id);
+    if (task === undefined || task.kind !== "process") return undefined;
+
+    const deadline = this.now() + timeoutMs;
+    for (;;) {
+      const from = session.followOffsets.get(id) ?? 0;
+      const read = await readOutputFrom(task.outputPath, from, { platform: this.platform });
+      session.followOffsets.set(id, read.to);
+      const finished = task.endedAt !== undefined;
+      if (read.text.length > 0 || finished) {
+        return {
+          view: this.view(session, task),
+          delta: read.text,
+          from: read.from,
+          offset: read.to,
+          deltaBytes: read.to - read.from,
+          finished,
+          timedOut: false,
+        };
+      }
+
+      // Nothing yet: give the process a moment, then look again. A finished
+      // task never reaches this wait, so an ended task answers at once.
+      const remaining = deadline - this.now();
+      if (remaining <= 0) {
+        return {
+          view: this.view(session, task),
+          delta: "",
+          from: read.from,
+          offset: read.to,
+          deltaBytes: 0,
+          finished: false,
+          timedOut: true,
+        };
+      }
+      await sleep(Math.min(FOLLOW_POLL_MS, remaining));
+    }
+  }
+
+  /**
+   * Wait for one task to end, or for `timeoutMs` to pass. Undefined means the
+   * session has no such task. The deadline is an answer, not an error: the view
+   * is whatever the record says then, and `waited` says which happened.
+   */
+  async wait(scope: TaskScope, id: string, timeoutMs: number): Promise<WaitTaskResult | undefined> {
+    const session = await this.session(scope);
+    const task = session.tasks.get(id);
+    if (task === undefined || task.kind !== "process") return undefined;
+    // A task nobody supervises has no later end to wait for: history loaded from
+    // disk, and a record another end already settled, answer right away. `waited`
+    // still tells the truth: a record left `running` without a supervisor caught
+    // no end, so it answers false even though the wait returns at once.
+    if (!session.running.has(id)) {
+      return { view: this.view(session, task), waited: task.endedAt !== undefined };
+    }
+
+    // Waiting is a listener on the end event, not a poll: `finish` resolves it on
+    // the same tick the record gets its final status, so the wake-up sees the end.
+    await new Promise<void>((resolve) => {
+      const waiters = session.waiters.get(id) ?? new Set<() => void>();
+      session.waiters.set(id, waiters);
+      const listener = (): void => {
+        clearTimeout(timer);
+        waiters.delete(listener);
+        if (waiters.size === 0) session.waiters.delete(id);
+        resolve();
+      };
+      const timer = setTimeout(listener, timeoutMs);
+      waiters.add(listener);
+    });
+
+    return { view: this.view(session, task), waited: task.endedAt !== undefined };
+  }
+
+  /**
    * Stop one task and everything its command started. Undefined means the
    * session has no such task; every other case is an answer, including a task
    * that had already finished on its own.
@@ -331,9 +671,33 @@ export class ProcessTasks {
     if (loaded === undefined) return undefined;
     // A record of the loop kind is not this store's to stop.
     if (loaded.kind !== "process") return undefined;
-    const task: ProcessTask = loaded;
+    return this.stopRecord(session, loaded, options);
+  }
 
-    const running = session.running.get(id);
+  /**
+   * Stop every running child of one loop, across loaded sessions. The loop's
+   * own stop path goes through here so a paused or deleted command loop never
+   * leaves a process running that no root row points at (ADR-0014).
+   */
+  async stopChildren(parentId: string, options: StopTaskOptions = {}): Promise<StopTaskResult[]> {
+    const sessions = await Promise.all([...this.sessions.values()]);
+    const results: StopTaskResult[] = [];
+    for (const session of sessions) {
+      for (const task of [...session.tasks.values()]) {
+        if (task.kind !== "process" || task.parentId !== parentId) continue;
+        if (task.status !== "running" || !session.running.has(task.id)) continue;
+        results.push(await this.stopRecord(session, task, options));
+      }
+    }
+    return results;
+  }
+
+  private async stopRecord(
+    session: SessionTasks,
+    task: ProcessTask,
+    options: StopTaskOptions,
+  ): Promise<StopTaskResult> {
+    const running = session.running.get(task.id);
     if (running === undefined) {
       return { view: this.view(session, task), outcome: "already-finished", tookMs: 0 };
     }
@@ -342,13 +706,29 @@ export class ProcessTasks {
     // reports whether anything was signalled, the store knows who asked. The
     // first ask wins — a second stop joins the one already in flight instead of
     // relabelling its end.
-    if (!session.killReasons.has(id)) session.killReasons.set(id, options.reason ?? "user");
-    this.clearRuntimeCap(session, id);
+    if (!session.killReasons.has(task.id))
+      session.killReasons.set(task.id, options.reason ?? "user");
     const stopped = await running.stop({
       graceMs: options.graceMs ?? this.killGraceMs,
       confirmMs: options.confirmMs ?? this.killConfirmMs,
     });
 
+    // A tree that survived the kill has not ended anything: the record keeps
+    // running, the reason stays with it so its eventual exit is still the kill
+    // that was asked for, and the deadline stays armed now that it was not met.
+    // The answer says so on the record, because a kill that lost must be loud.
+    if (stopped.outcome === "tree-survived") {
+      this.noteSurvival(session, task, stopped.detail);
+      this.scheduleStop(session, task.id, this.survivedRetryMs, options);
+      return {
+        view: this.view(session, task),
+        outcome: STOP_OUTCOMES[stopped.outcome],
+        tookMs: stopped.tookMs,
+        detail: stopped.detail,
+      };
+    }
+
+    this.clearRuntimeCap(session, task.id);
     // A stop that got an answer must leave a finished record, never `running`:
     // the exit bookkeeping usually arrives on its own, and when it does not the
     // stop settles the record here. `finish` ignores a record already settled,
@@ -356,8 +736,7 @@ export class ProcessTasks {
     if (stopped.outcome === "stopped" && !(await settledWithin(running.exit, EXIT_WAIT_MS))) {
       this.finish(session, task, running, null);
     }
-    session.killReasons.delete(id);
-
+    session.killReasons.delete(task.id);
     return {
       view: this.view(session, task),
       outcome: STOP_OUTCOMES[stopped.outcome],
@@ -379,7 +758,11 @@ export class ProcessTasks {
   private finish(
     session: SessionTasks,
     task: ProcessTask,
-    running: RunningProcess,
+    /**
+     * The supervisor of the process that ended, or undefined when there never was
+     * one: a step that could not be spawned still needs an end in its record.
+     */
+    running: RunningProcess | undefined,
     exitCode: number | null,
     failure?: string,
   ): void {
@@ -391,11 +774,11 @@ export class ProcessTasks {
     // A stop of our own only counts when a signal actually went out: a task that
     // ended on its own during a stop keeps its natural end instead of becoming
     // a kill.
-    const stopReason = running.signalled() ? session.killReasons.get(task.id) : undefined;
+    const stopReason = running?.signalled() === true ? session.killReasons.get(task.id) : undefined;
     const killReason = limitReason ?? stopReason;
     session.killReasons.delete(task.id);
     session.limitReasons.delete(task.id);
-    task.outputBytes = running.bytesWritten();
+    if (running !== undefined) task.outputBytes = running.bytesWritten();
     // A stop that was already answered settled this record; a late exit may only
     // improve its byte count, never overwrite what the kill said.
     if (task.endedAt !== undefined) return;
@@ -410,6 +793,9 @@ export class ProcessTasks {
       // ordinary — and the reason says who asked.
       task.status = "killed";
       task.killReason = killReason;
+      // A note from a kill that once lost is history now that the kill landed:
+      // the record ends killed, and a stale "could not be stopped" would lie.
+      delete task.error;
     } else if (failure !== undefined) {
       task.status = "failed";
       task.error = failure;
@@ -422,11 +808,22 @@ export class ProcessTasks {
           ? "the command was terminated by a signal"
           : `exited with code ${exitCode}`;
     }
+    // A wait is released only after the final status is in the record: the
+    // caller's view has to be the end it was waiting for, exit code and all.
+    this.settleWaiters(session, task.id);
     // The record reaches the disk before the notice leaves: a reader who restarts
     // the session right after the notice has to find the same ending on disk.
     void this.persist(session).then(() => {
       this.onFinish?.(this.view(session, task));
     });
+  }
+
+  /** Release every pending wait on a task whose record just got its end. */
+  private settleWaiters(session: SessionTasks, id: string): void {
+    const waiters = session.waiters.get(id);
+    if (waiters === undefined) return;
+    session.waiters.delete(id);
+    for (const waiter of waiters) waiter();
   }
 
   /**
@@ -436,17 +833,52 @@ export class ProcessTasks {
    */
   private scheduleRuntimeCap(
     session: SessionTasks,
-    scope: TaskScope,
     id: string,
     timeoutMs: number | undefined,
   ): void {
     if (timeoutMs === undefined) return;
+    this.scheduleStop(session, id, timeoutMs, { reason: "timeout" });
+  }
+
+  /**
+   * Arm the stop at `delayMs` from now, replacing the timer already armed for the
+   * task: one task waits on one stop at a time, whether that stop comes from a
+   * deadline, a cap, or a kill that has to be tried again.
+   */
+  private scheduleStop(
+    session: SessionTasks,
+    id: string,
+    delayMs: number,
+    options: StopTaskOptions,
+  ): void {
+    this.clearRuntimeCap(session, id);
     const timer = setTimeout(() => {
-      void this.stop(scope, id, { reason: "timeout" });
-    }, timeoutMs);
-    // A waiting cap must not be the reason the host process stays alive.
+      const task = session.tasks.get(id);
+      // The session is already in hand, so the stop reaches the record it named and
+      // needs no scope of its own — which is also what lets a launched step, whose
+      // turn came long after the call that queued it, keep its cap.
+      if (task === undefined || task.kind !== "process") return;
+      void this.stopRecord(session, task, options);
+    }, delayMs);
+    // A waiting stop must not be the reason the host process stays alive.
     timer.unref();
     session.runtimeCaps.set(id, timer);
+  }
+
+  /**
+   * Say on the record that a kill could not clear its tree. The record is still
+   * running, so this is the only place a reader — the panel, `bg_status`, the next
+   * `bg_kill` — can learn that the task outlived a stop that was already paid for.
+   */
+  private noteSurvival(session: SessionTasks, task: ProcessTask, detail: string | undefined): void {
+    const note = `the process tree could not be stopped: ${
+      detail ?? "it was still there after the forced kill"
+    }. The task is still running; the kill will be tried again.`;
+    // Every retry that loses says the same sentence: one note, not one a second.
+    if (task.error === note) return;
+    task.error = note;
+    task.updatedAt = this.now();
+    void this.persist(session);
   }
 
   /** Cancel a task's runtime cap; a task that ends on its own leaves no timer. */
@@ -471,13 +903,26 @@ export class ProcessTasks {
     const existing = this.sessions.get(directory);
     if (existing !== undefined) return existing;
 
-    const opened = this.openSession(scope);
+    const opened = this.hub.session(scope).then((shared) => this.attach(shared));
     this.sessions.set(directory, opened);
     return opened;
   }
 
-  private async openSession(scope: TaskScope): Promise<SessionTasks> {
-    const shared = await this.hub.session(scope);
+  /**
+   * The runtime half of a session another store already holds: the processes this
+   * store supervises, keyed by the records both stores share. A chain hands its
+   * session in when it launches a step, so the queue and the process it starts
+   * work on one map of records instead of two copies of the same history.
+   */
+  private async attached(shared: TaskSession): Promise<SessionTasks> {
+    const existing = this.sessions.get(shared.directory);
+    if (existing !== undefined) return existing;
+    const opened = this.attach(shared);
+    this.sessions.set(shared.directory, opened);
+    return opened;
+  }
+
+  private async attach(shared: TaskSession): Promise<SessionTasks> {
     // A loaded record carries the output size it was last saved with; the file
     // itself is the truth. Refresh once per process store, even when the loop
     // tools loaded the session first.
@@ -490,6 +935,9 @@ export class ProcessTasks {
       killReasons: new Map(),
       limitReasons: new Map(),
       runtimeCaps: new Map(),
+      waiters: new Map(),
+      followOffsets: new Map(),
+      queued: new Map(),
     };
   }
 

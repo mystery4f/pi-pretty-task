@@ -14,8 +14,14 @@ export const STATUS_COLOUR: Record<TaskStatus, ThemeColor> = {
   running: "accent",
   /** A paused loop task is neither running nor finished. */
   paused: "muted",
+  /** Queued behind another step: work that has not started, like a paused task. */
+  waiting: "muted",
   completed: "success",
   failed: "error",
   killed: "warning",
   interrupted: "warning",
+  /** A step that never ran because the one ahead of it failed. */
+  skipped: "muted",
+  /** A step the user's stop settled before it could run. */
+  stopped: "warning",
 };

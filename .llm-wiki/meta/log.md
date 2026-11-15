@@ -17,3 +17,6 @@
 ## [2026-11-14T05:03:57.149Z] observe
 - slug: "obs-2026-11-14-kill-path-skipped-persist-and-notice-in-pi-pretty-task", title: "Kill path skipped persist and notice in pi-pretty-task", relevance: "high"
 
+## [2026-11-14T09:44:52.898Z] observe
+- slug: "obs-2026-11-14-loop-wake-backlog-storms-after-a-long-turn", title: "Loop wake backlog storms after a long turn", relevance: "medium"
+

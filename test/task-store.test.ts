@@ -11,7 +11,12 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { previousTaskRecordPath, taskRecordPath } from "../src/tasks/base/runtime-state.js";
-import type { LoopTask, ProcessTask } from "../src/tasks/base/task.js";
+import type {
+  ChainTask,
+  CmdLoopTask,
+  ProcessTask,
+  PromptLoopTask,
+} from "../src/tasks/base/task.js";
 import { TaskStore } from "../src/tasks/base/task-store.js";
 import { makeTempDir } from "./support/processes.js";
 
@@ -46,10 +51,10 @@ function processTask(overrides: Partial<ProcessTask> = {}): ProcessTask {
 }
 
 /** A loop arm record, plus one field this version does not know, to prove it round-trips. */
-function loopRecord(overrides: Partial<LoopTask> = {}): LoopTask {
+function loopRecord(overrides: Partial<PromptLoopTask> = {}): PromptLoopTask {
   return {
     id: "lp12cd",
-    kind: "loop",
+    kind: "prompt-loop",
     name: "nightly review",
     status: "completed",
     createdAt: 1_700_000_000_000,
@@ -63,7 +68,86 @@ function loopRecord(overrides: Partial<LoopTask> = {}): LoopTask {
     intervalMs: 300_000,
     iterations: [],
     ...overrides,
-  } as LoopTask;
+  } as PromptLoopTask;
+}
+
+/** A command loop: a schedule with a command, its last three fires kept for the row. */
+function cmdLoopRecord(overrides: Partial<CmdLoopTask> = {}): CmdLoopTask {
+  return {
+    id: "lc34ef",
+    kind: "cmd-loop",
+    name: "watch",
+    status: "running",
+    createdAt: 1_700_000_000_000,
+    updatedAt: 1_700_000_181_000,
+    schedule: "5m",
+    command: "node watch.js",
+    cwd: "/work/project",
+    env: { NODE_ENV: "test" },
+    wakeOnFailure: false,
+    fires: 3,
+    nextFireAt: 1_700_000_300_000,
+    lastFireAt: 1_700_000_181_000,
+    missedFires: 1,
+    consecutiveFailures: 0,
+    lastExitCode: 0,
+    lastOutputPath: "/state/bg13cd.output",
+    lastOutputBytes: 42,
+    fireHistory: [
+      {
+        fire: 1,
+        at: 1_700_000_061_000,
+        startedAt: 1_700_000_061_000,
+        endedAt: 1_700_000_061_800,
+        outcome: "success",
+        exitCode: 0,
+        durationMs: 800,
+        outputBytes: 42,
+        taskId: "bg11cd",
+      },
+      {
+        fire: 2,
+        at: 1_700_000_121_000,
+        startedAt: 1_700_000_121_000,
+        endedAt: 1_700_000_122_900,
+        outcome: "failed",
+        exitCode: 2,
+        durationMs: 1_900,
+        outputBytes: 12,
+        taskId: "bg12cd",
+      },
+      {
+        fire: 3,
+        at: 1_700_000_181_000,
+        startedAt: 1_700_000_181_000,
+        outcome: "success",
+        exitCode: 0,
+        endedAt: 1_700_000_181_800,
+        durationMs: 800,
+        outputBytes: 42,
+        taskId: "bg13cd",
+      },
+    ],
+    ...overrides,
+  };
+}
+
+/**
+ * A chain: a queue of step ids with a cursor, no command of its own and no
+ * output file — its output is each step's (ADR-0013).
+ */
+function chainRecord(overrides: Partial<ChainTask> = {}): ChainTask {
+  return {
+    id: "ch34ef",
+    kind: "chain",
+    name: "build",
+    status: "running",
+    createdAt: 1_700_000_000_000,
+    updatedAt: 1_700_000_001_000,
+    steps: ["bg34ef", "bg35ef"],
+    cursor: 1,
+    ...overrides,
+  };
 }
 
 describe("the task record file", () => {
@@ -79,11 +163,11 @@ describe("the task record file", () => {
     expect(previousTaskRecordPath(directory)).toBe(join(directory, "tasks.json.prev"));
   });
 
-  it("reads a version 1 record without an update time as created, then writes version 2", async () => {
+  it("reads a version 1 record without an update time as created, then writes the current version", async () => {
     const directory = await stateDirectory();
     const oldProcess: Record<string, unknown> = { ...processTask({ id: "ab12cd" }) };
     delete oldProcess.updatedAt;
-    const oldLoop: Record<string, unknown> = { ...loopRecord({ id: "lp12cd" }) };
+    const oldLoop: Record<string, unknown> = { ...loopRecord({ id: "lp12cd" }), kind: "loop" };
     delete oldLoop.updatedAt;
     await writeFile(
       taskRecordPath(directory),
@@ -106,7 +190,52 @@ describe("the task record file", () => {
     const saved = JSON.parse(await readFile(taskRecordPath(directory), "utf8")) as {
       version: number;
     };
-    expect(saved.version).toBe(2);
+    expect(saved.version).toBe(5);
+  });
+
+  it("reads a version 2 loop as an prompt loop and keeps its schedule across the upgrade", async () => {
+    const directory = await stateDirectory();
+    const oldLoop = {
+      id: "lp0001",
+      kind: "loop",
+      name: "nightly review",
+      status: "running",
+      createdAt: 1_700_000_000_000,
+      updatedAt: 1_700_000_001_000,
+      schedule: "15m",
+      prompt: "review the diff",
+      maxFires: 10,
+      fires: 3,
+      nextFireAt: 1_700_000_900_000,
+      iterations: [],
+    };
+    await writeFile(
+      taskRecordPath(directory),
+      JSON.stringify({ version: 2, tasks: [oldLoop] }),
+      "utf8",
+    );
+
+    const loaded = await new TaskStore(directory).load();
+    const [record] = loaded;
+    if (record?.kind !== "prompt-loop")
+      throw new Error("the old loop did not load as an prompt loop");
+    expect(record).toMatchObject({
+      id: "lp0001",
+      kind: "prompt-loop",
+      schedule: "15m",
+      fires: 3,
+      maxFires: 10,
+      nextFireAt: 1_700_000_900_000,
+    });
+
+    await new TaskStore(directory).save(loaded);
+    const saved = JSON.parse(await readFile(taskRecordPath(directory), "utf8")) as {
+      version: number;
+    };
+    expect(saved.version).toBe(5);
+
+    const reloaded = await new TaskStore(directory).load();
+    expect(reloaded).toEqual(loaded);
   });
 
   it("has no records before the first write, and never throws for that", async () => {
@@ -232,7 +361,7 @@ describe("the task record file", () => {
     // turn outlives the process that was running it.
     expect(loaded).toHaveLength(1);
     const record = loaded[0];
-    if (record?.kind !== "loop") throw new Error("the loop record did not load");
+    if (record?.kind !== "prompt-loop") throw new Error("the loop record did not load");
     expect(record.status).toBe("running");
     const [iteration] = record.iterations;
     expect(iteration).toMatchObject({ status: "interrupted", endedAt: 1_700_000_009_000 });
@@ -241,5 +370,136 @@ describe("the task record file", () => {
       endedAt: 1_700_000_009_000,
       durationMs: 8_800,
     });
+  });
+
+  it("round-trips a command loop, its fire history and its child process", async () => {
+    const directory = await stateDirectory();
+    // The child is an ordinary process record that points at its loop and its fire.
+    const child = processTask({ id: "bg13cd", name: "watch #3", parentId: "lc34ef", fire: 3 });
+    const records = [cmdLoopRecord(), child];
+
+    await new TaskStore(directory).save(records);
+    const loaded = await new TaskStore(directory).load();
+
+    expect(loaded).toEqual(records);
+  });
+
+  it("keeps a command loop schedule across a restart and interrupts only its in-flight fire", async () => {
+    const directory = await stateDirectory();
+    // The fire that was running when pi stopped: its process died with the previous pi.
+    const loop = cmdLoopRecord({
+      fireHistory: [
+        {
+          fire: 3,
+          at: 1_700_000_181_000,
+          startedAt: 1_700_000_181_000,
+          outcome: "running",
+          taskId: "bg13cd",
+        },
+      ],
+    });
+    await new TaskStore(directory).save([loop]);
+
+    const loaded = await new TaskStore(directory, { now: () => 1_700_000_200_000 }).load();
+
+    // The schedule survives: it owns no process. The fire that was running cannot,
+    // because the process it started died with the previous pi (ADR-0014).
+    expect(loaded).toHaveLength(1);
+    const record = loaded[0];
+    if (record?.kind !== "cmd-loop") throw new Error("the command loop did not load");
+    expect(record.status).toBe("running");
+    expect(record.schedule).toBe("5m");
+    expect(record.nextFireAt).toBe(1_700_000_300_000);
+    expect(record.fires).toBe(3);
+    expect(record.fireHistory).toHaveLength(1);
+    expect(record.fireHistory[0]).toMatchObject({
+      fire: 3,
+      outcome: "interrupted",
+      endedAt: 1_700_000_200_000,
+      durationMs: 19_000,
+      taskId: "bg13cd",
+    });
+  });
+
+  it("round-trips a chain with its steps in queue order and its cursor", async () => {
+    const directory = await stateDirectory();
+    // A step carries a parent and no fire: the two links are independent, because
+    // a chain step belongs to a chain and never to a loop's fire (ADR-0013).
+    const steps = [
+      processTask({ id: "bg34ef", name: "build", parentId: "ch34ef" }),
+      processTask({ id: "bg35ef", name: "test", parentId: "ch34ef" }),
+    ];
+    const chain = chainRecord({
+      status: "completed",
+      endedAt: 1_700_000_004_000,
+      updatedAt: 1_700_000_004_000,
+      cursor: 2,
+    });
+    const records = [...steps, chain];
+
+    await new TaskStore(directory).save(records);
+    const loaded = await new TaskStore(directory).load();
+
+    expect(loaded).toEqual(records);
+    const stored = loaded[2];
+    if (stored?.kind !== "chain") throw new Error("the chain record did not load as a chain");
+    expect(stored.steps).toEqual(["bg34ef", "bg35ef"]);
+    expect(stored.cursor).toBe(2);
+  });
+
+  it("reads a version 4 document, the shape before chains, and writes the chain-aware version", async () => {
+    const directory = await stateDirectory();
+    const records = [processTask(), loopRecord(), cmdLoopRecord()];
+    await writeFile(
+      taskRecordPath(directory),
+      JSON.stringify({ version: 4, tasks: records }),
+      "utf8",
+    );
+
+    const loaded = await new TaskStore(directory).load();
+    expect(loaded).toEqual(records);
+
+    await new TaskStore(directory).save(loaded);
+    const saved = JSON.parse(await readFile(taskRecordPath(directory), "utf8")) as {
+      version: number;
+    };
+    expect(saved.version).toBe(5);
+  });
+
+  it("ends a chain a restart left running as interrupted, and stops the steps still waiting", async () => {
+    const directory = await stateDirectory();
+    const done = processTask({ id: "bg34ef", name: "build", parentId: "ch34ef" });
+    const running = processTask({
+      id: "bg35ef",
+      name: "test",
+      status: "running",
+      pid: 4242,
+      parentId: "ch34ef",
+    });
+    const waiting = processTask({
+      id: "bg36ef",
+      name: "deploy",
+      status: "waiting",
+      parentId: "ch34ef",
+    });
+    delete waiting.endedAt;
+    const chain = chainRecord({ cursor: 1, steps: ["bg34ef", "bg35ef", "bg36ef"] });
+    delete chain.endedAt;
+    await new TaskStore(directory).save([done, running, waiting, chain]);
+
+    const loaded = await new TaskStore(directory, { now: () => 1_700_000_009_000 }).load();
+
+    // Nothing will launch the rest of the queue: the process that was running the
+    // chain died with the step it had started.
+    expect(loaded.find((record) => record.id === "ch34ef")).toMatchObject({
+      status: "interrupted",
+      endedAt: 1_700_000_009_000,
+      cursor: 1,
+    });
+    expect(loaded.find((record) => record.id === "bg35ef")).toMatchObject({
+      status: "interrupted",
+    });
+    expect(loaded.find((record) => record.id === "bg36ef")).toMatchObject({ status: "stopped" });
+    expect(loaded.find((record) => record.id === "bg34ef")).toEqual(done);
   });
 });

@@ -5,9 +5,11 @@
  * @author mystery4f <40482524+mystery4f@users.noreply.github.com>
  */
 
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createHarness, type Harness, resultText } from "./support/extension-harness.js";
+import { sessionTaskDirectory, taskRecordPath } from "../src/tasks/base/runtime-state.js";
+import { createHarness, type Harness, resultText, type Turn } from "./support/extension-harness.js";
 import { makeTempDir } from "./support/processes.js";
 
 interface LoopDetails {
@@ -24,6 +26,8 @@ interface LoopDetails {
   endedAt?: number;
   untilNextFireMs?: number;
   outcome?: string;
+  iterations?: Array<{ fire: number; status: string }>;
+  error?: string;
 }
 
 const cleanup: Array<() => Promise<void>> = [];
@@ -32,11 +36,12 @@ afterEach(async () => {
   while (cleanup.length > 0) await cleanup.pop()?.();
 });
 
-async function setup() {
+async function setup(seed?: (turn: Turn) => Promise<void>) {
   const directory = await makeTempDir();
   cleanup.push(directory.dispose);
   let now = Date.UTC(2026, 0, 1, 9, 0, 0);
-  const turn = { cwd: directory.path, sessionId: "session-loops" };
+  const turn: Turn = { cwd: directory.path, sessionId: "session-loops" };
+  if (seed !== undefined) await seed(turn);
   const harness = createHarness(turn, { now: () => now });
   return {
     directory,
@@ -77,7 +82,7 @@ describe("loop tools", () => {
     });
 
     expect(created).toMatchObject({
-      kind: "loop",
+      kind: "prompt-loop",
       status: "running",
       schedule: "10s",
       prompt: "review the diff",
@@ -301,6 +306,105 @@ describe("loop tools", () => {
     expect(task.harness.messages).toHaveLength(1);
   });
 
+  it("retunes a loop through loop_update and keeps its id, fires and iterations", async () => {
+    const task = await setup();
+    const created = await createLoop(task.harness, { schedule: "10s", prompt: "keep going" });
+
+    task.advance(10_000);
+    await task.harness.pump(task.now);
+    const before = detailsOf(await task.harness.call("loop_list", { id: created.id }));
+    expect(before).toMatchObject({ fires: 1, schedule: "10s" });
+    expect(before.iterations).toHaveLength(1);
+
+    task.advance(5_000);
+    const retuned = await task.harness.call("loop_update", { id: created.id, schedule: "1h" });
+    expect(resultText(retuned)).toContain("Retuned loop");
+    expect(detailsOf(retuned)).toMatchObject({
+      id: created.id,
+      outcome: "rescheduled",
+      status: "running",
+      schedule: "1h",
+      fires: before.fires,
+      lastFireAt: before.lastFireAt,
+      nextFireAt: task.now + 3_600_000,
+    });
+
+    const listed = await task.harness.call("loop_list", { id: created.id });
+    expect(resultText(listed)).toContain("schedule: 1h");
+    expect(detailsOf(listed).iterations).toEqual(before.iterations);
+
+    // The 10s slot the old schedule had picked does not fire; the 1h one does.
+    task.advance(10_000);
+    expect(await task.harness.pump(task.now)).toEqual([]);
+    task.advance(3_600_000 - 10_000);
+    expect(await task.harness.pump(task.now)).toHaveLength(1);
+  });
+
+  it("retunes a paused loop through loop_update and leaves it paused", async () => {
+    const task = await setup();
+    const created = await createLoop(task.harness, { schedule: "10s", prompt: "keep going" });
+    await task.harness.call("loop_update", { id: created.id, action: "pause" });
+
+    const retuned = await task.harness.call("loop_update", { id: created.id, schedule: "30m" });
+    expect(resultText(retuned)).toContain("stays paused");
+    expect(detailsOf(retuned)).toMatchObject({
+      outcome: "rescheduled",
+      status: "paused",
+      schedule: "30m",
+    });
+    expect(detailsOf(retuned).nextFireAt).toBeUndefined();
+
+    task.advance(10_000);
+    expect(await task.harness.pump(task.now)).toEqual([]);
+
+    const resumed = await task.harness.call("loop_update", { id: created.id, action: "resume" });
+    expect(detailsOf(resumed)).toMatchObject({
+      status: "running",
+      nextFireAt: task.now + 1_800_000,
+    });
+  });
+
+  it("rejects an invalid schedule on loop_update with the message loop_create gives", async () => {
+    const task = await setup();
+    const created = await createLoop(task.harness, { schedule: "10s", prompt: "keep going" });
+    const rejectedCreate = await task.harness.call("loop_create", {
+      schedule: "10 minutes",
+      prompt: "keep going",
+    });
+
+    const rejectedUpdate = await task.harness.call("loop_update", {
+      id: created.id,
+      schedule: "10 minutes",
+    });
+    expect(resultText(rejectedUpdate)).toBe(resultText(rejectedCreate));
+    expect(detailsOf(rejectedUpdate).error).toContain('Invalid schedule "10 minutes"');
+    expect(detailsOf(rejectedUpdate).id).toBeUndefined();
+
+    const unchanged = detailsOf(await task.harness.call("loop_list", { id: created.id }));
+    expect(unchanged).toMatchObject({
+      schedule: "10s",
+      status: "running",
+      nextFireAt: created.nextFireAt,
+    });
+
+    task.advance(10_000);
+    expect(await task.harness.pump(task.now)).toHaveLength(1);
+  });
+
+  it("asks for an action or a schedule when loop_update gets neither", async () => {
+    const task = await setup();
+    const created = await createLoop(task.harness, { schedule: "10s", prompt: "keep going" });
+
+    const result = await task.harness.call("loop_update", { id: created.id });
+    expect(resultText(result)).toContain("Give an action or a schedule");
+    expect(detailsOf(result).outcome).toBeUndefined();
+    expect(detailsOf(result).error).toContain("Give an action or a schedule");
+
+    // The loop is untouched by the refusal, not merely unchanged in the reply.
+    const listed = detailsOf(await task.harness.call("loop_list", { id: created.id }));
+    expect(listed).toMatchObject({ schedule: "10s", status: "running" });
+  });
+
   it("reloads a loop after a restart and keeps its fire count", async () => {
     const task = await setup();
     const created = await createLoop(task.harness, { schedule: "10s", prompt: "keep going" });
@@ -324,5 +428,58 @@ describe("loop tools", () => {
     expect(fired).toHaveLength(1);
     expect(fired[0]?.fire).toBe(2);
     expect(restarted.messages[0]?.content).toBe("keep going");
+  });
+
+  it("loads a version 2 loop file, fires it, and rewrites it in the new version", async () => {
+    const first = Date.UTC(2026, 0, 1, 9, 0, 10);
+    const task = await setup(async (turn) => {
+      const directory = sessionTaskDirectory(turn.cwd, turn.sessionId);
+      await mkdir(directory, { recursive: true });
+      await writeFile(
+        taskRecordPath(directory),
+        JSON.stringify({
+          version: 2,
+          tasks: [
+            {
+              id: "lp0001",
+              kind: "loop",
+              name: "legacy review",
+              status: "running",
+              createdAt: first - 20_000,
+              schedule: "10s",
+              prompt: "keep reviewing",
+              fires: 2,
+              maxFires: 5,
+              nextFireAt: first,
+              lastFireAt: first - 10_000,
+            },
+          ],
+        }),
+      );
+    });
+
+    await task.harness.startSession();
+    task.advance(first - task.now);
+    expect(await task.harness.pump(task.now)).toHaveLength(1);
+    expect(task.harness.messages[0]?.content).toBe("keep reviewing");
+
+    const listed = detailsOf(await task.harness.call("loop_list", { id: "lp0001" }));
+    expect(listed).toMatchObject({
+      id: "lp0001",
+      kind: "prompt-loop",
+      name: "legacy review",
+      schedule: "10s",
+      fires: 3,
+      maxFires: 5,
+    });
+
+    const directory = sessionTaskDirectory(task.turn.cwd, task.turn.sessionId);
+    const document = JSON.parse(await readFile(taskRecordPath(directory), "utf8")) as {
+      version: number;
+      tasks: Array<{ id: string; kind: string; nextFireAt?: number }>;
+    };
+    expect(document.version).toBe(5);
+    expect(document.tasks[0]).toMatchObject({ id: "lp0001", kind: "prompt-loop" });
+    expect(document.tasks[0]?.nextFireAt).toBeGreaterThan(first);
   });
 });

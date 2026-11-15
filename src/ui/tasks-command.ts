@@ -8,13 +8,20 @@
  * @author mystery4f <40482524+mystery4f@users.noreply.github.com>
  */
 
+import { readdir } from "node:fs/promises";
+import { join } from "node:path";
 import type {
   ExtensionAPI,
   ExtensionCommandContext,
   ExtensionUIContext,
 } from "@earendil-works/pi-coding-agent";
-import type { TaskScope } from "../tasks/base/runtime-state.js";
+import {
+  RUNTIME_STATE_DIRECTORY,
+  sessionTaskDirectory,
+  type TaskScope,
+} from "../tasks/base/runtime-state.js";
 import type { Task } from "../tasks/base/task.js";
+import type { ChainTasks, ChainTaskView } from "../tasks/chain/chain-tasks.js";
 import type { LoopTasks, LoopTaskView } from "../tasks/loop/loop-tasks.js";
 import type { ProcessTasks } from "../tasks/process/process-tasks.js";
 import {
@@ -58,13 +65,14 @@ export function statusLineText(tasks: readonly Task[]): string {
 }
 
 /**
- * Bind the panel to one session's stores. Process tasks and loop tasks arrive as
- * one list; the panel still only ever sees these three calls, so it cannot signal
- * a process, fire a loop or bypass the stores' rules.
+ * Bind the panel to one session's stores. The panel asks for every record once and
+ * decides for itself which ones get a row; it still only ever sees these four calls,
+ * so it cannot signal a process, fire a loop or bypass the stores' rules.
  */
 export function panelSourceFor(
   processes: ProcessTasks,
   loops: LoopTasks,
+  chains: ChainTasks,
   scope: TaskScope,
   now: () => number = Date.now,
 ): PanelSource {
@@ -74,23 +82,81 @@ export function panelSourceFor(
     outputBytes: 0,
     ...(view.untilNextFireMs === undefined ? {} : { untilNextFireMs: view.untilNextFireMs }),
   });
+  const chainRow = (view: ChainTaskView): PanelTaskView => ({
+    task: view.task,
+    elapsedMs: Math.max(0, (view.task.endedAt ?? now()) - view.task.createdAt),
+    outputBytes: 0,
+  });
 
   return {
+    sessionId: scope.sessionId,
     async list() {
-      const [running, scheduled] = await Promise.all([processes.list(scope), loops.list(scope)]);
-      return [...running, ...scheduled.map(loopRow)];
+      // Children are listed too: the header counts them even when no page shows them
+      // as a row, and a chain's detail resolves its steps by id (ADR-0014).
+      const [records, scheduled, queues] = await Promise.all([
+        processes.listAll(scope),
+        loops.list(scope),
+        chains.list(scope),
+      ]);
+      return [...records, ...scheduled.map(loopRow), ...queues.map(chainRow)];
     },
-    async tail(id) {
-      const logs = await processes.logs(scope, id, { lines: DETAIL_TAIL_LINES });
+    async others() {
+      // Other sessions lose nothing by being seen: each keeps its own store under the
+      // same runtime root, so the directories there name them. A session whose store
+      // cannot be read drops out alone and never hides this session's own rows.
+      const mine = sessionTaskDirectory(scope.cwd, scope.sessionId);
+      const entries = await readdir(join(scope.cwd, RUNTIME_STATE_DIRECTORY), {
+        withFileTypes: true,
+      });
+      const rows: PanelTaskView[] = [];
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        if (sessionTaskDirectory(scope.cwd, entry.name) === mine) continue;
+        try {
+          const other: TaskScope = { cwd: scope.cwd, sessionId: entry.name };
+          const [records, scheduled, queues] = await Promise.all([
+            processes.listAll(other),
+            loops.list(other),
+            chains.list(other),
+          ]);
+          const theirs = [...records, ...scheduled.map(loopRow), ...queues.map(chainRow)];
+          rows.push(...theirs.map((row) => ({ ...row, sessionId: entry.name })));
+        } catch {
+          // One unreadable session is not a reason to hide the rest.
+        }
+      }
+      return rows;
+    },
+    async tail(id, sessionId) {
+      const logs = await processes.logs(
+        sessionId === undefined ? scope : { ...scope, sessionId },
+        id,
+        { lines: DETAIL_TAIL_LINES },
+      );
       return logs?.tail;
     },
     async stop(id) {
-      // A loop is stopped by ending its schedule; a process by killing its tree.
+      // A loop is stopped by ending its schedule; a chain by stopping the step it is
+      // on and telling every later step it never got its turn (ADR-0013, ADR-0014);
+      // a process by killing its tree.
       const loop = await loops.get(scope, id);
       if (loop !== undefined) {
-        const result = await loops.update(scope, id, "complete");
+        const result = await loops.update({ ...scope, id, action: "complete" });
         if (result === undefined) return undefined;
         return { outcome: result.outcome, view: loopRow(result.view) };
+      }
+      const chain = await chains.get(scope, id);
+      if (chain !== undefined) {
+        const result = await chains.stop(scope, id);
+        if (result === undefined) return undefined;
+        // A survivor says why: the outcome alone would read like part of the kill
+        // that failed, and the reader is owed the sentence the supervisor gave.
+        const why = result.detail === undefined ? "" : ` · ${result.detail}`;
+        const step =
+          result.step === undefined
+            ? {}
+            : { detail: `step ${result.step.task.id} ${result.step.task.status}${why}` };
+        return { outcome: result.outcome, view: chainRow(result.view), ...step };
       }
       return processes.stop(scope, id);
     },
@@ -116,11 +182,12 @@ export function registerTasksCommand(
   pi: ExtensionAPI,
   processes: ProcessTasks,
   loops: LoopTasks,
+  chains: ChainTasks,
 ): void {
   pi.registerCommand(TASKS_COMMAND, {
-    description: "Open the task panel: background processes and scheduled loops",
+    description: "Open the task panel: background processes, loops and chains",
     handler: async (_args, ctx) => {
-      await openPanel(ctx, processes, loops);
+      await openPanel(ctx, processes, loops, chains);
     },
   });
   // The status line advertises this key, so it has to work: the panel is the only
@@ -128,7 +195,7 @@ export function registerTasksCommand(
   pi.registerShortcut(TASKS_SHORTCUT, {
     description: "Open the task panel",
     handler: async (ctx) => {
-      await openPanel(ctx, processes, loops);
+      await openPanel(ctx, processes, loops, chains);
     },
   });
 }
@@ -143,6 +210,7 @@ async function openPanel(
   ctx: PanelContext,
   processes: ProcessTasks,
   loops: LoopTasks,
+  chains: ChainTasks,
 ): Promise<void> {
   if (ctx.mode !== "tui" || !ctx.hasUI) {
     ctx.ui.notify(
@@ -152,7 +220,7 @@ async function openPanel(
     return;
   }
   const scope: TaskScope = { cwd: ctx.cwd, sessionId: ctx.sessionManager.getSessionId() };
-  const source = panelSourceFor(processes, loops, scope);
+  const source = panelSourceFor(processes, loops, chains, scope);
 
   await ctx.ui.custom<void>(
     (tui, theme, _keybindings, done) =>
@@ -164,7 +232,7 @@ async function openPanel(
     },
   );
 
-  await publishStatus(ctx.ui, processes, loops, scope);
+  await publishStatus(ctx.ui, processes, loops, chains, scope);
 }
 
 /**
@@ -175,11 +243,22 @@ export async function publishStatus(
   ui: ExtensionUIContext,
   processes: ProcessTasks,
   loops: LoopTasks,
+  chains: ChainTasks,
   scope: TaskScope,
 ): Promise<void> {
   try {
-    const [running, scheduled] = await Promise.all([processes.list(scope), loops.list(scope)]);
-    const tasks = [...running.map((view) => view.task), ...scheduled.map((view) => view.task)];
+    // Every record is counted, children included (ADR-0014): a fire that fails every
+    // ten seconds has to show up in the line even though no page gives it a row.
+    const [records, scheduled, queues] = await Promise.all([
+      processes.listAll(scope),
+      loops.list(scope),
+      chains.list(scope),
+    ]);
+    const tasks = [
+      ...records.map((view) => view.task),
+      ...scheduled.map((view) => view.task),
+      ...queues.map((view) => view.task),
+    ];
     ui.setWidget(SUMMARY_KEY, tasks.length === 0 ? undefined : [statusLineText(tasks)]);
   } catch {
     // The count is a courtesy: a store that cannot list still gets the way back in.

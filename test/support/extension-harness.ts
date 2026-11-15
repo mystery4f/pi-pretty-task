@@ -8,8 +8,10 @@
  * @author mystery4f <40482524+mystery4f@users.noreply.github.com>
  */
 
+import { join } from "node:path";
 import type {
   AgentToolResult,
+  EventBus,
   ExtensionAPI,
   ExtensionCommandContext,
   ExtensionToolContext,
@@ -18,7 +20,7 @@ import type {
   Theme,
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
-
+import { createEventBus } from "@earendil-works/pi-coding-agent";
 import type { Component, KeybindingsManager, TUI } from "@earendil-works/pi-tui";
 
 import { createExtension } from "../../src/index.js";
@@ -52,11 +54,37 @@ export interface HarnessOptions {
   readonly iterationCallLimit?: number;
   /** Iterations one loop keeps; omitted means the extension's default. */
   readonly iterationHistoryLimit?: number;
+  /**
+   * Project root holding `.pi/pretty-task.json`; defaults to the harness turn's
+   * cwd so a test never reads the repository's own configuration.
+   */
+  readonly projectDir?: string;
+  /** Agent settings directory; defaults to a missing directory beside the turn's cwd. */
+  readonly agentDir?: string;
+  /**
+   * Receives configuration problems the extension reports at load. The harness
+   * collects them into `problems`; production writes them to stderr.
+   */
+  readonly reportProblem?: (message: string) => void;
+  /**
+   * Receives the terminal notification bytes. The production writer is silent
+   * unless stdout is a TTY, and a test runner's stdout is a pipe.
+   */
+  readonly notificationWrite?: (text: string) => void;
 }
 
 export interface Harness {
   /** Names of every tool the extension registered. */
   readonly toolNames: readonly string[];
+  /** The description the model reads for one registered tool. */
+  toolDescription(toolName: string): string;
+  /**
+   * The shared event bus the extension publishes on, handed over exactly as pi
+   * does: a test subscribes here to see what another extension would see.
+   */
+  readonly events: EventBus;
+  /** Configuration problems reported while the extension loaded, oldest first. */
+  readonly problems: readonly string[];
   /** Every message sent with `sendMessage`, oldest first. */
   readonly messages: readonly SentMessage[];
   /** Custom types the extension registered a message renderer for. */
@@ -167,6 +195,25 @@ export function fakeTheme(): Theme {
 }
 
 /**
+ * A stand-in `Theme` that draws text exactly as given. The panel measures every line
+ * it draws, so a theme whose styling is not ANSI would be measured as wider than the
+ * terminal and the panel would cut real content to fit a test's markers.
+ */
+export function plainTheme(): Theme {
+  const plain = (_colour: string, text: string): string => text;
+  const decorate = (text: string): string => text;
+  return {
+    fg: plain,
+    bg: plain,
+    bold: decorate,
+    italic: decorate,
+    underline: decorate,
+    inverse: decorate,
+    strikethrough: decorate,
+  } as unknown as Theme;
+}
+
+/**
  * Load the extension against a fake API and return a caller for its tools.
  *
  * The environment is explicit so a test can set a limit without touching the
@@ -174,6 +221,7 @@ export function fakeTheme(): Theme {
  * The clock and the pump are explicit too, so no real timer drives a loop.
  */
 export function createHarness(defaultTurn: Turn, options: HarnessOptions = {}): Harness {
+  const problems: string[] = [];
   const tools: ToolDefinition[] = [];
   const renderers = new Map<string, MessageRenderer>();
   const messages: SentMessage[] = [];
@@ -184,6 +232,10 @@ export function createHarness(defaultTurn: Turn, options: HarnessOptions = {}): 
   const widgetKeys: string[] = [];
   const widgets: WidgetUpdate[] = [];
   let opened: { component: Component; options: CustomOptions } | undefined;
+
+  // pi's own bus, so a listener that throws is isolated the way it is in
+  // production and the tests observe the real emit/on contract.
+  const events = createEventBus();
 
   const fakeTui = { requestRender: () => undefined } as unknown as TUI;
   const ui = {
@@ -201,7 +253,7 @@ export function createHarness(defaultTurn: Turn, options: HarnessOptions = {}): 
           opened = { component, options: options ?? {} };
         };
         try {
-          const produced = factory(fakeTui, fakeTheme(), {} as KeybindingsManager, resolve);
+          const produced = factory(fakeTui, plainTheme(), {} as KeybindingsManager, resolve);
           if (produced instanceof Promise) produced.then(open, reject);
           else open(produced);
         } catch (error) {
@@ -232,6 +284,8 @@ export function createHarness(defaultTurn: Turn, options: HarnessOptions = {}): 
     }) as unknown as ExtensionCommandContext;
 
   const api = {
+    // The bus pi hands every extension: same object the harness exposes.
+    events,
     registerCommand(name: string, definition: CommandDefinition): void {
       commands.set(name, definition);
     },
@@ -279,10 +333,24 @@ export function createHarness(defaultTurn: Turn, options: HarnessOptions = {}): 
     ...(options.iterationHistoryLimit === undefined
       ? {}
       : { iterationHistoryLimit: options.iterationHistoryLimit }),
+    projectDir: options.projectDir ?? defaultTurn.cwd,
+    agentDir: options.agentDir ?? join(defaultTurn.cwd, "agent-settings"),
+    reportProblem: (message) => {
+      problems.push(message);
+      options.reportProblem?.(message);
+    },
+    writeTerminal: options.notificationWrite,
   });
 
   return {
+    events,
     toolNames: tools.map((tool) => tool.name),
+    toolDescription(toolName: string): string {
+      const tool = tools.find((candidate) => candidate.name === toolName);
+      if (tool === undefined) throw new Error(`tool ${toolName} is not registered`);
+      return tool.description;
+    },
+    problems,
     messages,
     rendererTypes: [...renderers.keys()],
     async call(toolName, params, turn = defaultTurn) {

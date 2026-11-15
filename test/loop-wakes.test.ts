@@ -60,8 +60,11 @@ describe("reload", () => {
     const task = await setup();
     const created = await createLoop(task.harness, { schedule: "30s", maxFires: 1 });
 
-    // A reload is a second extension instance over the same session directory.
+    // A reload is a second extension instance over the same session directory; it
+    // owns that session once its own session_start names it, and only then does
+    // its pump drive the loop.
     const reloaded = createHarness(task.turn, { now: () => task.now });
+    await reloaded.startSession(task.turn);
     await reloaded.pump(task.now + 1_000);
     const afterLoad = detailsOf<LoopDetails>(await reloaded.call("loop_list", { id: created.id }));
     expect(afterLoad.status).toBe("running");

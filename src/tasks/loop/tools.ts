@@ -15,25 +15,46 @@ import type {
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { formatDuration } from "../base/format.js";
+import { formatBytes, formatDuration } from "../base/format.js";
 import type { TaskScope } from "../base/runtime-state.js";
-import type { LoopTask } from "../base/task.js";
-import {
-  LoopInputError,
-  type LoopTasks,
-  type LoopTaskView,
-  type LoopUpdateAction,
-} from "./loop-tasks.js";
+import type { CmdLoopTask, FireRecord, PromptLoopTask } from "../base/task.js";
+import { LoopInputError, type LoopTasks, type LoopTaskView } from "./loop-tasks.js";
 
 const CreateParameters = Type.Object({
   schedule: Type.String({
     description:
       "When to fire: interval shorthand such as 30s, 10m or 2h (seconds allowed), or a five-field cron expression in local time such as 0 9 * * 1-5 (minute hour day-of-month month day-of-week; * every, 1-5 ranges, 9,17 lists, */15 steps). Weekdays: 0-6 start on Sunday and 7 is Sunday too. A day-of-month and a day-of-week both given fire on either match; when only one is given it must match. Six fields are refused: use the shorthand for second-level timing.",
   }),
-  prompt: Type.String({
-    description:
-      "Message sent into the session each time the loop fires; it starts a new turn. There is no command to run.",
-  }),
+  prompt: Type.Optional(
+    Type.String({
+      description:
+        "Message sent into the session each time the loop fires; it starts a new turn. Give this or `command`, never both.",
+    }),
+  ),
+  command: Type.Optional(
+    Type.String({
+      description:
+        "Shell command to run as a background process on each fire, exactly like bg_run. Give this or `prompt`, never both. A fire that comes due while the previous one still runs is skipped and shown as skipped, not started twice.",
+    }),
+  ),
+  cwd: Type.Optional(
+    Type.String({
+      description:
+        "Working directory of a command loop; relative paths resolve against the session directory. Only valid with `command`.",
+    }),
+  ),
+  env: Type.Optional(
+    Type.Record(Type.String(), Type.String(), {
+      description:
+        "Extra environment variables for a command loop, layered over the session environment. Only valid with `command`.",
+    }),
+  ),
+  wakeOnFailure: Type.Optional(
+    Type.Boolean({
+      description:
+        "Send a notice into this session when a fire fails (exit code, duration, last output lines); a healthy fire stays silent. Defaults to true. Only valid with `command`.",
+    }),
+  ),
   name: Type.Optional(
     Type.String({
       description:
@@ -62,10 +83,18 @@ const ListParameters = Type.Object({
 
 const UpdateParameters = Type.Object({
   id: Type.String({ description: "Loop id to update." }),
-  action: Type.Union([Type.Literal("pause"), Type.Literal("resume"), Type.Literal("complete")], {
-    description:
-      "pause stops fires but keeps the record; resume re-arms from now; complete ends the loop.",
-  }),
+  action: Type.Optional(
+    Type.Union([Type.Literal("pause"), Type.Literal("resume"), Type.Literal("complete")], {
+      description:
+        "pause stops fires but keeps the record; resume re-arms from now; complete ends the loop. Omit it to change only the schedule.",
+    }),
+  ),
+  schedule: Type.Optional(
+    Type.String({
+      description:
+        "New schedule for the same loop, in the forms loop_create accepts. The loop keeps its id, fire count and every recorded iteration; a running loop is re-armed from this update, never from the slot the old schedule had picked. An invalid expression is refused and the old schedule stays in force.",
+    }),
+  ),
 });
 
 const DeleteParameters = Type.Object({
@@ -113,7 +142,7 @@ export function describeLoop(view: LoopTaskView): string {
   if (task.lastFireAt !== undefined) {
     lines.push(`last fire: ${new Date(task.lastFireAt).toISOString()}`);
   }
-  lines.push(iterationSummary(task));
+  lines.push(task.kind === "prompt-loop" ? iterationSummary(task) : fireSummary(task));
   if (task.expiresAt !== undefined) {
     lines.push(`expires: ${new Date(task.expiresAt).toISOString()}`);
   }
@@ -121,7 +150,22 @@ export function describeLoop(view: LoopTaskView): string {
     lines.push(`ended: ${new Date(task.endedAt).toISOString()}`);
   }
   if (task.error !== undefined) lines.push(`error: ${task.error}`);
-  lines.push(`prompt: ${task.prompt}`);
+  if (task.kind === "prompt-loop") {
+    lines.push(`prompt: ${task.prompt}`);
+  } else {
+    if (task.cwd !== undefined) lines.push(`cwd: ${task.cwd}`);
+    if (task.wakeOnFailure === false) lines.push("wake on failure: off");
+    if (task.lastOutputPath !== undefined) {
+      const exit =
+        task.lastExitCode === undefined || task.lastExitCode === null
+          ? "—"
+          : String(task.lastExitCode);
+      lines.push(
+        `last output: ${exit} · ${formatBytes(task.lastOutputBytes ?? 0)} · ${task.lastOutputPath}`,
+      );
+    }
+    lines.push(`command: ${task.command}`);
+  }
   return lines.join("\n");
 }
 
@@ -130,7 +174,7 @@ export function describeLoop(view: LoopTaskView): string {
  * did. A loop with no iteration yet says so, because `iterations: none` is a fact
  * a caller can act on, unlike a missing line.
  */
-function iterationSummary(task: LoopTask): string {
+function iterationSummary(task: PromptLoopTask): string {
   const dropped = task.droppedIterations ?? 0;
   const droppedText = dropped > 0 ? ` (${String(dropped)} older dropped)` : "";
   const newest = task.iterations.at(-1);
@@ -141,12 +185,63 @@ function iterationSummary(task: LoopTask): string {
 }
 
 /**
+ * One line for a command loop's block: how many fires it has had, and the newest
+ * recorded one. Skipped fires are counted, so a stuck command cannot look quiet.
+ */
+function fireSummary(task: CmdLoopTask): string {
+  const dropped = Math.max(0, task.fires - task.fireHistory.length);
+  const droppedText = dropped > 0 ? ` (${String(dropped)} older dropped)` : "";
+  const newest = task.fireHistory.at(-1);
+  if (newest === undefined) return `fires: none${droppedText}`;
+  return `fires: ${String(task.fires)}${droppedText} · newest #${String(newest.fire)} ${newest.outcome}${fireMeta(newest)}`;
+}
+
+/** The changing facts of one fire, in the order a person reads them. */
+function fireMeta(fire: FireRecord): string {
+  const parts = [
+    fire.exitCode === undefined ? undefined : `exit ${String(fire.exitCode)}`,
+    fire.durationMs === undefined ? undefined : formatDuration(fire.durationMs),
+    fire.outputBytes === undefined ? undefined : formatBytes(fire.outputBytes),
+    fire.taskId,
+    fire.error,
+  ];
+  return parts
+    .filter((part) => part !== undefined && part.length > 0)
+    .map((part) => ` · ${part as string}`)
+    .join("");
+}
+
+/**
+ * The fire listing for one command loop, newest first: the same rows the panel
+ * expands to, so a caller reading `loop_list id=…` sees what the user sees.
+ * A trimmed record says how many older fires it dropped.
+ */
+export function describeFires(task: CmdLoopTask): string {
+  const dropped = Math.max(0, task.fires - task.fireHistory.length);
+  if (task.fireHistory.length === 0) {
+    return dropped > 0
+      ? `No fire recorded; ${String(dropped)} older ones were dropped.`
+      : "No fire yet: this loop has not fired.";
+  }
+
+  const rows = [...task.fireHistory].reverse().map((fire) => {
+    const time = fire.at === undefined ? undefined : new Date(fire.at).toISOString();
+    const head = [`#${String(fire.fire)}`, time, fire.outcome]
+      .filter((part) => part !== undefined)
+      .join(" · ");
+    return `${head}${fireMeta(fire)}`;
+  });
+  if (dropped > 0) rows.push(`… ${String(dropped)} older`);
+  return rows.join("\n");
+}
+
+/**
  * The iteration listing for one loop, newest first, with the tool calls each turn
  * made. This is the listing `loop_list id=…` returns and the panel (#9) draws:
  * an iteration is reachable from the loop, never as a row of its own (ADR-0002).
  * A truncated record says how much it dropped rather than hiding it.
  */
-export function describeIterations(task: LoopTask): string {
+export function describeIterations(task: PromptLoopTask): string {
   if (task.iterations.length === 0) {
     return task.droppedIterations === undefined || task.droppedIterations === 0
       ? "No iteration yet: this loop has not fired."
@@ -188,33 +283,51 @@ export function describeIterations(task: LoopTask): string {
 }
 
 /**
- * The facts a caller can inspect without parsing the prose. The iteration
- * summary is always here; the iterations themselves only when asked for, because
- * a listing of every loop must not carry every tool call of every wake.
+ * The facts a caller can inspect without parsing the prose. The per-kind summary
+ * is always here; the iterations and fires themselves only when asked for,
+ * because a listing of every loop must not carry every tool call of every wake.
  */
 function loopDetails(
   view: LoopTaskView,
   options: { readonly iterations?: boolean } = {},
 ): Record<string, unknown> {
   const { task } = view;
-  return {
+  const shared = {
     id: task.id,
     name: task.name,
     kind: task.kind,
     status: task.status,
     schedule: task.schedule,
-    prompt: task.prompt,
     fires: task.fires,
     maxFires: task.maxFires,
     nextFireAt: task.nextFireAt,
     lastFireAt: task.lastFireAt,
+    missedFires: task.missedFires,
+    consecutiveFailures: task.consecutiveFailures,
     expiresAt: task.expiresAt,
     endedAt: task.endedAt,
     untilNextFireMs: view.untilNextFireMs,
     error: task.error,
-    iterationCount: task.iterations.length,
-    droppedIterations: task.droppedIterations,
-    ...(options.iterations === true ? { iterations: task.iterations } : {}),
+  };
+  if (task.kind === "prompt-loop") {
+    return {
+      ...shared,
+      prompt: task.prompt,
+      iterationCount: task.iterations.length,
+      droppedIterations: task.droppedIterations,
+      ...(options.iterations === true ? { iterations: task.iterations } : {}),
+    };
+  }
+  return {
+    ...shared,
+    command: task.command,
+    cwd: task.cwd,
+    wakeOnFailure: task.wakeOnFailure,
+    lastExitCode: task.lastExitCode,
+    lastOutputPath: task.lastOutputPath,
+    lastOutputBytes: task.lastOutputBytes,
+    fireCount: task.fireHistory.length,
+    ...(options.iterations === true ? { fireHistory: task.fireHistory } : {}),
   };
 }
 
@@ -228,6 +341,12 @@ function updateHeadline(id: string, result: Awaited<ReturnType<LoopTasks["update
       return `Loop ${id} was already paused.`;
     case "resumed":
       return `Resumed loop ${id} (${name}); its next fire is ${nextFireText(result.view)}.`;
+    case "rescheduled": {
+      const retuned = `Retuned loop ${id} (${name}) to ${result.view.task.schedule}`;
+      return result.view.task.status === "paused"
+        ? `${retuned}; it stays paused until resumed.`
+        : `${retuned}; its next fire is ${nextFireText(result.view)}.`;
+    }
     case "already-running":
       return `Loop ${id} is already running.`;
     case "completed":
@@ -249,14 +368,18 @@ export function loopTaskTools(loops: LoopTasks): ToolDefinition[] {
     name: "loop_create",
     label: "Create a loop",
     description:
-      "Schedule a prompt to be sent into this session, starting a new agent turn each time the loop fires. The schedule is an interval (30s, 10m, 2h) or a five-field cron expression in local time (0 9 * * 1-5). This does not run a command; the prompt is the work. A fire is delivered when the agent is idle, so a busy agent delays the wake instead of losing it. Use loop_list to watch it and loop_delete to stop it.",
+      "Schedule something to happen on a recurrence. With `prompt`, each fire sends that message into this session and starts a new agent turn; the wake is delivered when the agent is idle, so a busy agent delays it instead of losing it. With `command`, each fire runs that shell command as an ordinary background process task (like bg_run) and nothing is sent into the session unless the fire fails and wakeOnFailure is on; a fire that comes due while the previous one still runs is skipped and recorded as skipped. Give exactly one of prompt and command. The schedule is an interval (30s, 10m, 2h) or a five-field cron expression in local time (0 9 * * 1-5). Use loop_list to watch it and loop_delete to stop it.",
     parameters: CreateParameters,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       try {
         const view = await loops.create({
           ...scopeOf(ctx),
           schedule: params.schedule,
-          prompt: params.prompt,
+          ...(params.prompt === undefined ? {} : { prompt: params.prompt }),
+          ...(params.command === undefined ? {} : { command: params.command }),
+          ...(params.cwd === undefined ? {} : { workingDirectory: params.cwd }),
+          ...(params.env === undefined ? {} : { env: params.env }),
+          ...(params.wakeOnFailure === undefined ? {} : { wakeOnFailure: params.wakeOnFailure }),
           ...(params.name === undefined ? {} : { name: params.name }),
           ...(params.maxFires === undefined ? {} : { maxFires: params.maxFires }),
           ...(params.expiresIn === undefined ? {} : { expiresIn: params.expiresIn }),
@@ -287,7 +410,7 @@ export function loopTaskTools(loops: LoopTasks): ToolDefinition[] {
     name: "loop_list",
     label: "List loops",
     description:
-      "Show loops of this session with their raw schedule, next fire time, fire count and status. A fire is counted at its scheduled time but delivered only when the agent is idle, so a fire count can lead the wakes actually sent. Pass an id to also get that loop's iterations, newest first, each with the tool calls the turn made. Omit the id to list them all.",
+      "Show loops of this session with their raw schedule, next fire time, fire count and status. A fire is counted at its scheduled time; for a prompt loop it is delivered only when the agent is idle, and for a command loop it is started immediately or skipped when the previous fire still runs. Pass an id to also get that loop's history, newest first: a prompt loop's iterations with the tool calls each turn made, or a command loop's fires with their time, outcome, exit code, duration and output size. Omit the id to list them all.",
     parameters: ListParameters,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const scope = scopeOf(ctx);
@@ -302,7 +425,13 @@ export function loopTaskTools(loops: LoopTasks): ToolDefinition[] {
           content: [
             {
               type: "text",
-              text: [describeLoop(view), "", describeIterations(view.task)].join("\n"),
+              text: [
+                describeLoop(view),
+                "",
+                view.task.kind === "prompt-loop"
+                  ? describeIterations(view.task)
+                  : describeFires(view.task),
+              ].join("\n"),
             },
           ],
           details: loopDetails(view, { iterations: true }),
@@ -322,9 +451,9 @@ export function loopTaskTools(loops: LoopTasks): ToolDefinition[] {
 
   const update: ToolDefinition<typeof UpdateParameters> = {
     name: "loop_update",
-    label: "Pause, resume or complete a loop",
+    label: "Pause, resume, complete or retune a loop",
     description:
-      "Change a loop without deleting its history: pause stops fires, resume re-arms from now, complete ends it. Pausing or completing also cancels a wake that is still waiting for the agent to be idle, so the loop will not wake the model after you stop it.",
+      "Change a loop without deleting its history: pause stops fires, resume re-arms from now, complete ends it, and schedule retunes when it fires. A retune keeps the id, the fire count and every recorded iteration; a running loop's next fire is computed from this update rather than from the slot the old schedule had already picked, a paused loop keeps the new schedule and arms onto it when resumed, and an invalid expression is refused with the old schedule still in force. Pausing or completing also cancels a wake that is still waiting for the agent to be idle, so the loop will not wake the model after you stop it.",
     parameters: UpdateParameters,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const id = params.id.trim();
@@ -332,19 +461,32 @@ export function loopTaskTools(loops: LoopTasks): ToolDefinition[] {
         return text("Pass the id of the loop to update; loop_list lists the ids of this session.");
       }
 
-      const result = await loops.update(scopeOf(ctx), id, params.action as LoopUpdateAction);
-      if (result === undefined) {
-        return text(`No loop with id ${id} in this session.`);
-      }
-      return {
-        content: [
-          {
-            type: "text",
-            text: [updateHeadline(id, result), "", describeLoop(result.view)].join("\n"),
-          },
-        ],
-        details: { ...loopDetails(result.view), outcome: result.outcome },
+      // A retune and a transition may arrive together; the store applies the
+      // schedule first, so `resume` with a new schedule lands on the new interval.
+      const input = {
+        ...scopeOf(ctx),
+        id,
+        ...(params.action === undefined ? {} : { action: params.action }),
+        ...(params.schedule === undefined ? {} : { schedule: params.schedule }),
       };
+      try {
+        const result = await loops.update(input);
+        if (result === undefined) {
+          return text(`No loop with id ${id} in this session.`);
+        }
+        return {
+          content: [
+            {
+              type: "text",
+              text: [updateHeadline(id, result), "", describeLoop(result.view)].join("\n"),
+            },
+          ],
+          details: { ...loopDetails(result.view), outcome: result.outcome },
+        };
+      } catch (error) {
+        if (error instanceof LoopInputError) return inputError(error);
+        throw error;
+      }
     },
   };
 

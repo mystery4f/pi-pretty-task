@@ -1,6 +1,6 @@
 # pi-pretty-task
 
-一个 pi 扩展包：用一个面板管理同一套 Task，按 kind 分四类——跑命令的后台进程（`process`）、定时唤醒 LLM 的循环（`llm-loop`）、定时跑命令的循环（`cmd-loop`），以及把多个进程排成队列的链（`chain`）。
+一个 pi 扩展包：用一个面板管理同一套 Task，按 kind 分四类——跑命令的后台进程（`process`）、定时唤醒 LLM 的循环（`prompt-loop`）、定时跑命令的循环（`cmd-loop`），以及把多个进程排成队列的链（`chain`）。
 
 ## Language
 
@@ -13,7 +13,7 @@ _Avoid_: job, bg item, background job, task list entry
 _Avoid_: bg task, background job, subprocess, shell task
 
 **Llm loop task**:
-`kind: "llm-loop"` 的 Task。不跑命令；到点把一段预置 prompt 送进会话，唤醒 LLM 跑一轮。有间隔或 cron 表达式、prompt、最大触发次数、下次触发时间。
+`kind: "prompt-loop"` 的 Task。不跑命令；到点把一段预置 prompt 送进会话，唤醒 LLM 跑一轮。有间隔或 cron 表达式、prompt、最大触发次数、下次触发时间。
 _Avoid_: cron, timer, scheduler, job, watcher, loop（单独用时含义太宽）
 
 **Cmd loop task**:
@@ -53,5 +53,5 @@ _Avoid_: dock, dashboard, overlay, task manager
 _Avoid_: status line, header, footer, ticker
 
 **Search mode**:
-面板里按 `/` 进入的过滤状态：输入即按子串匹配 Name、id、命令或 prompt、状态词与 kind 词；`alt+q` 第一次退出搜索并保留过滤条件，再按一次关闭面板。
+面板里按 `/` 进入的过滤状态：输入即按「子序列」匹配 Name、id、命令或 prompt、状态词与 kind 词（`dbg` 能命中 `deploy-bg`）。命中的字符在行内高亮；排序先看命中质量——连续命中和词首优先、字段越短越靠前——再按 `updatedAt` 降序，空查询只按时间不重排。命中的词不在行上（`command`、`prompt`，或链自己的 name 已被步骤取代）时，行尾注明 `via command` / `via prompt` / `via name`。`alt+q` 第一次退出搜索并保留过滤条件，再按一次关闭面板。
 _Avoid_: filter box, query mode, find

@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "last_updated": "2026-11-14T05:03:57.152Z",
+  "last_updated": "2026-11-14T09:44:52.902Z",
   "pages": {
     "sources/obs-2026-11-14-kill-path-skipped-persist-and-notice-in-pi-pretty-task": {
       "type": "source",
@@ -16,6 +16,23 @@
       "relevance": "high",
       "observed_at": "2026-11-14T05:03:57.145Z",
       "source_context": "pi-pretty-task v0.1 whole-branch review and fixes",
+      "created": "2026-11-14",
+      "updated": "2026-11-14"
+    },
+    "sources/obs-2026-11-14-loop-wake-backlog-storms-after-a-long-turn": {
+      "type": "source",
+      "title": "Observation: Loop wake backlog storms after a long turn",
+      "tags": [
+        "pi-pretty-task",
+        "loop",
+        "wake-queue",
+        "scheduling"
+      ],
+      "status": "observation",
+      "slug": "obs-2026-11-14-loop-wake-backlog-storms-after-a-long-turn",
+      "relevance": "medium",
+      "observed_at": "2026-11-14T09:44:52.888Z",
+      "source_context": "Supervising pi-pretty-task v0.2 implementers with the plugin's own loop feature",
       "created": "2026-11-14",
       "updated": "2026-11-14"
     },
