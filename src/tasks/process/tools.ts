@@ -680,7 +680,7 @@ export function processTaskTools(
   };
 
   const wait: ToolDefinition<typeof WaitParameters> = {
-    name: "bg_wait",
+    name: "pretty_task_bg_wait",
     label: "Wait for a background task",
     description:
       "Wait for a background task to end, then return its final view. A timeout is not an error: it returns the running view with waited: false.",

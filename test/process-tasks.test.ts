@@ -516,7 +516,7 @@ describe("bg_run lifetime", () => {
   });
 });
 
-describe("bg_wait", () => {
+describe("pretty_task_bg_wait", () => {
   it("returns the final view as soon as the task ends", async () => {
     const dir = await makeTempDir();
     cleanup.push(dir.dispose);
@@ -531,7 +531,7 @@ describe("bg_wait", () => {
     const task = await startRunning(harness, command, "short wait job");
 
     const started = Date.now();
-    const result = await harness.call("bg_wait", { id: task.id, timeoutSeconds: 15 });
+    const result = await harness.call("pretty_task_bg_wait", { id: task.id, timeoutSeconds: 15 });
     const elapsed = Date.now() - started;
     const details = result.details as TaskDetails & { waited: boolean };
 
@@ -555,8 +555,8 @@ describe("bg_wait", () => {
     const task = await startRunning(harness, command, "shared wait job");
 
     const results = await Promise.all([
-      harness.call("bg_wait", { id: task.id, timeoutSeconds: 15 }),
-      harness.call("bg_wait", { id: task.id, timeoutSeconds: 15 }),
+      harness.call("pretty_task_bg_wait", { id: task.id, timeoutSeconds: 15 }),
+      harness.call("pretty_task_bg_wait", { id: task.id, timeoutSeconds: 15 }),
     ]);
 
     for (const result of results) {
@@ -575,7 +575,7 @@ describe("bg_wait", () => {
     const task = await startRunning(harness, command, "long wait job");
 
     const started = Date.now();
-    const result = await harness.call("bg_wait", { id: task.id, timeoutSeconds: 0.3 });
+    const result = await harness.call("pretty_task_bg_wait", { id: task.id, timeoutSeconds: 0.3 });
     const elapsed = Date.now() - started;
     const details = result.details as TaskDetails & { waited: boolean };
 
@@ -600,7 +600,7 @@ describe("bg_wait", () => {
     await waitForEnd(harness, task.id);
 
     const started = Date.now();
-    const result = await harness.call("bg_wait", { id: task.id, timeoutSeconds: 600 });
+    const result = await harness.call("pretty_task_bg_wait", { id: task.id, timeoutSeconds: 600 });
     const elapsed = Date.now() - started;
     const details = result.details as TaskDetails & { waited: boolean };
 
@@ -616,12 +616,12 @@ describe("bg_wait", () => {
     const harness = createHarness({ cwd: dir.path, sessionId: "session-wait-bad" });
 
     const tooLong = resultText(
-      await harness.call("bg_wait", { id: "b-whatever", timeoutSeconds: 601 }),
+      await harness.call("pretty_task_bg_wait", { id: "b-whatever", timeoutSeconds: 601 }),
     );
     expect(tooLong).toContain("no larger than 600");
     expect(tooLong).toContain("Nothing was waited for");
 
-    const unknown = resultText(await harness.call("bg_wait", { id: "b-unknown" }));
+    const unknown = resultText(await harness.call("pretty_task_bg_wait", { id: "b-unknown" }));
     expect(unknown).toContain("No background task with id b-unknown in this session.");
   });
 });
