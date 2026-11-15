@@ -50,7 +50,7 @@ Source references from the two upstream plugins are cloned under `.tmp/` (git-ig
 ## Verification
 
 - `npm run check` — typecheck, no emit (`tsconfig.dev.json`, covers `src/` and `test/`).
-- `npm run build` — emit to `dist/` (`tsconfig.json`). A session that installed this package from disk or from git loads `dist/`, so a `src/` change is invisible until this runs (git installs run it through `prepare`).
+- `npm run build` — emit to `dist/` (`tsconfig.json`). The installed package points pi at `./src/index.ts` (pi transpiles it), so this is a check-and-release step, not a deploy step; `dist/` stays out of git.
 - `npm run lint` — Biome check; `npm run lint:fix` applies safe fixes.
 - `npm run test` — vitest over both projects (`unit`, `integration`); `npm run test:unit` runs the pure half in seconds.
 - `npm run verify` — check, lint and test in one run; CI (`.github/workflows/verify.yml`) runs the same three. Run the gates one by one and read each exit code: a chained `a && b` has already hidden a broken typecheck.

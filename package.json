@@ -9,7 +9,7 @@
   },
   "pi": {
     "extensions": [
-      "./dist/index.js"
+      "./src/index.ts"
     ],
     "skills": [
       "./skills"
@@ -35,8 +35,7 @@
     "test:unit": "vitest run --project unit --passWithNoTests",
     "test:integration": "vitest run --project integration --passWithNoTests",
     "test:watch": "vitest",
-    "verify": "npm run check && npm run lint && npm test",
-    "prepare": "npm run build"
+    "verify": "npm run check && npm run lint && npm test"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "^1.5.0",
