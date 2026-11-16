@@ -2,7 +2,25 @@
 
 Background processes and scheduled agent wake-ups for [pi](https://github.com/earendil-works/pi), behind one panel.
 
-> **Status: 1.0.1 on npm.** Install with `pi install npm:pi-pretty-task`; see [Install](#install) and [Releasing](#releasing).
+[![verify](https://github.com/mystery4f/pi-pretty-task/actions/workflows/verify.yml/badge.svg)](https://github.com/mystery4f/pi-pretty-task/actions/workflows/verify.yml)
+[![npm](https://img.shields.io/npm/v/pi-pretty-task.svg)](https://www.npmjs.com/package/pi-pretty-task)
+[![license](https://img.shields.io/npm/l/pi-pretty-task.svg)](LICENSE)
+![node](https://img.shields.io/node/v/pi-pretty-task.svg)
+
+> **Status: published on npm as `pi-pretty-task`.** Install with `pi install npm:pi-pretty-task`; see [Install](#install) and [Releasing](#releasing).
+
+A build that takes six minutes, a watcher that runs all afternoon, a loop that pings the model every ten minutes — they all end up in the same list, readable, searchable and stoppable, with the output still on disk when the turn is over.
+
+```text
+── Background Tasks ─────────────────────────────────────────────
+ ● Running 2  ● Succeeded 11  ● Failed 1  ● Timeout 0  ● Killed 3
+╭──────────────────────────────────────────────────────────────╮
+│ › ● api-watch#47  lc-7k2m9 · cmd-loop  running  32.0s 492 B │
+│   ● build         bg-4xq81 · process    running  1m 05s 12KB │
+│   ● nightly       lp-9f3kd · prompt-loop paused  5 fires    │
+╰──────────────────────────────────────────────────────────────╯
+ ↑/↓ select · Enter logs · k stop · f filter · o others · 1/2/3 tabs · / search · R rerun · a stop all · alt+q close
+```
 
 ## What it does
 
@@ -17,6 +35,24 @@ The panel opens with `/tasks` or `shift+down` and has three tabs — processes, 
 List keys: `↑/↓` select, `Enter` open, `←` back, `k` stop, `a` stop all, `f` cycle filter (`all`/`running`/`failed`/`done`), `o` toggle other sessions' records, `R` rerun, `c` show the output path, `/` search, `x` close from the list, `alt+q` close from anywhere (the first press leaves search mode). An id says its kind on sight: `bg-` runs a command, `lp-` wakes the assistant, `ch-` is a chain.
 
 Deliberately not here: subagent/delegate/fusion tools, monitors-with-shell, workflow/orchestration families, provider-attested runs. See [docs/scope-v1.md](docs/scope-v1.md).
+
+## Use it
+
+```text
+pretty_task_bg_run    command: "npm run build", name: "build"
+pretty_task_bg_status id: "bg-4xq81"
+pretty_task_bg_logs   id: "bg-4xq81", follow: true
+pretty_task_bg_grep   id: "bg-4xq81", pattern: "error"
+pretty_task_bg_wait   id: "bg-4xq81", timeoutSeconds: 120
+pretty_task_bg_kill   id: "bg-4xq81"
+
+pretty_task_loop_create schedule: "10m", prompt: "Check the deploy and report drift."
+pretty_task_loop_create schedule: "0 9 * * 1-5", command: "npm run nightly"
+pretty_task_loop_update id: "lp-9f3kd", action: "pause"
+pretty_task_loop_list   id: "lp-9f3kd"
+```
+
+A fire that comes due while the previous one still runs is skipped and counted, never queued. Stopping means the whole tree: SIGTERM, a grace period, SIGKILL, then a poll until the process group is really gone — grandchildren included; on Windows, `taskkill /PID <n> /T`.
 
 ## Tools
 
@@ -59,7 +95,7 @@ Requires [pi](https://github.com/earendil-works/pi) and Node >= 22.19.
 pi install npm:pi-pretty-task
 ```
 
-A local checkout works too: `pi install ./path/to/pi-pretty-task`. The published package carries `src/`, `skills/` and `dist/`, because `pi.extensions` points at `./src/index.ts` and pi transpiles it.
+A local checkout works too: `pi install ./path/to/pi-pretty-task`, or `pi install git:github.com/mystery4f/pi-pretty-task` for the latest `main`. The published package carries `src/`, `skills/` and `dist/`, because `pi.extensions` points at `./src/index.ts` and pi transpiles it.
 
 ## Development
 
