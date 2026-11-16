@@ -1,7 +1,15 @@
 {
   "name": "pi-pretty-task",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Background processes and scheduled agent wake-ups for pi, behind one panel.",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "background-tasks",
+    "process-manager",
+    "scheduler",
+    "cron"
+  ],
   "type": "module",
   "license": "MIT",
   "repository": {
