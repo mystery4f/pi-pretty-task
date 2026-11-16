@@ -23,13 +23,16 @@ import { handlePanelInput } from "./input.js";
 import { renderList, stepRecord } from "./list.js";
 import {
   DEFAULT_PANEL_FILTER,
+  DETAIL_OUTPUT_LINES,
   DETAIL_TAIL_LINES,
   LIST_VISIBLE_ROWS,
+  PANEL_FILTERS,
   type PanelFilter,
   type PanelMode,
   type PanelSource,
   type PanelTab,
   type PanelTaskView,
+  QUERY_MAX_LENGTH,
   type TasksPanelOptions,
 } from "./model.js";
 import { bestFieldMatch, type RowMatch } from "./query.js";
@@ -313,6 +316,230 @@ export class TasksPanel implements Component {
 
   dispose(): void {
     if (this.timer !== undefined) clearInterval(this.timer);
+  }
+  // ---- intents -------------------------------------------------------------
+  // The keyboard says what the reader asked for, never which field moves. Every
+  // change the panel allows is a method here, so `input.ts` writes no field and a
+  // state no key can reach cannot be built by one.
+
+  /** Say something in the notice line: the answer to a key that could not act. */
+  notify(text: string | undefined): void {
+    this.notice = text;
+    this.paint();
+  }
+
+  /** `/` — the next keystrokes are a query, not a command. */
+  beginSearch(): void {
+    this.searching = true;
+    this.paint();
+  }
+
+  /** `alt+q` in search — the query stays on screen, the keys go back to commands. */
+  endSearch(): void {
+    this.searching = false;
+    this.paint();
+  }
+
+  /** Re-filter on a new query and paint; every record is already in hand. */
+  enterQuery(query: string): void {
+    this.query = query.slice(0, QUERY_MAX_LENGTH);
+    this.applyFilters();
+    this.paint();
+  }
+
+  /** Move the list cursor by `delta`, keeping the selected row on screen. */
+  moveCursor(delta: number): void {
+    if (this.rows.length === 0) return;
+    const current = this.rows.findIndex((row) => row.task.id === this.selectedId);
+    const base = current === -1 ? 0 : current;
+    const next = Math.min(this.rows.length - 1, Math.max(0, base + delta));
+    this.selectRow(this.rows[next]?.task.id);
+    this.scrollListTo(next);
+    this.paint();
+  }
+
+  /** Point the list at one row, without moving the window. */
+  selectRow(id: string | undefined): void {
+    this.selectedId = id;
+  }
+
+  /** Keep row `index` inside the list window. */
+  private scrollListTo(index: number): void {
+    if (index < this.listTop) this.listTop = index;
+    if (index >= this.listTop + LIST_VISIBLE_ROWS) this.listTop = index - LIST_VISIBLE_ROWS + 1;
+  }
+
+  /** Enter on the list: open the selected record, or say there is nothing to open. */
+  openPage(): void {
+    if (this.rows.length === 0) {
+      this.notify(
+        "No tasks to open yet — run a command with pretty_task_bg_run and it appears here.",
+      );
+      return;
+    }
+    this.detailId = this.selectedId;
+    this.mode = "detail";
+    this.following = true;
+    this.scrollBack = 0;
+    this.callTop = 0;
+    const row = this.detailRow();
+    // A loop opens on its newest history row; a process opens on its output tail.
+    this.iterationFire =
+      row?.task.kind === "prompt-loop"
+        ? row.task.iterations.at(-1)?.fire
+        : row?.task.kind === "cmd-loop"
+          ? row.task.fireHistory.at(-1)?.fire
+          : undefined;
+    this.iterationTop = 0;
+    this.enqueue(async () => {
+      await this.readTail();
+      this.paint();
+    });
+  }
+
+  /** Enter on a fire: the process record it left behind, at its own tail. */
+  openProcessPage(taskId: string, fire: number): void {
+    this.iterationFire = fire;
+    this.detailId = taskId;
+    this.mode = "detail";
+    this.following = true;
+    this.scrollBack = 0;
+    this.enqueue(async () => {
+      await this.readTail();
+      this.paint();
+    });
+  }
+
+  /** `←` from a fire: the record it was started by, without leaving the detail. */
+  showDetailOf(id: string | undefined): void {
+    this.detailId = id;
+    this.paint();
+  }
+
+  /** Enter on an iteration: the calls of one turn. */
+  openIterationPage(fire: number): void {
+    this.iterationFire = fire;
+    this.callTop = 0;
+    this.mode = "iteration";
+    this.paint();
+  }
+
+  /** `←` out of a detail: back to the list the reader came from. */
+  backToList(): void {
+    this.mode = "list";
+    this.paint();
+  }
+
+  /** `←` out of an iteration: back to the detail of the loop it belongs to. */
+  backToLoopPage(): void {
+    this.mode = "detail";
+    this.callTop = 0;
+    this.paint();
+  }
+
+  /** `←` out of a loop detail: the fire cursor has no meaning in the list. */
+  clearFireCursor(): void {
+    this.iterationTop = 0;
+  }
+
+  /** `←` out of an iteration detail: the next one opens at its own top. */
+  clearCallCursor(): void {
+    this.callTop = 0;
+  }
+
+  /** Walk the newest-first history, keeping the picked fire and its window. */
+  showFire(fire: number, index: number): void {
+    this.iterationFire = fire;
+    if (index < this.iterationTop) this.iterationTop = index;
+    if (index >= this.iterationTop + LIST_VISIBLE_ROWS) {
+      this.iterationTop = index - LIST_VISIBLE_ROWS + 1;
+    }
+    this.paint();
+  }
+
+  /** Two new lines come from the reader scrolling back through the output. */
+  scrollTail(delta: number): void {
+    const oldest = Math.max(0, this.detailLines.length - DETAIL_OUTPUT_LINES);
+    const next = Math.min(oldest, Math.max(0, this.scrollBack + delta));
+    if (next === this.scrollBack) return;
+    this.scrollBack = next;
+    if (next > 0) {
+      // Scrolled up: the buffer is frozen so the reader's place stays put.
+      this.following = false;
+      this.paint();
+      return;
+    }
+    // Back at the newest line: the tail moves again, freshly read.
+    this.followTail();
+  }
+
+  /** `r`, or scrolling back to the newest line: read the tail again and follow it. */
+  followTail(): void {
+    this.following = true;
+    this.scrollBack = 0;
+    this.enqueue(async () => {
+      await this.readTail();
+      this.paint();
+    });
+  }
+
+  /** Move the call cursor inside one iteration, never past its oldest call. */
+  scrollCalls(delta: number, calls: number): void {
+    const oldest = Math.max(0, calls - DETAIL_OUTPUT_LINES);
+    const next = Math.min(oldest, Math.max(0, this.callTop + delta));
+    if (next === this.callTop) return;
+    this.callTop = next;
+    this.paint();
+  }
+
+  /** A page key: take the whole keyboard to that page and drop the detail behind it. */
+  selectPage(next: PanelTab): void {
+    if (next === this.tab && this.mode === "list" && !this.searching) return;
+    this.selectedByTab[this.tab] = this.selectedId;
+    this.tab = next;
+    this.remember(next);
+    this.mode = "list";
+    this.searching = false;
+    this.detailId = undefined;
+    this.detailLines = [];
+    this.detailError = undefined;
+    this.following = true;
+    this.scrollBack = 0;
+    this.selectedId = this.selectedByTab[next];
+    this.listTop = 0;
+    this.notice = undefined;
+    this.applyFilters();
+    this.paint();
+  }
+
+  /** `f` walks all → running → failed → done inside the open page, and round again. */
+  cycleFilter(): void {
+    const index = PANEL_FILTERS.indexOf(this.filter);
+    this.filter = PANEL_FILTERS[(index + 1) % PANEL_FILTERS.length] ?? "all";
+    // Every record is already in hand, so the filter narrows the view without a read.
+    this.applyFilters();
+    this.notify(this.filter === "all" ? "showing every status" : `showing ${this.filter}`);
+  }
+
+  /** `o`: add or drop the rows another session started, read-only (ticket #27). */
+  toggleOthers(): void {
+    this.showOthers = !this.showOthers;
+    if (!this.showOthers) {
+      this.otherRows = [];
+      this.notify("showing this session only");
+    } else if (this.source.others === undefined) {
+      this.notify("No other sessions can be seen from here.");
+    } else {
+      this.notify("showing other sessions read-only");
+    }
+    this.applyFilters();
+    this.paint();
+    if (this.showOthers) {
+      this.enqueue(async () => {
+        await this.refresh();
+        this.paint();
+      });
+    }
   }
 
   // ---- data ----------------------------------------------------------------
