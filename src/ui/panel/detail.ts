@@ -19,7 +19,6 @@ import {
   fireLine,
   firesHeading,
   firesText,
-  fittedFooter,
   formatSize,
   ITERATION_COLOUR,
   isCommandCall,
@@ -27,12 +26,11 @@ import {
   iterationsText,
   missedText,
   nextFireText,
-  PROCESS_KEYS,
-  pad,
   STEP_MARK,
   singleLine,
   stepColour,
 } from "./format.js";
+import { fittedFooter, PROCESS_KEYS, pad } from "./keys.js";
 import { chainPlace, foreign, renderList, stepRecord } from "./list.js";
 import {
   DETAIL_OUTPUT_LINES,

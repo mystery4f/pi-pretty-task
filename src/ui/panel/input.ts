@@ -12,7 +12,8 @@
 
 import { matchesKey } from "@earendil-works/pi-tui";
 import type { CmdLoopTask, PromptLoopTask } from "../../tasks/base/task.js";
-import { messageOf, pageKey, pastedQuery, typedQuery } from "./format.js";
+import { messageOf } from "./format.js";
+import { pageKey } from "./keys.js";
 import { foreign, selectedIndex } from "./list.js";
 import {
   DETAIL_OUTPUT_LINES,
@@ -23,6 +24,7 @@ import {
   QUERY_MAX_LENGTH,
   READ_ONLY,
 } from "./model.js";
+import { pastedQuery, typedQuery } from "./query.js";
 import type { TasksPanel } from "./tasks-panel.js";
 
 export function handlePanelInput(panel: TasksPanel, data: string): void {

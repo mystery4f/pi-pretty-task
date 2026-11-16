@@ -18,7 +18,7 @@ import { formatBytes } from "../../tasks/base/format.js";
 import type { CmdLoopTask, FireRecord, PromptLoopTask, Task } from "../../tasks/base/task.js";
 import type { Iteration } from "../../tasks/loop/iteration.js";
 import { renderDetail, renderIterationDetail } from "./detail.js";
-import { bestFieldMatch, inTab, messageOf, passesFilter, type RowMatch } from "./format.js";
+import { messageOf } from "./format.js";
 import { handlePanelInput } from "./input.js";
 import { renderList, stepRecord } from "./list.js";
 import {
@@ -32,9 +32,14 @@ import {
   type PanelTaskView,
   type TasksPanelOptions,
 } from "./model.js";
+import { bestFieldMatch, type RowMatch } from "./query.js";
+import { inTab, passesFilter } from "./row-filter.js";
 
 export * from "./format.js";
+export * from "./keys.js";
 export * from "./model.js";
+export * from "./query.js";
+export * from "./row-filter.js";
 
 /** Refresh period; the tail of a running task should look alive. */
 const REFRESH_MS = 1000;

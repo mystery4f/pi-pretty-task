@@ -15,16 +15,12 @@ import {
   exitText,
   FIRE_COLOUR,
   FIRE_MARK,
-  fittedFooter,
-  inTab,
   kindWord,
-  LIST_KEYS,
-  type MatchField,
   nameColour,
-  pad,
   rightText,
   stepColour,
 } from "./format.js";
+import { fittedFooter, LIST_KEYS, pad } from "./keys.js";
 import {
   ID_COLUMN_WIDTH,
   LIST_VISIBLE_ROWS,
@@ -35,6 +31,8 @@ import {
   TAB_EMPTY,
   TAB_TITLE,
 } from "./model.js";
+import type { MatchField } from "./query.js";
+import { inTab } from "./row-filter.js";
 import type { TasksPanel } from "./tasks-panel.js";
 
 export function renderList(panel: TasksPanel, width: number): string[] {
