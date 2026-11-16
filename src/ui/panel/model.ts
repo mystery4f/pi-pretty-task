@@ -1,13 +1,15 @@
 /**
  * The panel's vocabulary: the shape it reads tasks through, the pages and filters
- * a reader walks, and the words a page says when it is empty. Types and constants
- * only, so every panel module can share them without importing another renderer.
+ * a reader walks, the one projection that turns a record into a row, and the words
+ * a page says when it is empty. No renderer lives here, so every panel module can
+ * share these without importing another one.
  *
  * @author mystery4f <40482524+mystery4f@users.noreply.github.com>
  */
 
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { TUI } from "@earendil-works/pi-tui";
+import { elapsedOf } from "../../tasks/base/format.js";
 import type { OutputTail } from "../../tasks/base/output.js";
 import type { Task } from "../../tasks/base/task.js";
 
@@ -47,6 +49,30 @@ export interface PanelTaskView {
    * row is shown only once `o` asks for the other sessions, and only to be read.
    */
   readonly sessionId?: string;
+}
+
+/** What a producer adds to a record beyond what every row shows. */
+export interface RowExtras {
+  readonly outputBytes?: number;
+  readonly untilNextFireMs?: number;
+  readonly sessionId?: string;
+}
+
+/**
+ * One record as the panel reads it: the record plus the numbers the list shows.
+ *
+ * Every producer of a row — a process view, a loop's countdown, a chain's, a
+ * rerun's — hands its record through here, so the shape and the elapsed
+ * arithmetic are written once instead of once per kind.
+ */
+export function rowOf(task: Task, now: number, extras: RowExtras = {}): PanelTaskView {
+  return {
+    task,
+    elapsedMs: elapsedOf(task, now),
+    outputBytes: extras.outputBytes ?? 0,
+    ...(extras.untilNextFireMs === undefined ? {} : { untilNextFireMs: extras.untilNextFireMs }),
+    ...(extras.sessionId === undefined ? {} : { sessionId: extras.sessionId }),
+  };
 }
 
 /** What a stop attempt produced, or `undefined` when there is no such task. */

@@ -5,6 +5,15 @@
  * @author mystery4f <40482524+mystery4f@users.noreply.github.com>
  */
 
+/**
+ * How long a record has been alive: to its end when it has one, to now while it
+ * runs. One formula, because a row, a tool line and a notification all quote the
+ * same task and must not disagree about it.
+ */
+export function elapsedOf(task: { createdAt: number; endedAt?: number }, now: number): number {
+  return Math.max(0, (task.endedAt ?? now) - task.createdAt);
+}
+
 /** `0.4s`, `12.3s`, `2m 05s`, `1h 03m`. */
 export function formatDuration(milliseconds: number): string {
   const total = Math.max(0, Math.round(milliseconds));

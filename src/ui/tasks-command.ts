@@ -23,7 +23,8 @@ import {
 import type { Task } from "../tasks/base/task.js";
 import type { ChainTasks, ChainTaskView } from "../tasks/chain/chain-tasks.js";
 import type { LoopTasks, LoopTaskView } from "../tasks/loop/loop-tasks.js";
-import type { ProcessTasks } from "../tasks/process/process-tasks.js";
+import type { ProcessTasks, ProcessTaskView } from "../tasks/process/process-tasks.js";
+import { rowOf } from "./panel/model.js";
 import {
   DETAIL_TAIL_LINES,
   type PanelSource,
@@ -76,17 +77,14 @@ export function panelSourceFor(
   scope: TaskScope,
   now: () => number = Date.now,
 ): PanelSource {
-  const loopRow = (view: LoopTaskView): PanelTaskView => ({
-    task: view.task,
-    elapsedMs: Math.max(0, (view.task.endedAt ?? now()) - view.task.createdAt),
-    outputBytes: 0,
-    ...(view.untilNextFireMs === undefined ? {} : { untilNextFireMs: view.untilNextFireMs }),
-  });
-  const chainRow = (view: ChainTaskView): PanelTaskView => ({
-    task: view.task,
-    elapsedMs: Math.max(0, (view.task.endedAt ?? now()) - view.task.createdAt),
-    outputBytes: 0,
-  });
+  // One projection builds every row; these three only say which field of their own
+  // a view adds to it, so a new row field cannot reach one kind and miss another.
+  const processRow = (view: ProcessTaskView, sessionId?: string): PanelTaskView =>
+    rowOf(view.task, now(), { outputBytes: view.outputBytes, sessionId });
+  const loopRow = (view: LoopTaskView, sessionId?: string): PanelTaskView =>
+    rowOf(view.task, now(), { untilNextFireMs: view.untilNextFireMs, sessionId });
+  const chainRow = (view: ChainTaskView, sessionId?: string): PanelTaskView =>
+    rowOf(view.task, now(), { sessionId });
 
   return {
     sessionId: scope.sessionId,
@@ -98,7 +96,11 @@ export function panelSourceFor(
         loops.list(scope),
         chains.list(scope),
       ]);
-      return [...records, ...scheduled.map(loopRow), ...queues.map(chainRow)];
+      return [
+        ...records.map((view) => processRow(view)),
+        ...scheduled.map((view) => loopRow(view)),
+        ...queues.map((view) => chainRow(view)),
+      ];
     },
     async others() {
       // Other sessions lose nothing by being seen: each keeps its own store under the
@@ -119,8 +121,13 @@ export function panelSourceFor(
             loops.list(other),
             chains.list(other),
           ]);
-          const theirs = [...records, ...scheduled.map(loopRow), ...queues.map(chainRow)];
-          rows.push(...theirs.map((row) => ({ ...row, sessionId: entry.name })));
+          // The session is part of the row from the start, never a tag spread on
+          // afterwards: a borrowed record is read-only, and its row says whose it is.
+          rows.push(
+            ...records.map((view) => processRow(view, entry.name)),
+            ...scheduled.map((view) => loopRow(view, entry.name)),
+            ...queues.map((view) => chainRow(view, entry.name)),
+          );
         } catch {
           // One unreadable session is not a reason to hide the rest.
         }
@@ -165,11 +172,7 @@ export function panelSourceFor(
       const again = await processes.rerun(scope, id);
       return again === undefined
         ? undefined
-        : {
-            task: again.task,
-            elapsedMs: Math.max(0, (again.task.endedAt ?? now()) - again.task.createdAt),
-            outputBytes: again.outputBytes,
-          };
+        : rowOf(again.task, now(), { outputBytes: again.outputBytes });
     },
   };
 }

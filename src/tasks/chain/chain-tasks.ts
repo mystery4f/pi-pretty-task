@@ -11,6 +11,7 @@
  * @author mystery4f <40482524+mystery4f@users.noreply.github.com>
  */
 
+import { elapsedOf } from "../base/format.js";
 import type { TaskScope } from "../base/runtime-state.js";
 import type { ChainTask, ProcessTask, Task } from "../base/task.js";
 import type { OwnedTaskSession, TaskSessions } from "../base/task-sessions.js";
@@ -377,7 +378,6 @@ export class ChainTasks {
   }
 
   private view(chain: ChainTask): ChainTaskView {
-    const endedAt = chain.endedAt ?? this.now();
-    return { task: chain, elapsedMs: Math.max(0, endedAt - chain.createdAt) };
+    return { task: chain, elapsedMs: elapsedOf(chain, this.now()) };
   }
 }

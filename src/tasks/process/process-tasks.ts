@@ -15,6 +15,7 @@
 import { stat } from "node:fs/promises";
 import { resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
+import { elapsedOf } from "../base/format.js";
 import { type OutputTail, readOutputFrom, readOutputTail } from "../base/output.js";
 import { processOutputPath, sessionTaskDirectory, type TaskScope } from "../base/runtime-state.js";
 import {
@@ -795,10 +796,9 @@ export class ProcessTasks {
 
   private view(session: SessionTasks, task: ProcessTask): ProcessTaskView {
     const running = session.running.get(task.id);
-    const endedAt = task.endedAt ?? this.now();
     return {
       task,
-      elapsedMs: Math.max(0, endedAt - task.createdAt),
+      elapsedMs: elapsedOf(task, this.now()),
       outputBytes: running === undefined ? task.outputBytes : running.bytesWritten(),
     };
   }
