@@ -50,3 +50,15 @@
 ## [2026-11-16T17:19:48.523Z] observe
 - slug: "obs-2026-11-16-7", title: "面板项目 7 项架构重构完成", relevance: "high"
 
+## [2026-11-16T18:23:16.658Z] retro
+- slug: "pi-pretty-task-session-hub-required", title: "会话 hub 必须由入口注入，默认值会分裂写入权", category: "architecture"
+
+## [2026-11-16T18:23:26.270Z] retro
+- slug: "pi-pretty-task-panel-intents-and-view", title: "面板：键盘说意图，渲染方拿只读视图", category: "architecture"
+
+## [2026-11-16T18:23:33.749Z] retro
+- slug: "pi-pretty-task-side-index-to-field", title: "并行索引应当塌回记录上的一个字段", category: "architecture"
+
+## [2026-11-16T18:23:41.712Z] retro
+- slug: "pi-pretty-task-one-projection-and-formula", title: "一个形状一处投影，一个式子一处实现", category: "architecture"
+

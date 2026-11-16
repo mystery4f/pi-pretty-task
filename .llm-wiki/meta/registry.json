@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "last_updated": "2026-11-16T17:19:48.537Z",
+  "last_updated": "2026-11-16T18:23:41.728Z",
   "pages": {
     "sources/await-state-not-bytes-in-process-tests": {
       "type": "source",
@@ -112,6 +112,42 @@
       "slug": "pi-git-install-omits-dev-deps-so-ship-ts-entry",
       "created": "2026-11-15",
       "updated": "2026-11-15"
+    },
+    "sources/pi-pretty-task-one-projection-and-formula": {
+      "type": "source",
+      "title": "一个形状一处投影，一个式子一处实现",
+      "category": "architecture",
+      "status": "insight",
+      "slug": "pi-pretty-task-one-projection-and-formula",
+      "created": "2026-11-16",
+      "updated": "2026-11-16"
+    },
+    "sources/pi-pretty-task-panel-intents-and-view": {
+      "type": "source",
+      "title": "面板：键盘说意图，渲染方拿只读视图",
+      "category": "architecture",
+      "status": "insight",
+      "slug": "pi-pretty-task-panel-intents-and-view",
+      "created": "2026-11-16",
+      "updated": "2026-11-16"
+    },
+    "sources/pi-pretty-task-session-hub-required": {
+      "type": "source",
+      "title": "会话 hub 必须由入口注入，默认值会分裂写入权",
+      "category": "architecture",
+      "status": "insight",
+      "slug": "pi-pretty-task-session-hub-required",
+      "created": "2026-11-16",
+      "updated": "2026-11-16"
+    },
+    "sources/pi-pretty-task-side-index-to-field": {
+      "type": "source",
+      "title": "并行索引应当塌回记录上的一个字段",
+      "category": "architecture",
+      "status": "insight",
+      "slug": "pi-pretty-task-side-index-to-field",
+      "created": "2026-11-16",
+      "updated": "2026-11-16"
     },
     "sources/slow-suite-timings-not-workers": {
       "type": "source",

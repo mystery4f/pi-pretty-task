@@ -11,6 +11,18 @@
   "sources/pi-git-install-omits-dev-deps-so-ship-ts-entry": [
     "syntheses/release-1-0-0-publish-support"
   ],
+  "sources/pi-pretty-task-one-projection-and-formula": [
+    "sources/pi-pretty-task-side-index-to-field"
+  ],
+  "sources/pi-pretty-task-panel-intents-and-view": [
+    "sources/pi-pretty-task-session-hub-required"
+  ],
+  "sources/pi-pretty-task-session-hub-required": [
+    "sources/pi-pretty-task-panel-intents-and-view"
+  ],
+  "sources/pi-pretty-task-side-index-to-field": [
+    "sources/pi-pretty-task-one-projection-and-formula"
+  ],
   "sources/slow-suite-timings-not-workers": [
     "sources/await-state-not-bytes-in-process-tests"
   ],
@@ -24,7 +36,12 @@
   "syntheses/pi-loop-源码调研": [
     "syntheses/pi-pretty-task-文档索引"
   ],
-  "syntheses/pi-pretty-task-交接v02-收尾状态": [],
+  "syntheses/pi-pretty-task-交接v02-收尾状态": [
+    "sources/pi-pretty-task-one-projection-and-formula",
+    "sources/pi-pretty-task-panel-intents-and-view",
+    "sources/pi-pretty-task-session-hub-required",
+    "sources/pi-pretty-task-side-index-to-field"
+  ],
   "syntheses/pi-pretty-task-文档索引": [
     "sources/await-state-not-bytes-in-process-tests",
     "sources/delete-remote-branch-via-gh-api",

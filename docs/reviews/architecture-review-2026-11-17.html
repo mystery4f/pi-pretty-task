@@ -1,0 +1,789 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>pi-pretty-task · 架构审查</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose", flowchart: { curve: "basis" } });
+</script>
+<style>
+  body { font-family: ui-sans-serif, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif; }
+  code, .mono { font-family: ui-monospace, "Cascadia Code", "JetBrains Mono", Menlo, monospace; }
+  .diagram { min-height: 320px; }
+  .diagram .mermaid { display: flex; justify-content: center; }
+  .seam { stroke-dasharray: 6 4; }
+  .leak { fill: #fef2f2; stroke: #dc2626; color: #7f1d1d; }
+  .deep { fill: #0f172a; color: #e2e8f0; stroke: #0f172a; }
+  .card { break-inside: avoid; }
+  .files code { white-space: nowrap; }
+  .tag { font-size: 11px; letter-spacing: .04em; }
+</style>
+</head>
+<body class="bg-slate-50 text-slate-900">
+
+<header class="border-b bg-white">
+  <div class="mx-auto max-w-5xl px-8 py-10">
+    <p class="text-xs font-semibold uppercase tracking-widest text-slate-500">架构审查 · improve-codebase-architecture</p>
+    <h1 class="mt-3 text-3xl font-bold tracking-tight">pi-pretty-task</h1>
+    <p class="mt-2 text-slate-600">后台进程与定时唤醒，共用一个面板。审查基于 <code>ff1572b</code>（2026-11-16），
+      <code>src/</code> 约 7,900 行，测试约 6,400 行。</p>
+    <dl class="mt-6 grid grid-cols-2 gap-4 text-sm sm:grid-cols-4">
+      <div class="rounded-lg border bg-slate-50 p-3"><dt class="text-slate-500">源码</dt><dd class="mt-1 text-lg font-semibold">~7.9k 行</dd></div>
+      <div class="rounded-lg border bg-slate-50 p-3"><dt class="text-slate-500">测试</dt><dd class="mt-1 text-lg font-semibold">~6.4k 行</dd></div>
+      <div class="rounded-lg border bg-slate-50 p-3"><dt class="text-slate-500">模块</dt><dd class="mt-1 text-lg font-semibold">44 个文件</dd></div>
+      <div class="rounded-lg border bg-slate-50 p-3"><dt class="text-slate-500">候选</dt><dd class="mt-1 text-lg font-semibold">9 个 <span class="text-xs font-normal text-emerald-700">· 全部落地</span></dd></div>
+    </dl>
+  </div>
+</header>
+
+  <div class="mb-8 rounded-xl border border-emerald-300 bg-emerald-50 p-5">
+    <p class="text-sm font-semibold text-emerald-900">已全部落地（2026-11-17）：9 张卡，11 个提交</p>
+    <p class="mt-1 text-sm text-emerald-800"><code>3c67560</code> 卡片 8 · <code>7297d01</code> 卡片 3+9 · <code>47d3a43</code> 卡片 7 · <code>19c4d43</code> 卡片 5 · <code>a0e9247</code> 卡片 4 · <code>df09ae7</code> 卡片 2 · <code>afd459e</code> 卡片 1 第一步（键位只说意图，input.ts 626 → 452 行，84 处字段直写归零）· <code>f211583</code> 卡片 1 第二步（<code>PanelView</code> 只读视图）· 卡片 6（<code>rowOf</code> 一个投影 + <code>elapsedOf</code> 一个时长公式，四处并成一处）。</p>
+    <p class="mt-1 text-sm text-emerald-800">每次改动都过了 <code>npm run check</code>、<code>npm run lint</code> 与全量测试；现在 37 个文件 / 443 个用例（卡片 6 新增 7 个，<code>WakeDesk</code> 5 个）。<code>npm run lint</code> 也顺手管住了环依赖（<code>suspicious/noImportCycles</code>），报告里的那处循环改完就再也不会回来。</p>
+  </div>
+
+<main class="mx-auto max-w-5xl px-8 py-10 space-y-12">
+
+<!-- ============ 方法 ============ -->
+<section>
+  <h2 class="text-xl font-bold">怎么看的</h2>
+  <div class="mt-3 space-y-3 text-slate-700">
+    <p>按 <strong>模块深度</strong>（接口是否小于实现）、<strong>接缝位置</strong>（缝在不在能被单独测试和替换的地方）、
+      <strong>局部性</strong>（改一件事要动几个文件）、<strong>杠杆</strong>（一处改动能解锁多少测试与变更）
+      四个维度过了一遍：全部 44 个源文件的导出面、最近 4 次提交的落点、以及测试是怎么把代码拉起来的。</p>
+    <p>判断依据放在<strong>做减法</strong>上：删掉一个模块，复杂度是消失，还是原样搬到调用方？消失的是纯转发（浅），搬走的说明它承载了真实现（深）。
+      下面每张卡片都标了强度：<strong>Strong</strong> 是"现在就在拖慢改动"，<strong>Worth exploring</strong> 是"接缝明显错位但代价可接受"，
+      <strong>Speculative</strong> 是"顺着同一根线就能拿走，但收益要靠情况"。</p>
+  </div>
+</section>
+
+<!-- ============ 卡片 1 ============ -->
+<section id="c1" class="card rounded-xl border bg-white p-8 shadow-sm">
+  <div class="flex flex-wrap items-start justify-between gap-4">
+    <h2 class="text-2xl font-bold">面板只有一堆公开字段，没有一个接口</h2>
+    <span class="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800">Strong</span>
+  </div>
+
+  <div class="files mt-4 flex flex-wrap gap-2 text-xs text-slate-700">
+    <code class="rounded bg-slate-100 px-2 py-1">src/ui/panel/tasks-panel.ts:80-137</code>
+    <code class="rounded bg-slate-100 px-2 py-1">src/ui/panel/input.ts:28</code>
+    <code class="rounded bg-slate-100 px-2 py-1">src/ui/panel/list.ts:40</code>
+    <code class="rounded bg-slate-100 px-2 py-1">src/ui/panel/detail.ts:45</code>
+    <code class="rounded bg-slate-100 px-2 py-1">src/ui/panel/model.ts:74</code>
+    <code class="rounded bg-slate-100 px-2 py-1">test/unit/tasks-panel.test.ts:275</code>
+  </div>
+
+  <div class="mt-6 grid gap-4 md:grid-cols-2">
+    <div class="rounded-lg border p-4">
+      <p class="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Before</p>
+      <div class="diagram">
+<pre class="mermaid">
+flowchart TB
+  IN["input.ts<br/>624 行 · 184 处 panel.*"]
+  LI["list.ts<br/>415 行 · 44 处 panel.*"]
+  DE["detail.ts<br/>431 行 · 42 处 panel.*"]
+  P["TasksPanel<br/>23 个公开字段 + 12 个方法"]
+  T["tasks-panel.test.ts<br/>2,580 行 · 按键字符串 → 整屏文本"]
+  IN --> P
+  LI --> P
+  DE --> P
+  T --> P
+  classDef leak fill:#fef2f2,stroke:#dc2626,color:#7f1d1d
+  classDef blob fill:#fee2e2,stroke:#b91c1c,color:#7f1d1d,stroke-width:2px
+  class IN,LI,DE,T leak
+  class P blob
+</pre>
+      </div>
+    </div>
+    <div class="rounded-lg border p-4">
+      <p class="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">After</p>
+      <div class="diagram">
+<pre class="mermaid">
+flowchart LR
+  K["键位表<br/>key → intent"] --> S["PanelState<br/>select · filter · query<br/>openDetail · snapshot"]
+  S --> SN["PanelSnapshot<br/>只读类型"]
+  SN --> R1["renderList(snapshot)"]
+  SN --> R2["renderDetail(snapshot)"]
+  SN --> R3["renderIteration(snapshot)"]
+  R1 --> T1["渲染测试<br/>无需按键"]
+  S --> T2["状态测试<br/>无需渲染"]
+  classDef deep fill:#0f172a,stroke:#0f172a,color:#e2e8f0
+  class S deep
+</pre>
+      </div>
+    </div>
+  </div>
+
+  <p class="mt-6 text-slate-800"><strong class="text-slate-500">问题</strong>　
+    <code>input.ts</code>、<code>list.ts</code>、<code>detail.ts</code> 三个文件合计 1,470 行，每个导出函数的第一个参数都是
+    <code>panel: TasksPanel</code>，一共碰到 <strong>40 个不同成员、270 次</strong>（184／44／42）。
+    它们不是模块，是把一个类的 <code>this</code> 拆成了三份文件；唯一能调的接口在组件边缘——<code>render(width)</code>、<code>handleInput(data)</code>、<code>settle()</code>。
+    所以 2,580 行测试全部只能靠"按键字符串进、整屏文本出"来验证：改一个页面的内部状态，要穿过键盘和边框才能看到结果。</p>
+
+  <ul class="mt-4 space-y-2 rounded-lg bg-slate-50 p-4 text-sm text-slate-700">
+    <li>· <strong>84 行注释没有宿主</strong>：<code>tasks-panel.ts:406-489</code> 只有 JSDoc 与空行，没有任何声明，类在 <code>490</code> 行直接闭合——文件是按行数切的，不是按概念切的。</li>
+    <li>· <strong>25 个导出只有一个调用者</strong>：<code>input.ts</code> 导出 25 个函数，全仓库只 import 了 <code>handlePanelInput</code> 一个（<code>tasks-panel.ts:22</code>）；其余的 <code>export</code> 只让"模块"看起来像个模块。</li>
+    <li>· <strong>互相引用</strong>：<code>list.ts:38</code> 从 <code>tasks-panel.js</code> 取 <code>type TasksPanel</code>，<code>tasks-panel.ts:23</code> 又从 <code>./list.js</code> 取 <code>renderList</code>／<code>stepRecord</code>；<code>detail.ts:36</code> 还得借 <code>list.ts</code> 的 <code>chainPlace</code>／<code>foreign</code>／<code>stepRecord</code> 才知道一行怎么排。</li>
+    <li>· <strong>测试从不碰字段</strong>：2,580 行用例里对 <code>panel.rows</code>／<code>panel.mode</code>／<code>panel.query</code> 的直接赋值是 <strong>0</strong> 次，只走 <code>handleInput</code>／<code>settle</code>／<code>render</code>——真正的接口是 3 个方法，类却同时公开 23 个字段与 12 个方法。</li>
+    <li>· <strong>意外 barrel</strong>：<code>tasks-panel.ts:35-36</code> 的 <code>export * from "./format.js"</code> 与 <code>"./model.js"</code> 让组件成了转口，测试因此绕道它去取 <code>PANEL_FILTERS</code>。</li>
+  </ul>
+
+  <p class="mt-3 text-slate-800"><strong class="text-slate-500">方案</strong>　
+    把面板状态收成一个模块，接口按<em>意图</em>命名而不是按字段：<code>select(id)</code>、<code>cycleFilter()</code>、<code>startSearch()</code>、<code>openDetail(id)</code>、
+    <code>scrollBy(n)</code>、<code>snapshot(): PanelSnapshot</code>。三个渲染器改成只吃只读快照的纯函数，<code>input.ts</code> 退化成一张键位表（key → intent）。
+    字段从公开变成私有，<code>rows</code> 这类中间量由 <code>applyFilters()</code> 自己维护。</p>
+
+  <ul class="mt-4 grid gap-2 text-sm text-slate-700 sm:grid-cols-2">
+    <li>· 渲染可以脱离键盘测试</li>
+    <li>· 状态迁移可以脱离渲染测试</li>
+    <li>· 换一个键位只动键位表</li>
+    <li>· 40 个可写成员变成 1 个快照出口</li>
+    <li>· 三个页面共享同一个状态类型</li>
+    <li>· tick 刷新不必再猜哪些字段是"派生"</li>
+  </ul>
+
+  <div class="mt-5 rounded-lg border-l-4 border-amber-400 bg-amber-50 p-4 text-sm text-amber-900">
+    <strong>与既有决策的关系</strong>　不推翻 ADR-0012（三页共享一套键盘模型）——键位表仍然是一个模块，
+    被改的是<em>状态怎么被写</em>，不是有哪些键。ADR-0003 的"面板不留痕、只留状态栏"也不受影响。
+    代价：面板内部会多一个类型（<code>PanelSnapshot</code>），渲染器签名要从 <code>(panel, width)</code> 改成 <code>(snapshot, width, theme)</code>。
+  </div>
+</section>
+
+<!-- ============ 卡片 2 ============ -->
+<section id="c2" class="card rounded-xl border bg-white p-8 shadow-sm">
+  <div class="flex flex-wrap items-start justify-between gap-4">
+    <h2 class="text-2xl font-bold">唤醒投递规则是组合根里的三个闭包</h2>
+    <span class="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800">Strong</span>
+  </div>
+
+  <div class="files mt-4 flex flex-wrap gap-2 text-xs text-slate-700">
+    <code class="rounded bg-slate-100 px-2 py-1">src/index.ts:371</code>
+    <code class="rounded bg-slate-100 px-2 py-1">src/index.ts:382</code>
+    <code class="rounded bg-slate-100 px-2 py-1">src/index.ts:394</code>
+    <code class="rounded bg-slate-100 px-2 py-1">src/index.ts:100-186</code>
+    <code class="rounded bg-slate-100 px-2 py-1">src/tasks/loop/wake-queue.ts:24</code>
+    <code class="rounded bg-slate-100 px-2 py-1">test/support/extension-harness.ts:23</code>
+  </div>
+
+  <div class="mt-6 grid gap-4 md:grid-cols-2">
+    <div class="rounded-lg border p-4">
+      <p class="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Before</p>
+      <div class="diagram">
+<pre class="mermaid">
+flowchart TB
+  EV1["session_start"] --> FW["flushWakes()<br/>闭包"]
+  EV2["turn_end"] --> PS["pumpSafely()<br/>闭包"]
+  EV3["agent_settled"] --> FW
+  PS --> FW
+  CT["controller.flushWakes"] --> FW
+  FW --> ID{"agentIdle ?"}
+  FW --> DL["isDeliverable()<br/>闭包"]
+  ID --> Q["wakes.drain()"]
+  DL --> Q
+  Q --> IT["iterations.bind / drop"]
+  Q --> SM["pi.sendMessage"]
+  classDef root fill:#fef2f2,stroke:#dc2626,color:#7f1d1d
+  class FW,DL,PS root
+</pre>
+      </div>
+    </div>
+    <div class="rounded-lg border p-4">
+      <p class="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">After</p>
+      <div class="diagram">
+<pre class="mermaid">
+flowchart TB
+  EV["pi 事件"] --> D["WakeDesk<br/>record · agentStarted<br/>agentSettled · pump · shutdown"]
+  D --> W["LoopWakes"]
+  D --> I["Iterations"]
+  D --> S["sendMessage"]
+  D --> TU["单测：假时钟 + 假投递"]
+  classDef deep fill:#0f172a,stroke:#0f172a,color:#e2e8f0
+  class D deep
+</pre>
+      </div>
+    </div>
+  </div>
+
+  <p class="mt-6 text-slate-800"><strong class="text-slate-500">问题</strong>　
+    ADR-0009 那条规则——"唤醒要等 agent 空闲，并且绑定它自己那一轮"——现在只以闭包形式存在：
+    一个布尔 <code>agentIdle</code>、一个谓词 <code>isDeliverable</code>（<code>src/index.ts:371</code>）、一个函数 <code>flushWakes</code>（<code>src/index.ts:382</code>），
+    被 4 处调用（<code>session_start</code>、<code>turn_end</code>、<code>agent_settled</code>、返回的 controller）。
+    "什么时候可以把一条 prompt 送进会话"没有任何接口能回答，而 <code>LoopWakes</code> 只有 66 行，是个数组加 <code>drain</code>——
+    真正的策略不在它里面。后果很直接：<code>test/unit</code> 里没有一个文件 import <code>src/index.ts</code>，
+    要验这条规则必须拉起整个扩展（假 <code>ExtensionAPI</code>、临时目录、真子进程）。</p>
+
+  <p class="mt-3 text-slate-800"><strong class="text-slate-500">方案</strong>　
+    提一个 <code>WakeDesk</code> 模块，接口只回答投递问题：<code>record(fire)</code>、<code>agentStarted()</code>、
+    <code>agentSettled(aborted)</code>、<code>pump(at)</code>、<code>shutdown()</code>、<code>attach(send)</code>。
+    空闲标志、drain 谓词、iteration 的 bind/drop、以及"停掉的 loop 不许再唤醒"都在它里面；<code>index.ts</code> 回到只做装配（约 150 行）。</p>
+
+  <ul class="mt-4 grid gap-2 text-sm text-slate-700 sm:grid-cols-2">
+    <li>· ADR-0009 有了名字和缝</li>
+    <li>· 四条唤醒路径收成一次 <code>pump</code></li>
+    <li>· 策略可以用假时钟单测</li>
+    <li>· 组合根回到装配职责</li>
+    <li>· "空闲"不再是一个裸布尔</li>
+    <li>· 关停时的丢弃行为有单一入口</li>
+  </ul>
+
+  <div class="mt-5 rounded-lg border-l-4 border-amber-400 bg-amber-50 p-4 text-sm text-amber-900">
+    <strong>与既有决策的关系</strong>　这是 ADR-0009 的实现搬家，不改语义。
+    注意 <code>LoopTasks.pump/pumpOnce/completeFire/noteFailure</code>（<code>src/tasks/loop/loop-tasks.ts:563-640</code>）已经把"跳过"与"退避"写对了（ADR-0017），
+    不要在抽取时把它们一起拖出来——那条线留在 loop store 里。
+  </div>
+</section>
+
+<!-- ============ 卡片 3 ============ -->
+<section id="c3" class="card rounded-xl border bg-white p-8 shadow-sm">
+  <div class="flex flex-wrap items-start justify-between gap-4">
+    <h2 class="text-2xl font-bold">同一条记录，每个工具抄三遍</h2>
+    <span class="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800">Worth exploring</span>
+  </div>
+
+  <div class="files mt-4 flex flex-wrap gap-2 text-xs text-slate-700">
+    <code class="rounded bg-slate-100 px-2 py-1">src/tasks/process/tools.ts:203</code>
+    <code class="rounded bg-slate-100 px-2 py-1">src/tasks/process/tools.ts:226</code>
+    <code class="rounded bg-slate-100 px-2 py-1">src/tasks/process/tools.ts:246</code>
+    <code class="rounded bg-slate-100 px-2 py-1">src/tasks/process/tools.ts:261</code>
+    <code class="rounded bg-slate-100 px-2 py-1">src/tasks/process/tools.ts:287</code>
+    <code class="rounded bg-slate-100 px-2 py-1">src/tasks/loop/tools.ts:131</code>
+  </div>
+
+  <div class="mt-6 grid gap-4 md:grid-cols-2">
+    <div class="rounded-lg border p-4">
+      <p class="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Before</p>
+      <div class="diagram">
+<pre class="mermaid">
+flowchart LR
+  V["ProcessTaskView"] --> D1["describeTask<br/>9 行文本"]
+  V --> D2["taskDetails<br/>逐字段抄 15 个属性"]
+  V --> E["execute 里再读一遍"]
+  C["ChainTaskView"] --> D3["describeChain"]
+  C --> D4["chainDetails<br/>再抄一层"]
+  D2 --> N["interface 与实现一样宽<br/>纯通道"]
+  D4 --> N
+  classDef leak fill:#fef2f2,stroke:#dc2626,color:#7f1d1d
+  class D2,D4,N leak
+</pre>
+      </div>
+    </div>
+    <div class="rounded-lg border p-4">
+      <p class="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">After</p>
+      <div class="diagram">
+<pre class="mermaid">
+flowchart LR
+  V["Task"] --> R["taskReport(view)<br/>{ text, details }"]
+  R --> T1["pretty_task_bg_status"]
+  R --> T2["pretty_task_bg_wait"]
+  R --> T3["面板详情页<br/>重叠字段"]
+  classDef deep fill:#0f172a,stroke:#0f172a,color:#e2e8f0
+  class R deep
+</pre>
+      </div>
+    </div>
+  </div>
+
+  <p class="mt-6 text-slate-800"><strong class="text-slate-500">问题</strong>　
+    每个工具带三份同一视图：给模型读的文本（<code>describeTask</code>）、给调用方读的结构体（<code>taskDetails</code>）、
+    以及 <code>execute</code> 里再取一遍的字段。<code>taskDetails</code> 把 15 个属性逐字段搬进一个新对象，
+    <code>chainDetails</code> 在它上面再搬一层——接口和数据一样宽，删掉它复杂度会原样回到调用方，是个纯通道。
+    已经能看到漂移的证据：<code>src/tasks/process/tools.ts:224-225</code> 的同一句注释出现了两遍。</p>
+
+  <ul class="mt-4 space-y-2 rounded-lg bg-slate-50 p-4 text-sm text-slate-700">
+    <li>· <strong>同一算式两处</strong>：<code>format.ts:251-253</code> 与 <code>loop/tools.ts:220</code> 都算 <code>Math.max(0, task.fires - task.fireHistory.length)</code>，但一处落成" · N older dropped"，一处落成 "N older ones were dropped."。</li>
+    <li>· <strong>同一条时间两种格式</strong>：面板用 <code>formatClockTime(fire.at)</code>（本地 HH:MM:SS），工具用 <code>new Date(fire.at).toISOString()</code>（<code>loop/tools.ts:228</code>）。两个模块互不 import，没有东西强迫它们一致。</li>
+    <li>· <strong>这是两个视图，不是两份实现</strong>：面板要主题色与网格，工具要给模型读纯文本，两份都不能删；能拿走的是它们各自重算的那层算术与词汇。</li>
+  </ul>
+
+  <p class="mt-3 text-slate-800"><strong class="text-slate-500">方案</strong>　
+    每种 kind 一个 <code>taskReport(view): { text, details }</code>，工具只调它，字段清单只写一次；
+    面板详情页与它重叠的那几项（state、exit、bytes、duration、schedule）读同一份，而不是各写一套列文本。</p>
+
+  <ul class="mt-4 grid gap-2 text-sm text-slate-700 sm:grid-cols-2">
+    <li>· 一个字段只在一处被描述</li>
+    <li>· 加一个工具不再抄一遍字段</li>
+    <li>· 文本与结构体天然同源</li>
+    <li>· 重复的 JSDoc 无法再出现</li>
+  </ul>
+
+  <div class="mt-5 rounded-lg border-l-4 border-slate-300 bg-slate-50 p-4 text-sm text-slate-700">
+    <strong>先看清楚再动</strong>　面板与工具的描述目标不同（人读的列 vs 模型读的键值），不要为了消除重复把两者强行合成一张表。
+    最小可行动作是<em>只统一 details 与 execute 那一份</em>，文本生成先各留各的。
+  </div>
+</section>
+
+<!-- ============ 卡片 4 ============ -->
+<section id="c4" class="card rounded-xl border bg-white p-8 shadow-sm">
+  <div class="flex flex-wrap items-start justify-between gap-4">
+    <h2 class="text-2xl font-bold"><code>format.ts</code> 是戴着同一顶帽子的四个模块</h2>
+    <span class="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800">Worth exploring</span>
+  </div>
+
+  <div class="files mt-4 flex flex-wrap gap-2 text-xs text-slate-700">
+    <code class="rounded bg-slate-100 px-2 py-1">src/ui/panel/format.ts:39-131</code>
+    <code class="rounded bg-slate-100 px-2 py-1">src/ui/panel/format.ts:133-181</code>
+    <code class="rounded bg-slate-100 px-2 py-1">src/ui/panel/format.ts:369-446</code>
+    <code class="rounded bg-slate-100 px-2 py-1">src/ui/panel/format.ts:476-612</code>
+    <code class="rounded bg-slate-100 px-2 py-1">src/ui/panel/format.ts:614-647</code>
+  </div>
+
+  <div class="mt-6 grid gap-4 md:grid-cols-2">
+    <div class="rounded-lg border p-4">
+      <p class="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Before</p>
+      <div class="diagram">
+<pre class="mermaid">
+flowchart TB
+  F["format.ts<br/>647 行 · 一个名字"]
+  F --> A["列文本<br/>size · exit · age"]
+  F --> B["键位文案与 footer 收缩"]
+  F --> C["页与过滤谓词<br/>inTab · passesFilter"]
+  F --> D["模糊匹配 + 14 个打分常数"]
+  F --> E["粘贴序列解码<br/>pastedQuery · typedQuery"]
+  E -.->|"其实是键盘输入"| IN["input.ts"]
+  classDef leak fill:#fef2f2,stroke:#dc2626,color:#7f1d1d
+  class F,E leak
+</pre>
+      </div>
+    </div>
+    <div class="rounded-lg border p-4">
+      <p class="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">After</p>
+      <div class="diagram">
+<pre class="mermaid">
+flowchart LR
+  M["matching.ts<br/>query → RowMatch<br/>+ 命中位置"] --> L["list.ts"]
+  C2["columns.ts<br/>单元格文本"] --> L
+  C2 --> DET["detail.ts"]
+  K["keys.ts<br/>键位与 footer"] --> L
+  IN["input.ts<br/>粘贴解码归位"] --> M
+  classDef deep fill:#0f172a,stroke:#0f172a,color:#e2e8f0
+  class M deep
+</pre>
+      </div>
+    </div>
+  </div>
+
+  <p class="mt-6 text-slate-800"><strong class="text-slate-500">问题</strong>　
+    647 行叫 "format"：里面同时住着查询匹配器（含 14 个打分常数：<code>MATCH_BASE</code>、<code>WORD_START_BONUS</code>、<code>GAP_CAP</code>…）、
+    页与过滤谓词、行内列文本、键位文案，以及把终端粘贴序列 <code>\x1b[200~</code> 解成查询的键盘解析。
+    想找"一行怎么和查询比对"的人，从一个不描述这件事的文件名开始读；而两个给渲染用的谓词（<code>inTab</code>、<code>passesFilter</code>）
+    与匹配器之间没有关系，却共用同一份 import 面。</p>
+
+  <p class="mt-3 text-slate-800"><strong class="text-slate-500">方案</strong>　
+    按概念切开：<code>matching.ts</code>（<code>bestFieldMatch</code> → <code>RowMatch</code> + 命中位置，纯函数、可单测）、
+    <code>columns.ts</code>（单元格文本）、<code>keys.ts</code>（键位与 footer 收缩）。粘贴解码搬回 <code>input.ts</code>——
+    它读的是键盘，不是文本格式。</p>
+
+  <ul class="mt-4 grid gap-2 text-sm text-slate-700 sm:grid-cols-2">
+    <li>· 匹配器成为独立的深模块</li>
+    <li>· 14 个常数集中在它自己的文件</li>
+    <li>· 文件名能回答它做什么</li>
+    <li>· 粘贴解析与按键处理同处一地</li>
+  </ul>
+
+  <div class="mt-5 rounded-lg border-l-4 border-slate-300 bg-slate-50 p-4 text-sm text-slate-700">
+    <strong>注意</strong>　人不该为此重排测试：<code>tasks-panel.test.ts</code> 里关于排名、高亮、命中的用例本来就只穿过公开行为，搬家后应当原样通过。
+  </div>
+</section>
+
+<!-- ============ 卡片 5 ============ -->
+<section id="c5" class="card rounded-xl border bg-white p-8 shadow-sm">
+  <div class="flex flex-wrap items-start justify-between gap-4">
+    <h2 class="text-2xl font-bold">同一个字段 <code>iterations</code> 被两个模块直接写</h2>
+    <span class="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800">Worth exploring</span>
+  </div>
+
+  <div class="files mt-4 flex flex-wrap gap-2 text-xs text-slate-700">
+    <code class="rounded bg-slate-100 px-2 py-1">src/tasks/loop/iterations.ts:105</code>
+    <code class="rounded bg-slate-100 px-2 py-1">src/tasks/loop/iterations.ts:142</code>
+    <code class="rounded bg-slate-100 px-2 py-1">src/tasks/loop/iterations.ts:155</code>
+    <code class="rounded bg-slate-100 px-2 py-1">src/tasks/loop/loop-tasks.ts:368</code>
+    <code class="rounded bg-slate-100 px-2 py-1">src/tasks/base/task.ts:175</code>
+  </div>
+
+  <div class="mt-6 grid gap-4 md:grid-cols-2">
+    <div class="rounded-lg border p-4">
+      <p class="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Before</p>
+      <div class="diagram">
+<pre class="mermaid">
+flowchart TB
+  LT["LoopTasks<br/>持有者 · 创建任务"] --> REC["PromptLoopTask.iterations<br/>上限 50 · 要落盘 · 要计数"]
+  IT["Iterations<br/>push · splice · find"] --> REC
+  IT --> P["sessions.persist()"]
+  LT --> P
+  REC --> PANEL["面板详情<br/>读同一条数组"]
+  classDef leak fill:#fef2f2,stroke:#dc2626,color:#7f1d1d
+  class REC leak
+</pre>
+      </div>
+    </div>
+    <div class="rounded-lg border p-4">
+      <p class="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">After</p>
+      <div class="diagram">
+<pre class="mermaid">
+flowchart LR
+  LT["LoopTasks"] -->|"按 id 询问"| IT["Iterations<br/>该字段唯一所有者<br/>open · drop · settle · trim"]
+  IT --> REC["记录"]
+  PANEL["面板 / 工具"] --> IT
+  classDef deep fill:#0f172a,stroke:#0f172a,color:#e2e8f0
+  class IT deep
+</pre>
+      </div>
+    </div>
+  </div>
+
+  <p class="mt-6 text-slate-800"><strong class="text-slate-500">问题</strong>　
+    <code>PromptLoopTask.iterations</code> 是 ADR-0007 明确要求"有上限、要计数、要落盘、重启要修"的字段。
+    写它的代码在 <code>Iterations</code> 里（<code>push</code>／<code>splice</code>／<code>find</code>，加上 <code>dropOverflow</code> 与 <code>persist</code>），
+    但持有它、规定上限、在创建时初始化它的却是 <code>LoopTasks</code>（<code>loop-tasks.ts:368</code>）。
+    两个模块共享一个可变形状，只靠约定协调：要改"保留多少轮"或"哪一轮算这一轮"，得同时改两处，而没有一处能独立说清这个字段的规则。</p>
+
+  <p class="mt-3 text-slate-800"><strong class="text-slate-500">方案</strong>　
+    二选一，都行，但要落定一个：① 让 <code>Iterations</code> 成为该字段的唯一所有者（<code>open</code>／<code>drop</code>／<code>settle</code>／<code>trim</code> 全在它里面），
+    <code>LoopTasks</code> 只按 id 问；② 反过来，把 <code>Iterations</code> 收进 <code>LoopTasks</code> 作为它的一段实现。
+    ①的接口更小、更容易单测；②的文件更少。当前状态是两不靠。</p>
+
+  <ul class="mt-4 grid gap-2 text-sm text-slate-700 sm:grid-cols-2">
+    <li>· 上限规则只有一个出处</li>
+    <li>· 计数（dropped）与写入同源</li>
+    <li>· 重启修复有明确归属</li>
+    <li>· 并行改动的共享形状消失</li>
+    <li>· 旁证：那份并行索引可以删掉——把 <code>bound</code> 放回 <code>Iteration</code> 记录，<code>openFires</code> 与 <code>findOpenFire</code>／<code>forget</code>（<code>iterations.ts:86/268/276</code>）一起消失</li>
+  </ul>
+
+  <div class="mt-5 rounded-lg border-l-4 border-amber-400 bg-amber-50 p-4 text-sm text-amber-900">
+    <strong>与既有决策的关系</strong>　ADR-0007 的两条上限（50 轮、100 次调用）不变，只是把它们连同实现放到一个能说清它们的模块里。
+  </div>
+</section>
+
+<!-- ============ 卡片 6 ============ -->
+<section id="c6" class="card rounded-xl border bg-white p-8 shadow-sm">
+  <div class="flex flex-wrap items-start justify-between gap-4">
+    <h2 class="text-2xl font-bold">面板行的形状被抄了三遍</h2>
+    <div class="flex items-center gap-2">
+      <span class="tag rounded bg-slate-200 px-2 py-1 font-semibold text-slate-700">依赖：卡片 1</span>
+      <span class="rounded-full bg-slate-200 px-3 py-1 text-xs font-semibold text-slate-700">Speculative</span>
+    </div>
+  </div>
+
+  <div class="files mt-4 flex flex-wrap gap-2 text-xs text-slate-700">
+    <code class="rounded bg-slate-100 px-2 py-1">src/ui/tasks-command.ts:79</code>
+    <code class="rounded bg-slate-100 px-2 py-1">src/ui/tasks-command.ts:86</code>
+    <code class="rounded bg-slate-100 px-2 py-1">src/ui/tasks-command.ts:159-170</code>
+    <code class="rounded bg-slate-100 px-2 py-1">src/ui/panel/model.ts:39</code>
+  </div>
+
+  <div class="mt-6 grid gap-4 md:grid-cols-2">
+    <div class="rounded-lg border p-4">
+      <p class="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Before</p>
+      <div class="diagram">
+<pre class="mermaid">
+flowchart TB
+  L["loopRow()"] --> R["PanelTaskView"]
+  C["chainRow()"] --> R
+  X["rerun() 里内联第三份"] --> R
+  L --> F["Math.max(0, (endedAt ?? now()) - createdAt)"]
+  C --> F
+  X --> F
+  classDef leak fill:#fef2f2,stroke:#dc2626,color:#7f1d1d
+  class F leak
+</pre>
+      </div>
+    </div>
+    <div class="rounded-lg border p-4">
+      <p class="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">After</p>
+      <div class="diagram">
+<pre class="mermaid">
+flowchart LR
+  T["Task"] --> R["rowOf(task, now, extras?)<br/>一个投影"]
+  R --> V["PanelTaskView"]
+  classDef deep fill:#0f172a,stroke:#0f172a,color:#e2e8f0
+  class R deep
+</pre>
+      </div>
+    </div>
+  </div>
+
+  <p class="mt-6 text-slate-800"><strong class="text-slate-500">问题</strong>　
+    三处都算同一个公式 <code>Math.max(0, (endedAt ?? now()) - createdAt)</code>，<code>loopRow</code> 与 <code>chainRow</code> 只差一个可选字段
+    <code>untilNextFireMs</code>，<code>rerun</code> 里是第三份内联。结果 <code>PanelTaskView</code> 这个形状没有单一定义处——
+    加一个行字段就要记得改三处，否则某一种行会悄悄少一项。</p>
+
+  <p class="mt-3 text-slate-800"><strong class="text-slate-500">方案</strong>　
+    一个 <code>rowOf(task, now, extras?)</code> 投影，<code>untilNextFireMs</code> 与 <code>sessionId</code> 作为可选增量传入。</p>
+
+  <ul class="mt-4 grid gap-2 text-sm text-slate-700 sm:grid-cols-2">
+    <li>· 行的形状只写一次</li>
+    <li>· 新行字段不会漏掉某种 kind</li>
+    <li>· 时间公式只有一个出处</li>
+  </ul>
+
+  <div class="mt-5 rounded-lg border-l-4 border-slate-300 bg-slate-50 p-4 text-sm text-slate-700">
+    <strong>为什么是 Speculative</strong>　它只值二十分钟，且与卡片 1 的 <code>PanelSnapshot</code> 天然同路：
+    先做 1 再做 6 几乎不额外花钱。单独做 6 收益有限。
+  </div>
+</section>
+
+<!-- ============ 卡片 7 ============ -->
+<section id="c7" class="card rounded-xl border bg-white p-8 shadow-sm">
+  <div class="flex flex-wrap items-start justify-between gap-4">
+    <h2 class="text-2xl font-bold">启动阶梯写了两遍，另有四个转发器</h2>
+    <span class="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800">Worth exploring</span>
+  </div>
+
+  <div class="files mt-4 flex flex-wrap gap-2 text-xs text-slate-700">
+    <code class="rounded bg-slate-100 px-2 py-1">src/tasks/process/process-tasks.ts:337-361</code>
+    <code class="rounded bg-slate-100 px-2 py-1">src/tasks/process/process-tasks.ts:391-430</code>
+    <code class="rounded bg-slate-100 px-2 py-1">src/tasks/process/process-tasks.ts:557</code>
+    <code class="rounded bg-slate-100 px-2 py-1">src/tasks/process/process-tasks.ts:935</code>
+    <code class="rounded bg-slate-100 px-2 py-1">src/tasks/process/process-tasks.ts:939-947</code>
+    <code class="rounded bg-slate-100 px-2 py-1">src/tasks/base/task-sessions.ts:68-76</code>
+  </div>
+
+  <div class="mt-6 grid gap-4 md:grid-cols-2">
+    <div class="rounded-lg border p-4">
+      <p class="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Before</p>
+      <div class="diagram">
+<pre class="mermaid">
+flowchart TB
+  S["start()<br/>用户调用"] --> L["配额检查 → spawn → book<br/>→ persist → scheduleRuntimeCap"]
+  N["launch()<br/>链的入口"] --> L
+  S --> E1["拒绝：throw"]
+  N --> E2["拒绝：finish(refusal)"]
+  F["list · persist · createId · session<br/>四个纯转发"] --> H["hub"]
+  L --> H
+  classDef leak fill:#fef2f2,stroke:#dc2626,color:#7f1d1d
+  class E1,E2,F leak
+</pre>
+      </div>
+    </div>
+    <div class="rounded-lg border p-4">
+      <p class="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">After</p>
+      <div class="diagram">
+<pre class="mermaid">
+flowchart LR
+  S["start"] --> R["run(session, task, plan, onRefuse)"]
+  N["launch"] --> R
+  R --> H["hub：一个目录一个缓存、一个写者"]
+  classDef deep fill:#0f172a,stroke:#0f172a,color:#e2e8f0
+  class R deep
+</pre>
+      </div>
+    </div>
+  </div>
+
+  <p class="mt-6 text-slate-800"><strong class="text-slate-500">问题</strong>　
+    同一条阶梯——配额检查 → 建/取记录 → <code>spawn</code> → <code>book</code> → <code>persist</code> → <code>scheduleRuntimeCap</code>——
+    在 <code>start</code>（337-361）和 <code>launch</code>（391-430）里各写了一遍。真正的差别只有一处：拒绝时 <code>start</code> 抛错，
+    <code>launch</code> 把拒绝写进记录（<code>finish(runtime, task, undefined, null, refusal)</code>）。
+    两段代码各自用注释解释了"为什么这样拒绝"，恰好说明这条阶梯没有名字。
+    另外四个方法只是转发：<code>list</code>（557）是 <code>listAll</code> 加一个 <code>parentId === undefined</code> 过滤，
+    <code>persist</code>（935）等于 <code>hub.persist</code>，<code>createId</code>（1022）等于 <code>hub.createId</code>，
+    而 <code>session</code>（939-947）逐字重复了 hub 的目录缓存（<code>task-sessions.ts:68-76</code>）——同一目录于是有两个 map、两个写者。</p>
+
+  <p class="mt-3 text-slate-800"><strong class="text-slate-500">方案</strong>　
+    把阶梯提成一个私有 <code>run(session, task, plan, onRefuse)</code>，两种拒绝策略由回调决定；四个转发器删掉，
+    <code>session</code> 直接用 hub 的。链的入口 <code>launch</code> 于是可以退化成"取记录 + 调 <code>run</code>"，<code>attached()</code> 那座桥也随之消失。</p>
+
+  <ul class="mt-4 grid gap-2 text-sm text-slate-700 sm:grid-cols-2">
+    <li>· 一条启动路径</li>
+    <li>· 拒绝的两种表达并排可见</li>
+    <li>· 同目录只剩一个写者</li>
+    <li>· 链与工具的启动行为不会再分叉</li>
+  </ul>
+
+  <div class="mt-5 rounded-lg border-l-4 border-amber-400 bg-amber-50 p-4 text-sm text-amber-900">
+    <strong>与既有决策的关系</strong>　ADR-0013 的"链持队列、一次一格"不变；被合并的是两种启动方式的<em>实现</em>，不是它们对外的语义。
+  </div>
+</section>
+
+<!-- ============ 卡片 8 ============ -->
+<section id="c8" class="card rounded-xl border bg-white p-8 shadow-sm">
+  <div class="flex flex-wrap items-start justify-between gap-4">
+    <h2 class="text-2xl font-bold">两个 store 各自 <code>new TaskSessions()</code></h2>
+    <span class="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800">Strong</span>
+  </div>
+
+  <div class="files mt-4 flex flex-wrap gap-2 text-xs text-slate-700">
+    <code class="rounded bg-slate-100 px-2 py-1">src/tasks/process/process-tasks.ts:323</code>
+    <code class="rounded bg-slate-100 px-2 py-1">src/tasks/chain/chain-tasks.ts:104</code>
+    <code class="rounded bg-slate-100 px-2 py-1">src/index.ts:163</code>
+    <code class="rounded bg-slate-100 px-2 py-1">src/tasks/base/task-sessions.ts:68-86</code>
+    <code class="rounded bg-slate-100 px-2 py-1">src/tasks/loop/loop-tasks.ts:810-813</code>
+  </div>
+
+  <div class="mt-6 grid gap-4 md:grid-cols-2">
+    <div class="rounded-lg border p-4">
+      <p class="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Before</p>
+      <div class="diagram">
+<pre class="mermaid">
+flowchart TB
+  IDX["index.ts:163<br/>new TaskSessions()"] --> P["ProcessTasks"]
+  IDX --> L["LoopTasks"]
+  IDX --> C["ChainTasks"]
+  P -.->|"忘了传就自己 new"| P2["第二个缓存<br/>process-tasks.ts:323"]
+  C -.->|"忘了传就自己 new"| C2["第二个缓存<br/>chain-tasks.ts:104"]
+  L --> R{"owned ? session : read"}
+  R -->|read| R2["新解析的一份<br/>新 TaskStore"]
+  classDef leak fill:#fef2f2,stroke:#dc2626,color:#7f1d1d
+  class P2,C2,R2 leak
+</pre>
+      </div>
+    </div>
+    <div class="rounded-lg border p-4">
+      <p class="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">After</p>
+      <div class="diagram">
+<pre class="mermaid">
+flowchart LR
+  H["TaskSessions<br/>sessions 必填"] --> P["ProcessTasks"]
+  H --> L["LoopTasks"]
+  H --> C["ChainTasks"]
+  H --> RD["read：只读、不收养<br/>显式命名"]
+  classDef deep fill:#0f172a,stroke:#0f172a,color:#e2e8f0
+  class H deep
+</pre>
+      </div>
+    </div>
+  </div>
+
+  <p class="mt-6 text-slate-800"><strong class="text-slate-500">问题</strong>　
+    <code>options.sessions ?? new TaskSessions({ now })</code> 出现在两处（<code>process-tasks.ts:323</code>、<code>chain-tasks.ts:104</code>）。
+    组合根（<code>index.ts:163</code>）今天确实传了同一个实例，所以线上看不出问题——但只要某个调用方（包括测试）忘了传，
+    同一目录立刻有第二个缓存和第二支笔，而且失败方式是"写进去了但看不见"，不是报错。
+    第三条规则在 <code>LoopTasks.readSession</code>（810-813）：<code>owned</code> 就用 <code>session()</code>，否则 <code>read()</code>——
+    而 <code>read()</code> 返回的是<strong>重新解析的一份</strong>（新的 <code>TaskStore</code>），谁顺手改它，谁就写出第二代记录。</p>
+
+  <p class="mt-3 text-slate-800"><strong class="text-slate-500">方案</strong>　
+    <code>sessions</code> 变必填（默认值删掉）；把 <code>read()</code> 的语义显式化——"只读翻开，不收养、不可写"，
+    并让 <code>LoopTasks</code> 那条三元判断收进 <code>TaskSessions</code> 自己，调用方只问一次。
+    一个目录一个缓存、一支笔，是 ADR-0010（recency 落盘）与 ADR-0011（id 前缀）共同依赖的前提。</p>
+
+  <ul class="mt-4 grid gap-2 text-sm text-slate-700 sm:grid-cols-2">
+    <li>· 第二个写者不可能出现</li>
+    <li>· "读到的是不是可写的"有明确答案</li>
+    <li>· 测试不再意外走默认分支</li>
+    <li>· 三条所有权规则收成一条</li>
+  </ul>
+
+  <div class="mt-5 rounded-lg border-l-4 border-red-400 bg-red-50 p-4 text-sm text-red-900">
+    <strong>为什么是 Strong</strong>　其它候选是结构问题，这条是正确性问题：它不会让你多写代码，只会在某天让一条记录静默消失。
+    改动很小，可以先做。
+  </div>
+</section>
+
+<!-- ============ 卡片 9 ============ -->
+<section id="c9" class="card rounded-xl border bg-white p-8 shadow-sm">
+  <div class="flex flex-wrap items-start justify-between gap-4">
+    <h2 class="text-2xl font-bold">「这个 id 是任务还是链」被重新推了七次</h2>
+    <span class="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800">Worth exploring</span>
+  </div>
+
+  <div class="files mt-4 flex flex-wrap gap-2 text-xs text-slate-700">
+    <code class="rounded bg-slate-100 px-2 py-1">src/tasks/process/tools.ts:555</code>
+    <code class="rounded bg-slate-100 px-2 py-1">src/tasks/process/tools.ts:607</code>
+    <code class="rounded bg-slate-100 px-2 py-1">src/tasks/process/tools.ts:653</code>
+    <code class="rounded bg-slate-100 px-2 py-1">src/tasks/process/tools.ts:714</code>
+    <code class="rounded bg-slate-100 px-2 py-1">src/tasks/process/tools.ts:755</code>
+    <code class="rounded bg-slate-100 px-2 py-1">src/tasks/process/tools.ts:842</code>
+    <code class="rounded bg-slate-100 px-2 py-1">src/tasks/process/tools.ts:867</code>
+  </div>
+
+  <div class="mt-6 grid gap-4 md:grid-cols-2">
+    <div class="rounded-lg border p-4">
+      <p class="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Before</p>
+      <div class="diagram">
+<pre class="mermaid">
+flowchart TB
+  T1["status"] --> Q{"tasks.get ? "}
+  T2["logs"] --> Q
+  T3["wait"] --> Q
+  T4["grep"] --> Q
+  T5["kill"] --> Q
+  T6["run"] --> Q
+  Q -->|"miss"| M["同一句 × 7"]
+  Q -->|"miss"| CH["chains.get"]
+  classDef leak fill:#fef2f2,stroke:#dc2626,color:#7f1d1d
+  class M leak
+</pre>
+      </div>
+    </div>
+    <div class="rounded-lg border p-4">
+      <p class="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">After</p>
+      <div class="diagram">
+<pre class="mermaid">
+flowchart LR
+  T["六个工具"] --> R["resolve(scope, id)<br/>→ task | chain | 无"]
+  R --> W["每个工具只写自己的散文"]
+  classDef deep fill:#0f172a,stroke:#0f172a,color:#e2e8f0
+  class R deep
+</pre>
+      </div>
+    </div>
+  </div>
+
+  <p class="mt-6 text-slate-800"><strong class="text-slate-500">问题</strong>　
+    六个工具各自先查 <code>tasks</code>、再查 <code>chains</code>，失败文案
+    <code>No background task with id … in this session.</code> 在同一个文件里出现 <strong>7 次</strong>，
+    连变量名都有三种写法（<code>wantedId</code>／<code>params.id</code>／<code>id</code>）。
+    后果是工具层即使与队列毫无关系，也必须拿到 <code>chainTasks</code>——六个工具里真正需要链的只有 <code>run</code> 的 <code>after</code> 参数。</p>
+
+  <p class="mt-3 text-slate-800"><strong class="text-slate-500">方案</strong>　
+    一个 <code>resolve(scope, id)</code>，返回 <code>{ kind: "task", view } | { kind: "chain", view } | undefined</code>；
+    文案只写一次，六个工具各自只剩自己的那段散文。它也是卡片 3 的前置：一处 resolve + 一处 report，工具层就没有再抄的理由。</p>
+
+  <ul class="mt-4 grid gap-2 text-sm text-slate-700 sm:grid-cols-2">
+    <li>· 一句文案</li>
+    <li>· 六处查找收成一处</li>
+    <li>· 工具不必都拿到链</li>
+    <li>· 加第七个工具不再抄</li>
+  </ul>
+</section>
+
+<!-- ============ 判决表 ============ -->
+<section class="rounded-xl border bg-white p-8 shadow-sm">
+  <h2 class="text-xl font-bold">判决表：哪些该拆，哪些其实是好模块</h2>
+  <p class="mt-2 text-sm text-slate-600">对每一个可疑模块都做了删除测试——<em>删掉它，复杂度是集中到一处，还是原样散回调用方？</em>集中说明它承载真实现，散回说明它只是个转发。</p>
+  <div class="mt-4 overflow-x-auto">
+    <table class="w-full text-left text-sm">
+      <thead class="border-b text-xs uppercase tracking-wide text-slate-500">
+        <tr><th class="py-2 pr-4">模块</th><th class="py-2 pr-4">行</th><th class="py-2 pr-4">判决</th><th class="py-2">理由</th></tr>
+      </thead>
+      <tbody class="divide-y">
+        <tr><td class="py-2 pr-4 mono">src/tasks/base/events.ts</td><td class="py-2 pr-4">122</td><td class="py-2 pr-4 text-red-700">浅</td><td class="py-2">3 个转发器裹一个 try/catch 的 <code>publish</code>；删掉约 15 行回到 4 个调用点，两边差不多——它是事件名约定，不是模块。</td></tr>
+        <tr><td class="py-2 pr-4 mono">src/tasks/base/runtime-state.ts</td><td class="py-2 pr-4">55</td><td class="py-2 pr-4 text-emerald-700">真叶子</td><td class="py-2">7 个小函数、一个概念（路径算术 + <code>safeSegment</code>）。删掉，路径算法会复制到四处。</td></tr>
+        <tr><td class="py-2 pr-4 mono">src/tasks/base/format.ts</td><td class="py-2 pr-4">58</td><td class="py-2 pr-4 text-emerald-700">薄但共享</td><td class="py-2">4 个纯格式化被两个 tools 与 list/detail 共用；删掉就是 4 份。（与 <code>src/ui/panel/format.ts</code> 同名不同事，卡片 4 顺手消掉一个。）</td></tr>
+        <tr><td class="py-2 pr-4 mono">src/tasks/base/decode.ts</td><td class="py-2 pr-4">80</td><td class="py-2 pr-4 text-emerald-700">小而深</td><td class="py-2">严格 UTF-8 → 半个字符裁剪 → win32 才走 GB18030 → lossy（ADR-0008）。删掉，重试阶梯就回到 reader 里。</td></tr>
+        <tr><td class="py-2 pr-4 mono">src/tasks/base/settings.ts</td><td class="py-2 pr-4">227</td><td class="py-2 pr-4 text-emerald-700">深</td><td class="py-2">9 个环境键加项目文件合成一个值；未知键拒绝与逐键报错本身就是用户看到的那条报错。</td></tr>
+        <tr><td class="py-2 pr-4 mono">src/tasks/base/search.ts</td><td class="py-2 pr-4">254</td><td class="py-2 pr-4 text-emerald-700">中等偏深</td><td class="py-2">分块读、半个字节的尾巴、字节夹取，三条常数三个接口。</td></tr>
+        <tr><td class="py-2 pr-4 mono">src/tasks/loop/wake-queue.ts</td><td class="py-2 pr-4">66</td><td class="py-2 pr-4 text-red-700">浅</td><td class="py-2">4 个方法里 2 个是 <code>push</code> 与 <code>length</code>；策略在调用方传进来的谓词里 → 见卡片 2。</td></tr>
+        <tr><td class="py-2 pr-4 mono">src/tasks/base/task-sessions.ts</td><td class="py-2 pr-4">132</td><td class="py-2 pr-4 text-amber-700">边界</td><td class="py-2">接口 6 个方法 + 1 个类型，内容是目录缓存加 id 铸造；缓存这一半被四个调用点各实现过一次 → 见卡片 8。</td></tr>
+        <tr><td class="py-2 pr-4 mono">src/tasks/process/supervisor.ts</td><td class="py-2 pr-4">381</td><td class="py-2 pr-4 text-emerald-700">最深处</td><td class="py-2">SIGTERM → 宽限 → SIGKILL → 轮询，全树只有这里编码平台形状。除 <code>StopOutcome</code> 又被翻译一次外无可指摘。</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============ 推荐 ============ -->
+<section class="rounded-xl border-2 border-slate-900 bg-white p-8">
+  <h2 class="text-xl font-bold">最先该做的一件事</h2>
+  <p class="mt-3 text-slate-700">
+    做<strong>卡片 1</strong>（面板状态收成一个带意图接口的模块）。理由是杠杆比例：
+    它是唯一能把 2,580 行"按键进、整屏出"的测试拆成两层的改动——状态测试和渲染测试各管一段；
+    同时它把 40 个可写成员收成 1 个出口，之后卡片 6 顺手拿走，卡片 4 的切分也有了落点（<code>matching.ts</code> 只吃 <code>query</code> 与行，不再吃整个 panel）。
+    卡片 2 排在它后面，因为它不打断面板的重排，可以独立合并。卡片 8 是唯一一条正确性问题（同目录第二个写者），如果你想先拆弹，把它插到最前面也合理。
+  </p>
+  <p class="mt-3 text-slate-700">
+    如果更想先降低"唤醒模型"这一块的风险，则做<strong>卡片 2</strong>：ADR-0009 是这套扩展与 pi 交互里最容易出错的一条，
+    而它现在只能靠整机集成测试证明。九张卡都不改产品行为，验收五条不受影响。
+  </p>
+</section>
+
+<footer class="pb-10 text-center text-xs text-slate-500">
+  pi-pretty-task · 架构审查 · 基于 ff1572b · 报告为一次性产物，可随时删除
+</footer>
+
+</main>
+</body>
+</html>

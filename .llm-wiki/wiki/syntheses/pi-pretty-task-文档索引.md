@@ -60,6 +60,12 @@ updated: 2026-11-14
 - [pi-background-tasks 源码调研](pi-background-tasks-源码调研.md) — 工具集、执行层、面板交互、已知硬伤
 - [pi-loop 源码调研](./pi-loop-源码调研.md) — 调度器、触发系统、状态存储、为何 `/loop` 看不到命令
 
+## 评审报告
+
+| 报告 | 讲什么 | 状态 |
+|---|---|---|
+| [architecture-review-2026-11-17.html](../../docs/reviews/architecture-review-2026-11-17.html) | 九张卡的架构评审：面板无接口、唤醒投递在组合根、记录渲染写两遍、format 是四个模块、并行索引、行投影抄三遍、启动台阶两遍、两个 store 各造 hub、id 解析七遍；含删除测试判决表 | 九张卡已全部落地（十一个提交）；评审后的收尾也在：`WakeDesk` 自带用例、`suspicious/noImportCycles` 管住环依赖，报告保留为决策依据 |
+
 ## 未决问题
 
 - **Loop 首发是否支持 cron**：现按“只做间隔触发”暂定。若日常用法是“每天 9 点”，cron 必须进 v0.1，且要补一份 ADR 说明解析器与秒级边界。
