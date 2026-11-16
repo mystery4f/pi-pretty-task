@@ -507,7 +507,10 @@ export class TaskStore {
    */
   private lastGeneration: string | undefined;
   /** Queued writes; each update waits for the one before it. */
-  private writes: Promise<void> = Promise.resolve();
+  /** The write in flight, if any; a save joins it instead of queueing behind it. */
+  private writes: Promise<void> | undefined;
+  /** The newest generation waiting to be written; older ones are superseded. */
+  private pending: string | undefined;
 
   constructor(directory: string, options: TaskStoreOptions = {}) {
     this.directory = directory;
@@ -552,9 +555,27 @@ export class TaskStore {
    * running, so a write error is swallowed rather than thrown at the session.
    */
   save(tasks: readonly Task[]): Promise<void> {
-    const generation = serialize(tasks);
-    this.writes = this.writes.then(() => this.writeGeneration(generation));
+    // Only the newest state is worth writing: a burst of updates (a step ending
+    // while a loop fires) would otherwise pay a flush per generation, and on a
+    // machine where flushing is slow the last one lands late enough to look
+    // lost. Coalescing keeps the promise meaning what callers need — "at least
+    // this state, or a newer one, is on disk when I resume".
+    this.pending = serialize(tasks);
+    if (this.writes === undefined) {
+      this.writes = this.drain().finally(() => {
+        this.writes = undefined;
+      });
+    }
     return this.writes;
+  }
+
+  /** Write the newest pending generation until none is left. */
+  private async drain(): Promise<void> {
+    while (this.pending !== undefined) {
+      const generation = this.pending;
+      this.pending = undefined;
+      await this.writeGeneration(generation);
+    }
   }
 
   private async writeGeneration(generation: string): Promise<void> {
