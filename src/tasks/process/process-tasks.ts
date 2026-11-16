@@ -23,7 +23,7 @@ import {
   MAX_RUNNING_TASKS_ENV,
 } from "../base/settings.js";
 import type { KillReason, ProcessTask, Task, TaskStatus } from "../base/task.js";
-import { type OwnedTaskSession, TaskSessions } from "../base/task-sessions.js";
+import type { OwnedTaskSession, TaskSessions } from "../base/task-sessions.js";
 import { resolveShellPolicy, type ShellChoice, type ShellPolicy } from "./shell.js";
 import {
   type RunningProcess,
@@ -346,19 +346,10 @@ export class ProcessTasks {
     const task = await this.record(session, input, "running");
     session.tasks.set(task.id, task);
 
-    let running: RunningProcess;
-    try {
-      running = this.spawn(session, task, input);
-    } catch (error) {
+    await this.ignite(session, task, input, (reason) => {
       session.tasks.delete(task.id);
-      throw error instanceof Error ? error : new Error(errorMessage(error));
-    }
-
-    this.book(session, task, running);
-    // The id is about to reach the model, so the record reaches the disk first:
-    // an extension that crashes right after this turn still knows the task.
-    await this.persist(session);
-    this.scheduleRuntimeCap(session, task.id, input.timeoutMs);
+      throw new Error(reason);
+    });
 
     return task;
   }
@@ -411,17 +402,9 @@ export class ProcessTasks {
     task.status = "running";
     task.updatedAt = at;
 
-    let running: RunningProcess;
-    try {
-      running = this.spawn(runtime, task, plan);
-    } catch (error) {
-      this.finish(runtime, task, undefined, null, errorMessage(error));
-      return task;
-    }
-
-    this.book(runtime, task, running);
-    await this.persist(runtime);
-    this.scheduleRuntimeCap(runtime, id, plan.timeoutMs);
+    await this.ignite(runtime, task, plan, (reason) =>
+      this.finish(runtime, task, undefined, null, reason),
+    );
     return task;
   }
 
@@ -461,6 +444,31 @@ export class ProcessTasks {
    * as the plan the caller kept: `start` builds one from its input, a queued step
    * keeps one until its turn comes.
    */
+  /**
+   * The one ladder a spawn walks: spawn, book, persist, cap. `fail` decides what a
+   * refusal means to the caller, which is the only thing a start and a launch
+   * ever disagreed about — a start has a call to throw at, a launch has a record
+   * to write the reason into.
+   */
+  private async ignite(
+    session: SessionTasks,
+    task: ProcessTask,
+    plan: QueuedLaunch,
+    fail: (reason: string) => void,
+  ): Promise<void> {
+    let running: RunningProcess;
+    try {
+      running = this.spawn(session, task, plan);
+    } catch (error) {
+      fail(errorMessage(error));
+      return;
+    }
+    this.book(session, task, running);
+    // The id is about to reach the model, so the record reaches the disk first:
+    // an extension that crashes right after this turn still knows the task.
+    await this.persist(session);
+    this.scheduleRuntimeCap(session, task.id, plan.timeoutMs);
+  }
   private spawn(session: SessionTasks, task: ProcessTask, plan: QueuedLaunch): RunningProcess {
     return this.supervise({
       command: task.command,
