@@ -31,7 +31,7 @@ import {
   type PanelTaskView,
   rememberPanelTab,
   TasksPanel,
-} from "../../src/ui/tasks-panel.js";
+} from "../../src/ui/panel/tasks-panel.js";
 import { plainTheme } from "../support/extension-harness.js";
 
 const UP = "\u001b[A";

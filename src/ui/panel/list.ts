@@ -8,7 +8,8 @@
 
 import type { ThemeColor } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import type { ChainTask, CmdLoopTask, Task } from "../tasks/base/task.js";
+import type { ChainTask, CmdLoopTask, Task } from "../../tasks/base/task.js";
+import { STATUS_COLOUR } from "../status-colour.js";
 import {
   dotColour,
   exitText,
@@ -23,7 +24,7 @@ import {
   pad,
   rightText,
   stepColour,
-} from "./panel-format.js";
+} from "./format.js";
 import {
   ID_COLUMN_WIDTH,
   LIST_VISIBLE_ROWS,
@@ -33,8 +34,7 @@ import {
   STRIP_CELLS,
   TAB_EMPTY,
   TAB_TITLE,
-} from "./panel-model.js";
-import { STATUS_COLOUR } from "./status-colour.js";
+} from "./model.js";
 import type { TasksPanel } from "./tasks-panel.js";
 
 export function renderList(panel: TasksPanel, width: number): string[] {

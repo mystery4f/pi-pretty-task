@@ -12,13 +12,13 @@ import { sessionTaskDirectory } from "../../src/tasks/base/runtime-state.js";
 import { TaskSessions } from "../../src/tasks/base/task-sessions.js";
 import { TaskStore } from "../../src/tasks/base/task-store.js";
 import { LoopTasks } from "../../src/tasks/loop/loop-tasks.js";
+import { TasksPanel } from "../../src/ui/panel/tasks-panel.js";
 import {
   SUMMARY_KEY,
   statusLineText,
   TASKS_COMMAND,
   TASKS_SHORTCUT,
 } from "../../src/ui/tasks-command.js";
-import { TasksPanel } from "../../src/ui/tasks-panel.js";
 import {
   createHarness,
   type Harness,

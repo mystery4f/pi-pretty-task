@@ -20,10 +20,10 @@ import {
   truncateToWidth,
   visibleWidth,
 } from "@earendil-works/pi-tui";
-import { formatBytes } from "../tasks/base/format.js";
-import type { CmdLoopTask, FireRecord, PromptLoopTask, Task } from "../tasks/base/task.js";
-import type { Iteration } from "../tasks/loop/iteration.js";
-import { renderDetail, renderIterationDetail } from "./panel-detail.js";
+import { formatBytes } from "../../tasks/base/format.js";
+import type { CmdLoopTask, FireRecord, PromptLoopTask, Task } from "../../tasks/base/task.js";
+import type { Iteration } from "../../tasks/loop/iteration.js";
+import { renderDetail, renderIterationDetail } from "./detail.js";
 import {
   bestFieldMatch,
   inTab,
@@ -33,8 +33,8 @@ import {
   pastedQuery,
   type RowMatch,
   typedQuery,
-} from "./panel-format.js";
-import { foreign, renderList, selectedIndex, stepRecord } from "./panel-list.js";
+} from "./format.js";
+import { foreign, renderList, selectedIndex, stepRecord } from "./list.js";
 import {
   DEFAULT_PANEL_FILTER,
   DETAIL_OUTPUT_LINES,
@@ -50,10 +50,10 @@ import {
   QUERY_MAX_LENGTH,
   READ_ONLY,
   type TasksPanelOptions,
-} from "./panel-model.js";
+} from "./model.js";
 
-export * from "./panel-format.js";
-export * from "./panel-model.js";
+export * from "./format.js";
+export * from "./model.js";
 
 /** Refresh period; the tail of a running task should look alive. */
 const REFRESH_MS = 1000;

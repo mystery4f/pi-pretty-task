@@ -8,8 +8,8 @@
 
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { TUI } from "@earendil-works/pi-tui";
-import type { OutputTail } from "../tasks/base/output.js";
-import type { Task } from "../tasks/base/task.js";
+import type { OutputTail } from "../../tasks/base/output.js";
+import type { Task } from "../../tasks/base/task.js";
 
 /** Output lines the detail view shows at once. */
 export const DETAIL_OUTPUT_LINES = 12;

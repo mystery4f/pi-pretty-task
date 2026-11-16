@@ -29,7 +29,7 @@ import {
   type PanelSource,
   type PanelTaskView,
   TasksPanel,
-} from "./tasks-panel.js";
+} from "./panel/tasks-panel.js";
 
 /** Command name the user types, without the leading slash. */
 export const TASKS_COMMAND = "tasks";

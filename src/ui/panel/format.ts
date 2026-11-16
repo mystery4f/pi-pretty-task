@@ -8,7 +8,7 @@
 
 import type { ThemeColor } from "@earendil-works/pi-coding-agent";
 import { matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import { formatBytes, formatClockTime, formatDuration } from "../tasks/base/format.js";
+import { formatBytes, formatClockTime, formatDuration } from "../../tasks/base/format.js";
 import type {
   CmdLoopTask,
   FireOutcome,
@@ -18,13 +18,14 @@ import type {
   Task,
   TaskKind,
   TaskStatus,
-} from "../tasks/base/task.js";
+} from "../../tasks/base/task.js";
 import type {
   Iteration,
   IterationCall,
   IterationCallStatus,
   IterationStatus,
-} from "../tasks/loop/iteration.js";
+} from "../../tasks/loop/iteration.js";
+import { STATUS_COLOUR } from "../status-colour.js";
 import {
   DETAIL_OUTPUT_LINES,
   PANEL_TABS,
@@ -32,8 +33,7 @@ import {
   type PanelTab,
   type PanelTaskView,
   QUERY_MAX_LENGTH,
-} from "./panel-model.js";
-import { STATUS_COLOUR } from "./status-colour.js";
+} from "./model.js";
 
 /** Size column: output bytes for a process task; a loop task has no output file. */
 export function formatSize(row: PanelTaskView): string {

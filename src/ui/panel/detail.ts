@@ -7,8 +7,9 @@
  */
 
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import { formatBytes, formatClockTime, formatDuration } from "../tasks/base/format.js";
-import type { IterationCall } from "../tasks/loop/iteration.js";
+import { formatBytes, formatClockTime, formatDuration } from "../../tasks/base/format.js";
+import type { IterationCall } from "../../tasks/loop/iteration.js";
+import { STATUS_COLOUR } from "../status-colour.js";
 import {
   CALL_COLOUR,
   callsHeading,
@@ -31,15 +32,14 @@ import {
   STEP_MARK,
   singleLine,
   stepColour,
-} from "./panel-format.js";
-import { chainPlace, foreign, renderList, stepRecord } from "./panel-list.js";
+} from "./format.js";
+import { chainPlace, foreign, renderList, stepRecord } from "./list.js";
 import {
   DETAIL_OUTPUT_LINES,
   LABEL_WIDTH,
   LIST_VISIBLE_ROWS,
   type PanelTaskView,
-} from "./panel-model.js";
-import { STATUS_COLOUR } from "./status-colour.js";
+} from "./model.js";
 import type { TasksPanel } from "./tasks-panel.js";
 
 export function renderDetail(panel: TasksPanel, width: number): string[] {

@@ -12,7 +12,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { LIST_KEYS } from "../../src/ui/tasks-panel.js";
+import { LIST_KEYS } from "../../src/ui/panel/tasks-panel.js";
 
 const README = join(import.meta.dirname, "..", "..", "README.md");
 
