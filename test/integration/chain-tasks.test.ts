@@ -241,6 +241,12 @@ describe("chain tasks", () => {
       STEP_NAME: "last",
     });
 
+    // The step has to have logged its start before the stop, or a fast runner
+    // kills it before the appendFileSync ever ran and the log stays empty.
+    await waitFor("the first step to log its start", async () => {
+      const seen = await readFile(log, "utf8").catch(() => "");
+      return seen.includes("start long");
+    });
     const result = await stores.chainTasks.stop(scope, second.chainId);
 
     expect(result?.outcome).toBe("stopped");

@@ -6,6 +6,7 @@
  */
 
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -28,6 +29,33 @@ export async function writeScript(dir: string, name: string, source: string): Pr
   const path = join(dir, name);
   await writeFile(path, source, "utf8");
   return `node "${path}"`;
+}
+
+/**
+ * A command that survives the polite signal: on POSIX it installs a SIGTERM
+ * handler, and on Windows a console process cannot be asked to close at all.
+ * It announces that the handler is in place, because a stop that arrives before
+ * the script has started kills a process that never refused anything — that
+ * race is what made the Linux runner report a 52ms stop where 500ms was due.
+ */
+export async function writeStubbornScript(
+  dir: string,
+  name: string,
+): Promise<{ command: string; ready: string }> {
+  const ready = join(dir, "ready");
+  const lines = [
+    "const fs = require('node:fs');",
+    ...(process.platform === "win32" ? [] : ["process.on('SIGTERM', () => {});"]),
+    `fs.writeFileSync(${JSON.stringify(ready)}, '');`,
+    "setInterval(() => {}, 1000);",
+    "",
+  ];
+  return { command: await writeScript(dir, name, lines.join("\n")), ready };
+}
+
+/** Wait until `writeStubbornScript`'s command has installed its handler. */
+export async function waitUntilReady(ready: string): Promise<void> {
+  await waitFor("the stubborn command to install its handler", () => existsSync(ready));
 }
 
 /**

@@ -24,7 +24,9 @@ import {
   makeTempDir,
   TEST_KILL_GRACE_MS,
   waitFor,
+  waitUntilReady,
   writeScript,
+  writeStubbornScript,
 } from "../support/processes.js";
 
 const cleanup: Array<() => Promise<void>> = [];
@@ -100,13 +102,12 @@ describe("stop", () => {
     cleanup.push(dir.dispose);
     // On Windows a console process cannot be asked to close, so it behaves
     // exactly like this POSIX script that refuses SIGTERM: only force ends it.
-    const source =
-      process.platform === "win32"
-        ? "setInterval(() => {}, 1000);\n"
-        : "process.on('SIGTERM', () => {});\nsetInterval(() => {}, 1000);\n";
-    const command = await writeScript(dir.path, "stubborn.js", source);
+    const { command, ready } = await writeStubbornScript(dir.path, "stubborn.js");
     const running = run(command, dir.path);
     const pid = pidOf(running);
+    // The stop must not beat the script's own SIGTERM handler: on a busy runner
+    // the polite signal used to arrive first and the child died like a quitter.
+    await waitUntilReady(ready);
 
     const result = await running.stop({ graceMs: 500, confirmMs: 5000 });
 
@@ -180,13 +181,10 @@ describe("the waits a stop spends", () => {
     // default honest, because a default nobody runs is a comment, not a promise.
     const dir = await makeTempDir();
     cleanup.push(dir.dispose);
-    const source =
-      process.platform === "win32"
-        ? "setInterval(() => {}, 1000);\n"
-        : "process.on('SIGTERM', () => {});\nsetInterval(() => {}, 1000);\n";
-    const command = await writeScript(dir.path, "impatient.js", source);
+    const { command, ready } = await writeStubbornScript(dir.path, "impatient.js");
     const running = run(command, dir.path);
     const pid = pidOf(running);
+    await waitUntilReady(ready);
 
     expect(KILL_GRACE_MS).toBe(3000);
     expect(KILL_CONFIRM_MS).toBe(5000);

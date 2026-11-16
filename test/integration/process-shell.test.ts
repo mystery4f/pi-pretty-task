@@ -396,7 +396,10 @@ describe("pretty_task_bg_run's shell override", () => {
     const message = resultText(started);
 
     expect(message).toContain(`"${refused}"`);
-    expect(message).toContain(onWindows ? "bash" : "inherit");
+    // The per-call override names the shells this platform accepts; the POSIX
+    // variable's `inherit` belongs to the environment-key error, not this one.
+    expect(message).toContain("use one of: default");
+    expect(message).toContain(onWindows ? "cmd" : "bash");
     expect(message).toContain("The task was not started.");
     const listed = await harness.call("pretty_task_bg_status", {});
     expect(resultText(listed)).not.toContain("echo hi");

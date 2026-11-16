@@ -664,6 +664,12 @@ describe("pretty_task_bg_kill", () => {
     const task = await startRunning(harness, command, "long job");
     const pid = trackPid(task);
 
+    // Kill only once the command has printed: a fast runner used to kill it
+    // before the first byte, leaving "no output yet" where the test reads it.
+    await waitFor("the command to write its first line", async () => {
+      const text = resultText(await harness.call("pretty_task_bg_logs", { id: task.id }));
+      return text.includes("waiting");
+    });
     const killed = await harness.call("pretty_task_bg_kill", { id: task.id });
     const details = killed.details as TaskDetails & { stopOutcome: string };
 
