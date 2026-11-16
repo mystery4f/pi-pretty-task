@@ -61,6 +61,11 @@ export interface Iteration {
   readonly startedAt: number;
   endedAt?: number;
   status: IterationStatus;
+  /**
+   * The wake reached pi, so this turn is real and its tool calls are its own. A
+   * fire that never woke the model keeps this false and records no calls.
+   */
+  bound?: boolean;
   /** Calls in the order they started; the newest are kept when the cap is hit. */
   calls: IterationCall[];
   /** Calls the cap dropped. Non-zero means the record is truncated, and says so. */

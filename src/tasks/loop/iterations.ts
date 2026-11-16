@@ -59,15 +59,6 @@ export interface IterationsOptions {
   readonly historyLimit?: number;
 }
 
-/** A fire whose turn has not settled yet, addressed by record rather than by object. */
-interface OpenFire {
-  readonly directory: string;
-  readonly taskId: string;
-  readonly fire: number;
-  /** False until the wake was handed to pi: a pending fire captures no calls. */
-  bound: boolean;
-}
-
 /** Both caps are positive counts: a zero would record nothing and say nothing. */
 export function positiveLimit(value: number | undefined, fallback: number, name: string): number {
   if (value === undefined) return fallback;
@@ -82,8 +73,6 @@ export class Iterations {
   private readonly now: () => number;
   private readonly callLimit: number;
   private readonly historyLimit: number;
-  /** Open fires in the order they opened, so the newest is the one a start joins. */
-  private readonly openFires: OpenFire[] = [];
 
   constructor(options: IterationsOptions) {
     this.sessions = options.sessions;
@@ -112,14 +101,7 @@ export class Iterations {
       droppedCalls: 0,
     };
     task.iterations.push(iteration);
-    for (const dropped of this.dropOverflow(task))
-      this.forget(fire.session.directory, task.id, dropped);
-    this.openFires.push({
-      directory: fire.session.directory,
-      taskId: task.id,
-      fire: iteration.fire,
-      bound: false,
-    });
+    this.dropOverflow(task);
     await this.sessions.persist(fire.session);
   }
 
@@ -128,8 +110,8 @@ export class Iterations {
    * wake is handed to pi. From here on the turn's tool calls are its own.
    */
   bind(fire: LoopFire): void {
-    const entry = this.findOpenFire(fire);
-    if (entry !== undefined) entry.bound = true;
+    const iteration = this.resolve(fire.session, fire.task.id, fire.fire);
+    if (iteration !== undefined) iteration.bound = true;
   }
 
   /**
@@ -140,13 +122,11 @@ export class Iterations {
    * and `settle` owns the record from here on.
    */
   async drop(fire: LoopFire): Promise<void> {
-    const entry = this.findOpenFire(fire);
-    if (entry === undefined || entry.bound) return;
-    this.forget(fire.session.directory, fire.task.id, fire.fire);
     const task = fire.session.tasks.get(fire.task.id);
     if (task?.kind !== "prompt-loop") return;
     const index = task.iterations.findIndex((iteration) => iteration.fire === fire.fire);
-    if (index < 0) return;
+    const found = task.iterations[index];
+    if (found === undefined || found.bound === true) return;
     task.iterations.splice(index, 1);
     await this.sessions.persist(fire.session);
   }
@@ -209,77 +189,55 @@ export class Iterations {
     const session = await this.sessions.session(scope);
     const at = this.now();
     let changed = false;
-    for (let index = this.openFires.length - 1; index >= 0; index -= 1) {
-      const entry = this.openFires[index];
-      if (entry === undefined || entry.directory !== session.directory) continue;
-      if (!entry.bound) continue;
-      this.openFires.splice(index, 1);
-      const iteration = this.resolve(session, entry.taskId, entry.fire);
-      if (iteration === undefined || iteration.status !== "running") continue;
-      closeIteration(iteration, at, aborted ? "aborted" : "completed");
+    for (const task of session.tasks.values()) {
+      if (task.kind !== "prompt-loop") continue;
+      let closed = false;
+      for (const iteration of task.iterations) {
+        if (iteration.bound !== true || iteration.status !== "running") continue;
+        closeIteration(iteration, at, aborted ? "aborted" : "completed");
+        closed = true;
+      }
+      if (!closed) continue;
       // The turn the loop woke has settled, which is the loop's own change: its
       // row moves on that, not only on the fire that started the turn (ADR-0010).
-      const owner = session.tasks.get(entry.taskId);
-      if (owner?.kind === "prompt-loop") owner.updatedAt = at;
+      task.updatedAt = at;
       changed = true;
     }
     if (changed) await this.sessions.persist(session);
   }
 
-  /** Drop the oldest iterations until the history cap holds; return their fire numbers. */
-  private dropOverflow(task: PromptLoopTask): number[] {
-    const dropped: number[] = [];
+  /** Drop the oldest iterations until the history cap holds. */
+  private dropOverflow(task: PromptLoopTask): void {
     while (task.iterations.length > this.historyLimit) {
       const oldest = task.iterations.shift();
       if (oldest === undefined) break;
-      dropped.push(oldest.fire);
       task.droppedIterations = (task.droppedIterations ?? 0) + 1;
     }
-    return dropped;
   }
 
   /**
-   * The iteration a start belongs to: the newest open iteration that its wake
-   * already produced. Resolved through the session's current record every time,
-   * because a loop update replaces the record object and a deleted loop must
-   * stop capturing calls. A pending iteration is skipped, not pruned: its turn
-   * has not begun, and the current turn belongs to whoever started it.
+   * The iteration a start belongs to: the newest open iteration its wake already
+   * produced. Read from the session's current records every time, because a loop
+   * update replaces the record object and a deleted loop must stop capturing
+   * calls. A pending iteration is skipped, not pruned: its turn has not begun,
+   * and the current turn belongs to whoever started it.
    */
   private newestOpenIteration(session: TaskSession): Iteration | undefined {
-    for (let index = this.openFires.length - 1; index >= 0; index -= 1) {
-      const entry = this.openFires[index];
-      if (entry === undefined || entry.directory !== session.directory) continue;
-      const iteration = this.resolve(session, entry.taskId, entry.fire);
-      if (iteration === undefined || iteration.status !== "running") {
-        this.openFires.splice(index, 1);
-        continue;
+    let newest: Iteration | undefined;
+    for (const task of session.tasks.values()) {
+      if (task.kind !== "prompt-loop") continue;
+      for (const iteration of task.iterations) {
+        if (iteration.bound !== true || iteration.status !== "running") continue;
+        if (newest === undefined || iteration.startedAt >= newest.startedAt) newest = iteration;
       }
-      if (entry.bound) return iteration;
     }
-    return undefined;
+    return newest;
   }
 
   private resolve(session: TaskSession, taskId: string, fire: number): Iteration | undefined {
     const task = session.tasks.get(taskId);
     if (task?.kind !== "prompt-loop") return undefined;
     return task.iterations.find((iteration) => iteration.fire === fire);
-  }
-
-  private forget(directory: string, taskId: string, fire: number): void {
-    const index = this.openFires.findIndex(
-      (entry) => entry.directory === directory && entry.taskId === taskId && entry.fire === fire,
-    );
-    if (index >= 0) this.openFires.splice(index, 1);
-  }
-
-  /** The bookkeeping entry for one fire, if it is still open in memory. */
-  private findOpenFire(fire: LoopFire): OpenFire | undefined {
-    return this.openFires.find(
-      (candidate) =>
-        candidate.directory === fire.session.directory &&
-        candidate.taskId === fire.task.id &&
-        candidate.fire === fire.fire,
-    );
   }
 }
 
