@@ -7,13 +7,17 @@
 
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 /** A temporary directory removed once the test finishes. */
 export async function makeTempDir(): Promise<{ path: string; dispose(): Promise<void> }> {
-  const path = await mkdtemp(join(tmpdir(), "pi-pretty-task-"));
+  // Windows CI hands out an 8.3 short path (`C:\Users\RUNNER~1\…`) that the
+  // process layer resolves to its long form. One temporary directory that is
+  // two strings is two directories to every comparison in these tests, so take
+  // the long form once, here.
+  const path = await realpath(await mkdtemp(join(tmpdir(), "pi-pretty-task-")));
   return {
     path,
     async dispose() {
