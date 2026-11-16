@@ -2035,7 +2035,7 @@ function rightText(
  * terminal takes a shorter variant whole rather than a cut-off one, so a reader
  * near the right edge never meets half a key (ticket #34).
  */
-const LIST_KEYS: readonly string[] = [
+export const LIST_KEYS: readonly string[] = [
   "↑/↓ · Enter logs · k stop · f filter · o others · 1/2/3 tabs · / search · R rerun · a stop all · alt+q close",
   "↑/↓ · Enter logs · k stop · f filter · o others · 1/2/3 · / search · R rerun · alt+q close",
   "↑/↓ · Enter logs · k stop · f filter · / search · alt+q close",

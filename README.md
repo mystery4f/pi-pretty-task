@@ -19,7 +19,7 @@ A build that takes six minutes, a watcher that runs all afternoon, a loop that p
 │   ● build         bg-4xq81 · process    running  1m 05s 12KB │
 │   ● nightly       lp-9f3kd · prompt-loop paused  5 fires    │
 ╰──────────────────────────────────────────────────────────────╯
- ↑/↓ select · Enter logs · k stop · f filter · o others · 1/2/3 tabs · / search · R rerun · a stop all · alt+q close
+ ↑/↓ · Enter logs · k stop · f filter · o others · 1/2/3 tabs · / search · R rerun · a stop all · alt+q close
 ```
 
 ## What it does

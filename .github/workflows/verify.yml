@@ -7,7 +7,14 @@ on:
 
 jobs:
   verify:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Both platforms carry load-bearing code: Windows the cmd.exe and
+        # taskkill paths, POSIX the process-group signals. A suite that only
+        # runs where it was written proves half of it.
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

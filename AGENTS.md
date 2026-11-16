@@ -14,6 +14,7 @@ Two jobs, one package: run long-lived shell commands in the background (`Task`),
 Decisions with rationale live in `docs/adr/`. `GLOSSARY.md` holds the vocabulary; use its terms in code, docs and replies.
 
 The index page for these docs is the wiki synthesis page `pi-pretty-task 文档索引` under `.llm-wiki/wiki/syntheses/` — not a README. Add a row there when you add an ADR or a design doc; keep the repository markdown as the source of truth and the wiki page as the map.
+Work-in-flight notes live in one place: the wiki's `pi-pretty-task 交接…` synthesis page. `.tmp/` is scratch for one session only — nothing there survives as a handoff, and a second copy of "what is next" is a stale copy.
 
 ## Non-goals
 
