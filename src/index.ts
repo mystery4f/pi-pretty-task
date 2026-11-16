@@ -19,7 +19,7 @@ import { ChainTasks } from "./tasks/chain/chain-tasks.js";
 import { Iterations } from "./tasks/loop/iterations.js";
 import { type LoopFire, LoopTasks } from "./tasks/loop/loop-tasks.js";
 import { loopTaskTools } from "./tasks/loop/tools.js";
-import { LoopWakes } from "./tasks/loop/wake-queue.js";
+import { WakeDesk } from "./tasks/loop/wake-desk.js";
 import { ProcessTasks, type ProcessTaskView } from "./tasks/process/process-tasks.js";
 import { loadTemplates } from "./tasks/process/templates.js";
 import { processTaskTools } from "./tasks/process/tools.js";
@@ -90,7 +90,7 @@ export interface ExtensionController {
   /** The queues that run process tasks one at a time (ADR-0013). */
   readonly chainTasks: ChainTasks;
   /** The wakes a fire produced that pi has not been given yet (ADR-0009). */
-  readonly wakes: LoopWakes;
+  readonly wakes: WakeDesk;
   /** Handle every loop due at `at` in this extension's loaded sessions. */
   pump(at: number): Promise<LoopFire[]>;
   /**
@@ -167,10 +167,14 @@ export function createExtension(
     callLimit: options.iterationCallLimit,
     historyLimit: options.iterationHistoryLimit,
   });
-  // Wakes wait here until the agent is idle: pi's own follow-up queue cannot be
-  // recalled, so sending one mid-turn would survive a `pretty_task_loop_update` (ADR-0009).
-  const wakes = new LoopWakes();
-  let agentIdle = true;
+  // Wakes wait in the desk until the agent is idle: pi's own follow-up queue
+  // cannot be recalled, so sending one mid-turn would survive a
+  // `pretty_task_loop_update` (ADR-0009).
+  const wakes = new WakeDesk({
+    iterations,
+    send: (fire) => sendLoopWake(pi, fire),
+    onChange: () => publishStatusLine(),
+  });
   const loops = new LoopTasks({
     sessions,
     now,
@@ -362,39 +366,11 @@ export function createExtension(
   const interval = options.pumpIntervalMs ?? DEFAULT_PUMP_INTERVAL_MS;
   let timer: ReturnType<typeof setInterval> | undefined;
 
-  /**
-   * A queued wake still belongs to the model while its loop runs; a fire that
-   * used the last of `maxFires` completed the loop and must still be delivered,
-   * because that turn is the reason the count reached the limit. Every other
-   * stopped loop drops its wake: pause, complete, expiry, delete.
-   */
-  const isDeliverable = (fire: LoopFire): boolean => {
-    const task = fire.session.tasks.get(fire.task.id);
-    if (task?.kind !== "prompt-loop") return false;
-    return task.status === "running" || fire.final;
-  };
-
-  /**
-   * Deliver what an idle agent may receive, drop what may not. A wake goes out
-   * only after its iteration binds, so the turn it wakes records its own calls;
-   * a dropped wake takes its pending iteration with it (ADR-0009).
-   */
-  const flushWakes = async (): Promise<void> => {
-    if (!agentIdle) return;
-    const { deliver, drop } = wakes.drain(isDeliverable);
-    for (const fire of drop) await recordSafely(iterations.drop(fire));
-    for (const fire of deliver) {
-      iterations.bind(fire);
-      sendLoopWake(pi, fire);
-    }
-    if (deliver.length > 0 || drop.length > 0) publishStatusLine();
-  };
-
   // A timer failure must not become an unhandled rejection that kills pi.
   const pumpSafely = async (): Promise<void> => {
     try {
       await loops.pump(now());
-      await flushWakes();
+      await wakes.flush();
       // The countdown is part of the line, so every tick repaints it.
       publishStatusLine();
     } catch (error) {
@@ -432,14 +408,13 @@ export function createExtension(
     startTimer();
     // A fresh session has no run in flight, so a wake left queued by the last one
     // may go out now.
-    agentIdle = true;
-    await flushWakes();
+    await wakes.settled();
   });
   // A turn is running: a fire recorded now waits for `agent_settled`, because pi
   // queues a `followUp` and cannot take it back (ADR-0009).
   pi.on("agent_start", async (_event, ctx) => {
     await remember(ctx);
-    agentIdle = false;
+    wakes.busy();
   });
   // One pump on a turn boundary covers the case where the timer was delayed by
   // a long turn; a loop that became due during the turn wakes right after it.
@@ -464,8 +439,7 @@ export function createExtension(
   pi.on("agent_settled", async (event, ctx) => {
     await remember(ctx);
     await recordSafely(iterations.settle(scopeOf(ctx), event.aborted));
-    agentIdle = true;
-    await flushWakes();
+    await wakes.settled();
   });
   pi.on("session_shutdown", () => {
     stopTimer();
@@ -483,10 +457,10 @@ export function createExtension(
     // test or an idle timer sees the wake; while busy it only queues.
     pump: async (at) => {
       const fires = await loops.pump(at);
-      await flushWakes();
+      await wakes.flush();
       return fires;
     },
-    flushWakes,
+    flushWakes: () => wakes.flush(),
   };
 }
 

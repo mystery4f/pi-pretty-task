@@ -13,7 +13,7 @@
 
 import type { TaskScope } from "../base/runtime-state.js";
 import type { ChainTask, ProcessTask, Task } from "../base/task.js";
-import { type OwnedTaskSession, TaskSessions } from "../base/task-sessions.js";
+import type { OwnedTaskSession, TaskSessions } from "../base/task-sessions.js";
 import type {
   ProcessTaskView,
   StartProcessTaskInput,
