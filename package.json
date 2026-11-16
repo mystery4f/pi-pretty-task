@@ -1,9 +1,17 @@
 {
   "name": "pi-pretty-task",
-  "version": "0.0.1",
+  "version": "1.0.0",
   "description": "Background processes and scheduled agent wake-ups for pi, behind one panel.",
   "type": "module",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mystery4f/pi-pretty-task.git"
+  },
+  "homepage": "https://github.com/mystery4f/pi-pretty-task#readme",
+  "bugs": {
+    "url": "https://github.com/mystery4f/pi-pretty-task/issues"
+  },
   "engines": {
     "node": ">=22.19.0"
   },
@@ -22,11 +30,18 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "src",
+    "skills"
   ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "scripts": {
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
     "build": "npm run clean && tsc -p tsconfig.json",
+    "prepack": "npm run build",
     "check": "tsc -p tsconfig.dev.json",
     "lint": "biome check .",
     "lint:fix": "biome check --fix .",

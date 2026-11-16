@@ -1,0 +1,68 @@
+name: publish
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  npm:
+    name: npm publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+          cache: npm
+
+      - run: npm ci
+      - run: npm run check
+      - run: npm run lint
+      - run: npm run build
+
+      # verify.yml gates every push/PR with the full suite. This job adds the
+      # release-specific gate: the tarball must actually carry the source, the
+      # skill and the compiled output that package.json points pi at.
+      - name: Verify the release tarball
+        run: |
+          npm pack --dry-run --json --ignore-scripts > pack.json
+          for f in src/index.ts skills/pretty-task-templates/SKILL.md dist/index.js; do
+            jq -e --arg f "$f" '.[0].files | any(.path == $f)' pack.json > /dev/null \
+              || { echo "::error::$f is missing from the tarball"; exit 1; }
+          done
+          echo "tarball OK: $(jq '.[0].entryCount' pack.json) files"
+          rm pack.json
+
+      - name: Release tag must match package.json
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if [ "${RELEASE_TAG#v}" != "$version" ]; then
+            echo "::error::tag '$RELEASE_TAG' does not match version '$version' (expected v$version)"
+            exit 1
+          fi
+          echo "Publishing $version from $RELEASE_TAG"
+
+      - name: Check npm credentials
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "::error::NPM_TOKEN is not configured. Add the npm granular access token as a repository secret (Settings > Secrets and variables > Actions)."
+            exit 1
+          fi
+
+      - name: Publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ "${{ github.event.release.prerelease }}" = "true" ]; then
+            npm publish --tag next
+          else
+            npm publish
+          fi
