@@ -43,7 +43,8 @@
       },
       "suspicious": {
         "noExplicitAny": "error",
-        "noConsole": "off"
+        "noConsole": "off",
+        "noImportCycles": "error"
       }
     }
   },

@@ -28,7 +28,7 @@ src/tasks/base/         Task supertype: kind-tagged record, store, atomic writes
 src/tasks/process/      spawn, process-tree kill, output files, exit codes
 src/tasks/loop/         interval scheduling, pump, fire → sendMessage, iteration recording
 src/ui/                 /tasks overlay (both kinds), detail view, message renderers
-docs/                   scope + ADRs (prose docs in Chinese)
+docs/                   scope + ADRs + reviews (prose docs in Chinese)
 test/unit/              tests whose subject never leaves the process
 test/integration/       tests that spawn a real child and stop a real tree
 test/support/           harness, temp directories, `waitFor`, process helpers
@@ -45,7 +45,7 @@ Source references from the two upstream plugins are cloned under `.tmp/` (git-ig
 - Platform behavior is load-bearing. The Windows invocation shape (`cmd.exe /d /s /c`, `windowsVerbatimArguments`), POSIX process groups, `taskkill /PID <n> /T`, and the "SIGTERM → grace → SIGKILL → poll until the group is gone" sequence exist because upstream debugged them the hard way. Keep them, and keep the comment that says why.
 - Tests read the panel's filter list and key counts from the exported constants (`PANEL_FILTERS`, `DEFAULT_PANEL_FILTER`) instead of hard-coding presses, so a default that moves does not turn four cases red.
 - Every state file write is atomic (temp file + rename) and every read tolerates a corrupt file by falling back to `.prev`.
-- Style is machine-enforced: `.editorconfig` (2 spaces, LF, final newline) plus Biome for both formatting and linting — one tool, so there is no Prettier/ESLint pair to keep in sync. `npm run lint` must be clean before a change is done; do not reformat files you did not otherwise touch.
+- Style is machine-enforced: `.editorconfig` (2 spaces, LF, final newline) plus Biome for both formatting and linting — one tool, so there is no Prettier/ESLint pair to keep in sync. `npm run lint` must be clean before a change is done; do not reformat files you did not otherwise touch. The same run catches import cycles (`suspicious/noImportCycles`): a split that leaves two files importing each other fails `npm run lint`, so the direction of a dependency is enforced rather than remembered.
 
 
 ## Verification
