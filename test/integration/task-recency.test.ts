@@ -9,6 +9,7 @@
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { TaskSessions } from "../../src/tasks/base/task-sessions.js";
 import { ProcessTasks } from "../../src/tasks/process/process-tasks.js";
 import { killTree, makeTempDir, waitFor, writeScript } from "../support/processes.js";
 
@@ -42,7 +43,7 @@ describe("task recency", () => {
 
     const start = 1_000_000;
     let now = start;
-    const tasks = new ProcessTasks({ now: () => now });
+    const tasks = new ProcessTasks({ sessions: new TaskSessions(), now: () => now });
     const scope = { cwd: directory.path, sessionId: "session-recency" };
 
     const record = await tasks.start({ ...scope, command, name: "ticker" });

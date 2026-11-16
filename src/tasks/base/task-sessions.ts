@@ -18,13 +18,34 @@ import { sessionTaskDirectory } from "./runtime-state.js";
 import type { Task, TaskKind } from "./task.js";
 import { TaskStore } from "./task-store.js";
 
-/** One session's loaded record set, shared by the stores that use it. */
+/**
+ * One session's loaded records: where they came from, and the map every store
+ * shares, so a save from one kind never drops another kind's record.
+ */
 export interface TaskSession {
   readonly directory: string;
-  readonly store: TaskStore;
   /** Every record of the session, both kinds. */
   readonly tasks: Map<string, Task>;
 }
+/**
+ * A session this extension runs in. Only this kind can be written and only this
+ * kind may be pumped: a session that was merely looked at must never fire, wake
+ * or save. The store lives here rather than on {@link TaskSession} so the wrong
+ * one cannot be persisted by accident — the mistake this split exists to stop.
+ */
+export interface OwnedTaskSession extends TaskSession {
+  readonly owned: true;
+  readonly store: TaskStore;
+}
+/**
+ * A session that was only looked at: read from disk on request, never adopted by
+ * the hub, never written, and its directory is not even made.
+ */
+export interface PeekedTaskSession extends TaskSession {
+  readonly owned: false;
+}
+/** What a read path accepts: either ownership, since it only looks. */
+export type AnyTaskSession = OwnedTaskSession | PeekedTaskSession;
 
 export interface TaskSessionsOptions {
   /** Clock seam for tests; defaults to `Date.now`. */
@@ -57,20 +78,22 @@ export class TaskSessions {
    * and session, and the promise keeps two calls from loading the same history
    * twice.
    */
-  private readonly sessions = new Map<string, Promise<TaskSession>>();
+  private readonly sessions = new Map<string, Promise<OwnedTaskSession>>();
 
   constructor(options: TaskSessionsOptions = {}) {
     this.now = options.now ?? Date.now;
     this.randomInt = options.randomInt ?? randomInt;
   }
 
-  /** The session's records, loaded from disk on first use. */
-  session(scope: TaskScope): Promise<TaskSession> {
+  /**
+   * The session's records, adopted by this hub: its directory is made, the map is
+   * shared with every other store, and it may be persisted and fired.
+   */
+  session(scope: TaskScope): Promise<OwnedTaskSession> {
     const directory = sessionTaskDirectory(scope.cwd, scope.sessionId);
     const existing = this.sessions.get(directory);
     if (existing !== undefined) return existing;
-
-    const opened = this.open(directory, true);
+    const opened = this.adopt(directory);
     this.sessions.set(directory, opened);
     return opened;
   }
@@ -81,8 +104,8 @@ export class TaskSessions {
    * through here: a session this extension is not running in must never become
    * one it holds, pumps or writes.
    */
-  read(scope: TaskScope): Promise<TaskSession> {
-    return this.open(sessionTaskDirectory(scope.cwd, scope.sessionId), false);
+  read(scope: TaskScope): Promise<PeekedTaskSession> {
+    return this.peek(sessionTaskDirectory(scope.cwd, scope.sessionId));
   }
 
   /**
@@ -90,12 +113,12 @@ export class TaskSessions {
    * single turn (a chain step ending) looks a record up here; the loop pump does
    * not, because a session that was only ever looked at must never be fired.
    */
-  loaded(): Promise<TaskSession[]> {
+  loaded(): Promise<OwnedTaskSession[]> {
     return Promise.all([...this.sessions.values()]);
   }
 
   /** Write the whole record set; queued and best effort in the store itself. */
-  persist(session: TaskSession): Promise<void> {
+  persist(session: OwnedTaskSession): Promise<void> {
     return session.store.save([...session.tasks.values()]);
   }
 
@@ -118,15 +141,25 @@ export class TaskSessions {
     }
   }
 
-  /**
-   * `create` says whether this is a session the extension writes to: only then is
-   * its directory made, so a read of another session leaves the filesystem alone.
-   */
-  private async open(directory: string, create: boolean): Promise<TaskSession> {
-    if (create) await mkdir(directory, { recursive: true });
+  /** The records of one directory, with the store that owns the file itself. */
+  private async fill(directory: string): Promise<{ store: TaskStore; tasks: Map<string, Task> }> {
     const store = new TaskStore(directory, { now: this.now });
     const tasks = new Map<string, Task>();
     for (const record of await store.load()) tasks.set(record.id, record);
-    return { directory, store, tasks };
+    return { store, tasks };
+  }
+  /** Adopt: make the directory, keep the store, share the map. */
+  private async adopt(directory: string): Promise<OwnedTaskSession> {
+    await mkdir(directory, { recursive: true });
+    const { store, tasks } = await this.fill(directory);
+    return { directory, store, tasks, owned: true };
+  }
+  /**
+   * Look: parse the file and keep nothing, so a session this extension is not
+   * running in leaves the filesystem exactly as it was.
+   */
+  private async peek(directory: string): Promise<PeekedTaskSession> {
+    const { tasks } = await this.fill(directory);
+    return { directory, tasks, owned: false };
   }
 }

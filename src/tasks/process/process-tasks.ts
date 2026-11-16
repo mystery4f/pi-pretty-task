@@ -23,7 +23,7 @@ import {
   MAX_RUNNING_TASKS_ENV,
 } from "../base/settings.js";
 import type { KillReason, ProcessTask, Task, TaskStatus } from "../base/task.js";
-import { type TaskSession, TaskSessions } from "../base/task-sessions.js";
+import { type OwnedTaskSession, TaskSessions } from "../base/task-sessions.js";
 import { resolveShellPolicy, type ShellChoice, type ShellPolicy } from "./shell.js";
 import {
   type RunningProcess,
@@ -172,7 +172,7 @@ export interface ProcessTasksOptions {
    */
   onFinish?: (view: ProcessTaskView) => void;
   /** Shared session loader; one instance is passed to every kind of store. */
-  sessions?: TaskSessions;
+  sessions: TaskSessions;
   /**
    * Shell resolved at load time. Absent, the store resolves one from `env`: a task
    * started by a test still runs in the platform's default shell.
@@ -183,7 +183,7 @@ export interface ProcessTasksOptions {
  * The process store's view of a shared session: the loaded records plus the
  * processes this store is supervising.
  */
-interface SessionTasks extends TaskSession {
+interface SessionTasks extends OwnedTaskSession {
   readonly running: Map<string, RunningProcess>;
   /** Why each running task is being stopped, kept until its exit is booked. */
   readonly killReasons: Map<string, KillReason>;
@@ -316,11 +316,13 @@ export class ProcessTasks {
 
   /** Loads and saves the shared record set; both kinds write through it. */
   private readonly hub: TaskSessions;
-  constructor(options: ProcessTasksOptions = {}) {
+  constructor(options: ProcessTasksOptions) {
     this.platform = options.platform ?? process.platform;
     this.env = options.env;
     this.now = options.now ?? Date.now;
-    this.hub = options.sessions ?? new TaskSessions({ now: this.now });
+    // Required, not defaulted: a second hub would load the same directory into a
+    // second map, and whichever saved last would erase the other's records.
+    this.hub = options.sessions;
     this.killGraceMs = options.killGraceMs;
     this.killConfirmMs = options.killConfirmMs;
     this.outputCapBytes = options.outputCapBytes ?? DEFAULT_OUTPUT_CAP_BYTES;
@@ -388,7 +390,7 @@ export class ProcessTasks {
    * here instead of staying `waiting`, because the chain behind it is waiting for
    * an end, not for a process.
    */
-  async launch(session: TaskSession, id: string): Promise<ProcessTask | undefined> {
+  async launch(session: OwnedTaskSession, id: string): Promise<ProcessTask | undefined> {
     const runtime = await this.attached(session);
     const task = runtime.tasks.get(id);
     if (task === undefined || task.kind !== "process" || task.status !== "waiting")
@@ -952,7 +954,7 @@ export class ProcessTasks {
    * session in when it launches a step, so the queue and the process it starts
    * work on one map of records instead of two copies of the same history.
    */
-  private async attached(shared: TaskSession): Promise<SessionTasks> {
+  private async attached(shared: OwnedTaskSession): Promise<SessionTasks> {
     const existing = this.sessions.get(shared.directory);
     if (existing !== undefined) return existing;
     const opened = this.attach(shared);
@@ -960,7 +962,7 @@ export class ProcessTasks {
     return opened;
   }
 
-  private async attach(shared: TaskSession): Promise<SessionTasks> {
+  private async attach(shared: OwnedTaskSession): Promise<SessionTasks> {
     // A loaded record carries the output size it was last saved with; the file
     // itself is the truth. Refresh once per process store, even when the loop
     // tools loaded the session first.

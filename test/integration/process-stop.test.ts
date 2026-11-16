@@ -11,6 +11,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { TaskSessions } from "../../src/tasks/base/task-sessions.js";
 import { ProcessTasks } from "../../src/tasks/process/process-tasks.js";
 import {
   KILL_CONFIRM_MS,
@@ -159,6 +160,7 @@ describe("the store's kill reason", () => {
     const command = await writeScript(dir.path, "forever.js", "setInterval(() => {}, 1000);\n");
     const tasks = new ProcessTasks({
       killGraceMs: TEST_KILL_GRACE_MS,
+      sessions: new TaskSessions(),
     });
     const scope = { cwd: dir.path, sessionId: "session-timeout-kill" };
 
@@ -208,6 +210,7 @@ describe("the waits a stop spends", () => {
     const command = await writeScript(dir.path, "impatient.js", source);
     const tasks = new ProcessTasks({
       killGraceMs: TEST_KILL_GRACE_MS,
+      sessions: new TaskSessions(),
     });
     const scope = { cwd: dir.path, sessionId: "session-narrow-grace" };
     const task = await tasks.start({ ...scope, command, name: "narrow" });

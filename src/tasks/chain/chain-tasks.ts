@@ -13,7 +13,7 @@
 
 import type { TaskScope } from "../base/runtime-state.js";
 import type { ChainTask, ProcessTask, Task } from "../base/task.js";
-import { type TaskSession, TaskSessions } from "../base/task-sessions.js";
+import { type OwnedTaskSession, TaskSessions } from "../base/task-sessions.js";
 import type {
   ProcessTaskView,
   StartProcessTaskInput,
@@ -24,7 +24,7 @@ import type {
 /** What a chain needs from the process store: queue a step, run it, stop it. */
 export interface StepRunner {
   queueStep(input: StartProcessTaskInput): Promise<ProcessTask>;
-  launch(session: TaskSession, id: string): Promise<ProcessTask | undefined>;
+  launch(session: OwnedTaskSession, id: string): Promise<ProcessTask | undefined>;
   stop(
     scope: TaskScope,
     id: string,
@@ -76,7 +76,7 @@ export interface ChainTasksOptions {
    */
   processes: () => StepRunner;
   /** Shared session loader; the same instance every other store is given. */
-  sessions?: TaskSessions;
+  sessions: TaskSessions;
   /** Clock seam for tests; defaults to `Date.now`. */
   now?: () => number;
   /**
@@ -101,7 +101,9 @@ export class ChainTasks {
   constructor(options: ChainTasksOptions) {
     this.processes = options.processes;
     this.now = options.now ?? Date.now;
-    this.sessions = options.sessions ?? new TaskSessions({ now: this.now });
+    // Required, not defaulted: a second hub would be a second copy of the same
+    // directory's records, and the two would overwrite each other.
+    this.sessions = options.sessions;
     this.onFinish = options.onFinish;
   }
 
@@ -233,7 +235,7 @@ export class ChainTasks {
    * is, or settle the chain. A new chain, a chain whose step just ended, and a chain
    * the user just appended to all arrive here, so one rule covers every arrival.
    */
-  private async advanceChain(session: TaskSession, chain: ChainTask): Promise<void> {
+  private async advanceChain(session: OwnedTaskSession, chain: ChainTask): Promise<void> {
     for (;;) {
       if (chain.status !== "running") return;
       const id = chain.steps[chain.cursor];
@@ -278,7 +280,7 @@ export class ChainTasks {
    * stopped it (ADR-0013).
    */
   private async end(
-    session: TaskSession,
+    session: OwnedTaskSession,
     chain: ChainTask,
     status: "completed" | "failed",
     error?: string,
@@ -307,7 +309,7 @@ export class ChainTasks {
    * The adoption is what makes `after: <taskId>` mean the same thing as
    * `after: <chainId>` a moment later, without inventing a second kind of queue.
    */
-  private async chainOf(session: TaskSession, anchor: Task): Promise<ChainTask> {
+  private async chainOf(session: OwnedTaskSession, anchor: Task): Promise<ChainTask> {
     if (anchor.kind === "chain") {
       this.revive(anchor);
       return anchor;
@@ -367,7 +369,7 @@ export class ChainTasks {
   }
 
   /** The loaded session that holds a record, without loading anything new. */
-  private async sessionOf(id: string): Promise<TaskSession | undefined> {
+  private async sessionOf(id: string): Promise<OwnedTaskSession | undefined> {
     for (const session of await this.sessions.loaded()) {
       if (session.tasks.has(id)) return session;
     }

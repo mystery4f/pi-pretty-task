@@ -264,10 +264,12 @@ describe("pretty_task_bg_run's directory and environment", () => {
   });
 
   it("accepts env only as string values, at the schema seam", () => {
-    const processes = new ProcessTasks();
-    const run = processTaskTools(processes, new ChainTasks({ processes: () => processes })).find(
-      (tool) => tool.name === "pretty_task_bg_run",
-    );
+    const sessions = new TaskSessions();
+    const processes = new ProcessTasks({ sessions });
+    const run = processTaskTools(
+      processes,
+      new ChainTasks({ sessions, processes: () => processes }),
+    ).find((tool) => tool.name === "pretty_task_bg_run");
     if (run === undefined) throw new Error("pretty_task_bg_run is not registered");
     const accepts = (env: unknown): boolean =>
       Value.Check(run.parameters, { command: "echo hi", env });
@@ -822,7 +824,7 @@ describe("queued steps", () => {
       "queued.js",
       `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "ran");\n`,
     );
-    const tasks = new ProcessTasks();
+    const tasks = new ProcessTasks({ sessions: new TaskSessions() });
     const scope = { cwd: dir.path, sessionId: "session-queue" };
 
     const step = await tasks.queueStep({
@@ -922,7 +924,7 @@ describe("queued steps", () => {
   it("rejects a step whose working directory cannot be used, before any record exists", async () => {
     const dir = await makeTempDir();
     cleanup.push(dir.dispose);
-    const tasks = new ProcessTasks();
+    const tasks = new ProcessTasks({ sessions: new TaskSessions() });
     const scope = { cwd: dir.path, sessionId: "session-queue-bad-cwd" };
 
     await expect(

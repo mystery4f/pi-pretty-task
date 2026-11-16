@@ -28,7 +28,7 @@ import type {
   TaskStatus,
 } from "../base/task.js";
 import { FIRE_HISTORY_LIMIT } from "../base/task.js";
-import type { TaskSession, TaskSessions } from "../base/task-sessions.js";
+import type { AnyTaskSession, OwnedTaskSession, TaskSessions } from "../base/task-sessions.js";
 import type { Recurrence } from "./schedule.js";
 import {
   parseDurationMs,
@@ -48,7 +48,7 @@ export interface LoopFire {
   /** One-based fire number, already recorded on the task. */
   readonly fire: number;
   /** The session the fire belongs to, so the iteration can be persisted as it opens. */
-  readonly session: TaskSession;
+  readonly session: OwnedTaskSession;
   /**
    * This fire used the last of `maxFires`, so the loop is already completed.
    * The wake still belongs to the model even though the loop stopped.
@@ -63,7 +63,7 @@ export interface CommandFire {
   readonly at: number;
   /** One-based fire number, already recorded on the task as running. */
   readonly fire: number;
-  readonly session: TaskSession;
+  readonly session: OwnedTaskSession;
   /** The scope the loop was created in, so the child lands in the same session. */
   readonly scope: TaskScope;
 }
@@ -807,7 +807,7 @@ export class LoopTasks {
    * session; any other is read from disk and never joins the hub, so a session
    * that is only being displayed cannot be pumped, woken or written.
    */
-  private readSession(scope: TaskScope): Promise<TaskSession> {
+  private readSession(scope: TaskScope): Promise<AnyTaskSession> {
     const directory = sessionTaskDirectory(scope.cwd, scope.sessionId);
     return this.owned.has(directory) ? this.sessions.session(scope) : this.sessions.read(scope);
   }
@@ -817,7 +817,7 @@ export class LoopTasks {
    * Deliberately not `TaskSessions.loaded()`: that set also holds sessions a panel
    * merely visited, and a visit must never fire their schedules.
    */
-  private ownedSessions(): Promise<Array<{ scope: TaskScope; session: TaskSession }>> {
+  private ownedSessions(): Promise<Array<{ scope: TaskScope; session: OwnedTaskSession }>> {
     return Promise.all(
       [...this.owned.values()].map(async (scope) => ({
         scope,
@@ -826,12 +826,12 @@ export class LoopTasks {
     );
   }
 
-  private findLoop(session: TaskSession, id: string): LoopTask | undefined {
+  private findLoop(session: AnyTaskSession, id: string): LoopTask | undefined {
     const task = session.tasks.get(id);
     return task?.kind === "prompt-loop" || task?.kind === "cmd-loop" ? task : undefined;
   }
 
-  private findCmdLoop(session: TaskSession, id: string): CmdLoopTask | undefined {
+  private findCmdLoop(session: AnyTaskSession, id: string): CmdLoopTask | undefined {
     const task = session.tasks.get(id);
     return task?.kind === "cmd-loop" ? task : undefined;
   }
