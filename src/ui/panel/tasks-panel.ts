@@ -37,6 +37,7 @@ import {
 } from "./model.js";
 import { bestFieldMatch, type RowMatch } from "./query.js";
 import { inTab, passesFilter } from "./row-filter.js";
+import type { PanelView } from "./view.js";
 
 export * from "./format.js";
 export * from "./keys.js";
@@ -77,7 +78,7 @@ function tailLines(text: string, count: number): string[] {
   return lines.slice(Math.max(0, lines.length - count));
 }
 
-export class TasksPanel implements Component {
+export class TasksPanel implements Component, PanelView {
   readonly tui: Pick<TUI, "requestRender">;
   readonly theme: Theme;
   readonly done: () => void;

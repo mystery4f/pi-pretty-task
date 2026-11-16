@@ -38,9 +38,9 @@ import {
   LIST_VISIBLE_ROWS,
   type PanelTaskView,
 } from "./model.js";
-import type { TasksPanel } from "./tasks-panel.js";
+import type { PanelView } from "./view.js";
 
-export function renderDetail(panel: TasksPanel, width: number): string[] {
+export function renderDetail(panel: PanelView, width: number): string[] {
   const row = panel.detailRow();
   if (row === undefined) return renderList(panel, width);
   if (row.task.kind === "prompt-loop") return renderLoopDetail(panel, row, width);
@@ -49,7 +49,7 @@ export function renderDetail(panel: TasksPanel, width: number): string[] {
   return renderProcessDetail(panel, width);
 }
 
-export function renderChainDetail(panel: TasksPanel, row: PanelTaskView, width: number): string[] {
+export function renderChainDetail(panel: PanelView, row: PanelTaskView, width: number): string[] {
   const theme = panel.theme;
   const task = row.task;
   if (task.kind !== "chain") return renderList(panel, width);
@@ -109,7 +109,7 @@ export function renderChainDetail(panel: TasksPanel, row: PanelTaskView, width: 
   );
 }
 
-export function renderProcessDetail(panel: TasksPanel, width: number): string[] {
+export function renderProcessDetail(panel: PanelView, width: number): string[] {
   const theme = panel.theme;
   const row = panel.detailRow();
   if (row === undefined || row.task.kind !== "process") return renderList(panel, width);
@@ -155,7 +155,7 @@ export function renderProcessDetail(panel: TasksPanel, width: number): string[] 
   );
 }
 
-export function outputBox(panel: TasksPanel, width: number): string[] {
+export function outputBox(panel: PanelView, width: number): string[] {
   const theme = panel.theme;
   const inner = Math.max(1, width - 2);
   const edge = (glyph: string): string => theme.fg("borderAccent", glyph);
@@ -181,7 +181,7 @@ export function outputBox(panel: TasksPanel, width: number): string[] {
   return lines;
 }
 
-export function renderLoopDetail(panel: TasksPanel, row: PanelTaskView, width: number): string[] {
+export function renderLoopDetail(panel: PanelView, row: PanelTaskView, width: number): string[] {
   const theme = panel.theme;
   const task = row.task;
   if (task.kind !== "prompt-loop") return renderList(panel, width);
@@ -242,7 +242,7 @@ export function renderLoopDetail(panel: TasksPanel, row: PanelTaskView, width: n
 }
 
 export function renderCommandLoopDetail(
-  panel: TasksPanel,
+  panel: PanelView,
   row: PanelTaskView,
   width: number,
 ): string[] {
@@ -332,7 +332,7 @@ export function renderCommandLoopDetail(
   );
 }
 
-export function renderIterationDetail(panel: TasksPanel, width: number): string[] {
+export function renderIterationDetail(panel: PanelView, width: number): string[] {
   const theme = panel.theme;
   const row = panel.detailRow();
   if (row === undefined || row.task.kind !== "prompt-loop") return renderList(panel, width);
@@ -382,7 +382,7 @@ export function renderIterationDetail(panel: TasksPanel, width: number): string[
 }
 
 export function callLine(
-  panel: TasksPanel,
+  panel: PanelView,
   call: IterationCall,
   index: number,
   width: number,
@@ -398,32 +398,32 @@ export function callLine(
   return `${prefix}${body}${theme.fg(CALL_COLOUR[call.status], status)}`;
 }
 
-export function position(panel: TasksPanel): string {
+export function position(panel: PanelView): string {
   if (panel.following || panel.detailLines.length === 0) return "following tail · ↑ scroll";
   const [from, to] = window(panel);
   const total = panel.detailLines.length;
   return `lines ${String(from + 1)}–${String(to)} of ${String(total)} · ↑/↓ scroll · r follows`;
 }
 
-export function window(panel: TasksPanel): [number, number] {
+export function window(panel: PanelView): [number, number] {
   const total = panel.detailLines.length;
   const to = Math.max(0, total - panel.scrollBack);
   return [Math.max(0, to - DETAIL_OUTPUT_LINES), to];
 }
 
-export function field(panel: TasksPanel, label: string, value: string): string {
+export function field(panel: PanelView, label: string, value: string): string {
   // Cut here, once, against the frame: the border and the label take their share first.
   const room = Math.max(8, panel.renderWidth - 2 - LABEL_WIDTH - 2);
   const text = visibleWidth(value) > room ? truncateToWidth(value, room, "…", false) : value;
   return `${panel.theme.fg("muted", pad(`${label}:`, LABEL_WIDTH))}${text}`;
 }
 
-export function sessionField(panel: TasksPanel, row: PanelTaskView): string[] {
+export function sessionField(panel: PanelView, row: PanelTaskView): string[] {
   if (!foreign(panel, row) || row.sessionId === undefined) return [];
   return [field(panel, "Session", panel.theme.fg("dim", row.sessionId))];
 }
 
-export function updatedText(panel: TasksPanel, updatedAt: number): string {
+export function updatedText(panel: PanelView, updatedAt: number): string {
   const age = formatDuration(Math.max(0, panel.now() - updatedAt));
   return `${formatClockTime(updatedAt)} · ${age} ago`;
 }

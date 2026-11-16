@@ -33,9 +33,9 @@ import {
 } from "./model.js";
 import type { MatchField } from "./query.js";
 import { inTab } from "./row-filter.js";
-import type { TasksPanel } from "./tasks-panel.js";
+import type { PanelView } from "./view.js";
 
-export function renderList(panel: TasksPanel, width: number): string[] {
+export function renderList(panel: PanelView, width: number): string[] {
   const theme = panel.theme;
   const inner = Math.max(1, width - 2);
   const body: string[] = [];
@@ -84,7 +84,7 @@ export function renderList(panel: TasksPanel, width: number): string[] {
   return listFrame(panel, body, width);
 }
 
-export function listHeader(panel: TasksPanel, width: number): string[] {
+export function listHeader(panel: PanelView, width: number): string[] {
   const theme = panel.theme;
   const heading = theme.fg("borderMuted", "──") + theme.fg("text", " Background Tasks ");
   const rule = Math.max(0, width - visibleWidth("── Background Tasks "));
@@ -101,7 +101,7 @@ export function listHeader(panel: TasksPanel, width: number): string[] {
   return lines;
 }
 
-export function tabBand(panel: TasksPanel): string {
+export function tabBand(panel: PanelView): string {
   const theme = panel.theme;
   const pages = PANEL_TABS.map((tab, index) => {
     const live = liveCount(panel, tab);
@@ -118,14 +118,14 @@ export function tabBand(panel: TasksPanel): string {
   return `${pages.join(divider)}${theme.fg("muted", `· filter: ${panel.filter}`)}`;
 }
 
-export function liveCount(panel: TasksPanel, tab: PanelTab): number {
+export function liveCount(panel: PanelView, tab: PanelTab): number {
   return panel.allRows.filter(
     (row) =>
       inTab(row.task, tab) && (row.task.status === "running" || row.task.status === "paused"),
   ).length;
 }
 
-export function countsLine(panel: TasksPanel): string {
+export function countsLine(panel: PanelView): string {
   const theme = panel.theme;
   const counts = { running: 0, succeeded: 0, failed: 0, timeout: 0, killed: 0 };
   for (const row of panel.allRows) {
@@ -165,11 +165,11 @@ export function countsLine(panel: TasksPanel): string {
     .join("  ");
 }
 
-export function listFooter(_panel: TasksPanel, room: number): string {
+export function listFooter(_panel: PanelView, room: number): string {
   return fittedFooter(LIST_KEYS, room);
 }
 
-export function listFrame(panel: TasksPanel, body: string[], width: number): string[] {
+export function listFrame(panel: PanelView, body: string[], width: number): string[] {
   const theme = panel.theme;
   const inner = Math.max(1, width - 2);
   const edge = (glyph: string): string => theme.fg("borderAccent", glyph);
@@ -198,7 +198,7 @@ export function listFrame(panel: TasksPanel, body: string[], width: number): str
 }
 
 export function listRow(
-  panel: TasksPanel,
+  panel: PanelView,
   row: PanelTaskView,
   selected: boolean,
   width: number,
@@ -280,7 +280,7 @@ export function listRow(
     : line;
 }
 
-export function fireStrip(panel: TasksPanel, task: CmdLoopTask, room: number): string {
+export function fireStrip(panel: PanelView, task: CmdLoopTask, room: number): string {
   const theme = panel.theme;
   const newest = task.fireHistory.slice(-STRIP_CELLS);
   // Widths are counted on the bare glyphs, so a theme's escapes never cost a
@@ -295,13 +295,13 @@ export function fireStrip(panel: TasksPanel, task: CmdLoopTask, room: number): s
   return cells.map((cell) => cell.themed).join(" ");
 }
 
-export function stepRecord(panel: TasksPanel, id: string): Task | undefined {
+export function stepRecord(panel: PanelView, id: string): Task | undefined {
   // Both stores are searched: a chain `o` brought in still has to name its steps,
   // and those records live in the session that owns it (ticket #27).
   return [...panel.allRows, ...panel.otherRows].find((row) => row.task.id === id)?.task;
 }
 
-export function chainPlace(_panel: TasksPanel, task: ChainTask): string {
+export function chainPlace(_panel: PanelView, task: ChainTask): string {
   if (task.steps.length === 0) return "no step queued";
   if (task.cursor >= task.steps.length)
     return `${String(task.steps.length)} of ${String(task.steps.length)} done`;
@@ -309,7 +309,7 @@ export function chainPlace(_panel: TasksPanel, task: ChainTask): string {
 }
 
 export function chainCells(
-  panel: TasksPanel,
+  panel: PanelView,
   row: PanelTaskView,
   room = Number.POSITIVE_INFINITY,
 ): {
@@ -379,7 +379,7 @@ export function chainCells(
 }
 
 export function highlight(
-  panel: TasksPanel,
+  panel: PanelView,
   text: string,
   colour: ThemeColor,
   positions: readonly number[],
@@ -404,10 +404,10 @@ export function highlight(
   return themed;
 }
 
-export function selectedIndex(panel: TasksPanel): number {
+export function selectedIndex(panel: PanelView): number {
   return panel.rows.findIndex((row) => row.task.id === panel.selectedId);
 }
 
-export function foreign(panel: TasksPanel, row: PanelTaskView | undefined): boolean {
+export function foreign(panel: PanelView, row: PanelTaskView | undefined): boolean {
   return row?.sessionId !== undefined && row.sessionId !== panel.source.sessionId;
 }
