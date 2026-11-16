@@ -12,3 +12,4 @@
 {"page_type":"synthesis","title":"pi-pretty-task 交接：v0.2 收尾状态","path":"syntheses/pi-pretty-task-交接v02-收尾状态","timestamp":"2026-11-15T06:18:29.441Z","kind":"ensure_page"}
 {"slug":"obs-2026-11-16-release-design-for-pi-pretty-task-1-0-0","title":"Release design for pi-pretty-task 1.0.0","relevance":"high","timestamp":"2026-11-16T07:10:32.911Z","kind":"observe"}
 {"slug":"windows-ci-slow-fsync-record-write","title":"Windows CI: fsync per state write outran the record wait","category":"bugfix","timestamp":"2026-11-16T13:13:39.712Z","kind":"retro"}
+{"slug":"obs-2026-11-16-pi-plugin-six-phase-skill-chain-created","title":"pi-plugin six-phase skill chain created","relevance":"high","timestamp":"2026-11-16T13:48:56.545Z","kind":"observe"}

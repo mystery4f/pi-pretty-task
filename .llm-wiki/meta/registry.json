@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "last_updated": "2026-11-16T13:13:39.725Z",
+  "last_updated": "2026-11-16T13:48:56.552Z",
   "pages": {
     "sources/await-state-not-bytes-in-process-tests": {
       "type": "source",
@@ -54,6 +54,23 @@
       "created": "2026-11-14",
       "updated": "2026-11-14"
     },
+    "sources/obs-2026-11-16-pi-plugin-six-phase-skill-chain-created": {
+      "type": "source",
+      "title": "Observation: pi-plugin six-phase skill chain created",
+      "tags": [
+        "skills",
+        "pi-plugin",
+        "chain",
+        "context-broker"
+      ],
+      "status": "observation",
+      "slug": "obs-2026-11-16-pi-plugin-six-phase-skill-chain-created",
+      "relevance": "high",
+      "observed_at": "2026-11-16T13:48:56.542Z",
+      "source_context": "Turning pi-pretty-task experience into reusable skill chain",
+      "created": "2026-11-16",
+      "updated": "2026-11-16"
+    },
     "sources/obs-2026-11-16-release-design-for-pi-pretty-task-1-0-0": {
       "type": "source",
       "title": "Observation: Release design for pi-pretty-task 1.0.0",
@@ -88,15 +105,6 @@
       "slug": "slow-suite-timings-not-workers",
       "created": "2026-11-15",
       "updated": "2026-11-15"
-    },
-    "sources/windows-ci-slow-fsync-record-write": {
-      "type": "source",
-      "title": "Windows CI: fsync per state write outran the record wait",
-      "category": "bugfix",
-      "status": "insight",
-      "slug": "windows-ci-slow-fsync-record-write",
-      "created": "2026-11-16",
-      "updated": "2026-11-16"
     },
     "sources/windows-taskkill-t-needs-force-for-console-node": {
       "type": "source",

@@ -5,6 +5,7 @@
   "sources/delete-remote-branch-via-gh-api": [],
   "sources/obs-2026-11-14-kill-path-skipped-persist-and-notice-in-pi-pretty-task": [],
   "sources/obs-2026-11-14-loop-wake-backlog-storms-after-a-long-turn": [],
+  "sources/obs-2026-11-16-pi-plugin-six-phase-skill-chain-created": [],
   "sources/obs-2026-11-16-release-design-for-pi-pretty-task-1-0-0": [],
   "sources/pi-git-install-omits-dev-deps-so-ship-ts-entry": [
     "syntheses/release-1-0-0-publish-support"

@@ -41,6 +41,6 @@
 ## [2026-11-16T07:10:32.911Z] observe
 - slug: "obs-2026-11-16-release-design-for-pi-pretty-task-1-0-0", title: "Release design for pi-pretty-task 1.0.0", relevance: "high"
 
-## [2026-11-16T13:13:39.712Z] retro
-- slug: "windows-ci-slow-fsync-record-write", title: "Windows CI: fsync per state write outran the record wait", category: "bugfix"
+## [2026-11-16T13:48:56.545Z] observe
+- slug: "obs-2026-11-16-pi-plugin-six-phase-skill-chain-created", title: "pi-plugin six-phase skill chain created", relevance: "high"
 
