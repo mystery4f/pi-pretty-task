@@ -177,7 +177,7 @@ describe("chain tasks", () => {
       ...scope,
       command,
       name: "build",
-      env: { STEP_LOG: log, STEP_NAME: "build", STEP_EXIT: "1" },
+      env: { STEP_LOG: log, STEP_NAME: "build", STEP_EXIT: "1", STEP_DELAY: "1500" }, // still running while the queue is added
     });
     const second = await queue(stores, scope, first.id, command, "deploy", {
       STEP_LOG: log,
