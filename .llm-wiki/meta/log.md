@@ -62,3 +62,12 @@
 ## [2026-11-16T18:23:41.712Z] retro
 - slug: "pi-pretty-task-one-projection-and-formula", title: "一个形状一处投影，一个式子一处实现", category: "architecture"
 
+## [2026-11-16T18:34:05.832Z] observe
+- slug: "obs-2026-11-16-biome-noimportcycles", title: "Biome noImportCycles 代替环依赖检查脚本", relevance: "high"
+
+## [2026-11-16T18:34:15.153Z] observe
+- slug: "obs-2026-11-16-skills-lint-skills-mjs", title: "skills 结构检查脚本 lint-skills.mjs", relevance: "medium"
+
+## [2026-11-16T18:34:15.155Z] observe
+- slug: "obs-2026-11-16-docs-reviews", title: "评审报告进 docs/reviews 并登记索引", relevance: "medium"
+

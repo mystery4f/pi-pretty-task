@@ -9,8 +9,11 @@
 - [[sources/obs-2026-11-14-kill-path-skipped-persist-and-notice-in-pi-pretty-task]] — Observation: Kill path skipped persist and notice in pi-pretty-task *(created: 2026-11-14)*
 - [[sources/obs-2026-11-14-loop-wake-backlog-storms-after-a-long-turn]] — Observation: Loop wake backlog storms after a long turn *(created: 2026-11-14)*
 - [[sources/obs-2026-11-16-7]] — Observation: 面板项目 7 项架构重构完成 *(created: 2026-11-16)*
+- [[sources/obs-2026-11-16-biome-noimportcycles]] — Observation: Biome noImportCycles 代替环依赖检查脚本 *(created: 2026-11-16)*
+- [[sources/obs-2026-11-16-docs-reviews]] — Observation: 评审报告进 docs/reviews 并登记索引 *(created: 2026-11-16)*
 - [[sources/obs-2026-11-16-pi-plugin-six-phase-skill-chain-created]] — Observation: pi-plugin six-phase skill chain created *(created: 2026-11-16)*
 - [[sources/obs-2026-11-16-release-design-for-pi-pretty-task-1-0-0]] — Observation: Release design for pi-pretty-task 1.0.0 *(created: 2026-11-16)*
+- [[sources/obs-2026-11-16-skills-lint-skills-mjs]] — Observation: skills 结构检查脚本 lint-skills.mjs *(created: 2026-11-16)*
 - [[sources/pi-git-install-omits-dev-deps-so-ship-ts-entry]] — pi 的 git 安装不带 devDeps，入口要写 .ts 而不是靠 prepare 构建 *(created: 2026-11-15)*
 - [[sources/pi-pretty-task-one-projection-and-formula]] — 一个形状一处投影，一个式子一处实现 *(created: 2026-11-16)*
 - [[sources/pi-pretty-task-panel-intents-and-view]] — 面板：键盘说意图，渲染方拿只读视图 *(created: 2026-11-16)*
@@ -30,4 +33,4 @@
 - [[syntheses/verify-red-tests-handoff]] — verify 红测修复交接（5 个 integration 用例） *(created: 2026-11-16)*
 
 ---
-*Last updated: 2026-11-16T18:23:41.728Z* | *Total pages: 21*
+*Last updated: 2026-11-16T18:34:15.161Z* | *Total pages: 24*

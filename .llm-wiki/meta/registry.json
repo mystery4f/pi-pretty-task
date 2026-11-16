@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "last_updated": "2026-11-16T18:23:41.728Z",
+  "last_updated": "2026-11-16T18:34:15.161Z",
   "pages": {
     "sources/await-state-not-bytes-in-process-tests": {
       "type": "source",
@@ -70,6 +70,41 @@
       "created": "2026-11-16",
       "updated": "2026-11-16"
     },
+    "sources/obs-2026-11-16-biome-noimportcycles": {
+      "type": "source",
+      "title": "Observation: Biome noImportCycles 代替环依赖检查脚本",
+      "tags": [
+        "biome",
+        "lint",
+        "architecture",
+        "cycles",
+        "tooling"
+      ],
+      "status": "observation",
+      "slug": "obs-2026-11-16-biome-noimportcycles",
+      "relevance": "high",
+      "observed_at": "2026-11-16T18:34:05.830Z",
+      "source_context": "评审后的收尾：给仓库加环依赖检查",
+      "created": "2026-11-16",
+      "updated": "2026-11-16"
+    },
+    "sources/obs-2026-11-16-docs-reviews": {
+      "type": "source",
+      "title": "Observation: 评审报告进 docs/reviews 并登记索引",
+      "tags": [
+        "docs",
+        "architecture",
+        "review",
+        "convention"
+      ],
+      "status": "observation",
+      "slug": "obs-2026-11-16-docs-reviews",
+      "relevance": "medium",
+      "observed_at": "2026-11-16T18:34:15.154Z",
+      "source_context": "评审报告入库与技能修订",
+      "created": "2026-11-16",
+      "updated": "2026-11-16"
+    },
     "sources/obs-2026-11-16-pi-plugin-six-phase-skill-chain-created": {
       "type": "source",
       "title": "Observation: pi-plugin six-phase skill chain created",
@@ -101,6 +136,23 @@
       "relevance": "high",
       "observed_at": "2026-11-16T07:10:32.902Z",
       "source_context": "Adding release-triggered npm auto-publish and packaging 1.0.0",
+      "created": "2026-11-16",
+      "updated": "2026-11-16"
+    },
+    "sources/obs-2026-11-16-skills-lint-skills-mjs": {
+      "type": "source",
+      "title": "Observation: skills 结构检查脚本 lint-skills.mjs",
+      "tags": [
+        "skills",
+        "tooling",
+        "markdown",
+        "lint"
+      ],
+      "status": "observation",
+      "slug": "obs-2026-11-16-skills-lint-skills-mjs",
+      "relevance": "medium",
+      "observed_at": "2026-11-16T18:34:15.152Z",
+      "source_context": "给 ~/.agents/skills 加结构检查",
       "created": "2026-11-16",
       "updated": "2026-11-16"
     },

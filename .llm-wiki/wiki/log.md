@@ -2,6 +2,9 @@
 
 ## 2026-11-16
 
+- **observe**: {"relevance":"medium","slug":"obs-2026-11-16-docs-reviews","title":"评审报告进 docs/reviews 并登记索引"}
+- **observe**: {"relevance":"medium","slug":"obs-2026-11-16-skills-lint-skills-mjs","title":"skills 结构检查脚本 lint-skills.mjs"}
+- **observe**: {"relevance":"high","slug":"obs-2026-11-16-biome-noimportcycles","title":"Biome noImportCycles 代替环依赖检查脚本"}
 - **retro**: {"category":"architecture","slug":"pi-pretty-task-one-projection-and-formula","title":"一个形状一处投影，一个式子一处实现"}
 - **retro**: {"category":"architecture","slug":"pi-pretty-task-side-index-to-field","title":"并行索引应当塌回记录上的一个字段"}
 - **retro**: {"category":"architecture","slug":"pi-pretty-task-panel-intents-and-view","title":"面板：键盘说意图，渲染方拿只读视图"}
