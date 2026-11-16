@@ -12,6 +12,7 @@
   "sources/slow-suite-timings-not-workers": [
     "sources/await-state-not-bytes-in-process-tests"
   ],
+  "sources/windows-ci-slow-fsync-record-write": [],
   "sources/windows-taskkill-t-needs-force-for-console-node": [
     "sources/slow-suite-timings-not-workers"
   ],

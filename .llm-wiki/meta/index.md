@@ -11,6 +11,7 @@
 - [[sources/obs-2026-11-16-release-design-for-pi-pretty-task-1-0-0]] — Observation: Release design for pi-pretty-task 1.0.0 *(created: 2026-11-16)*
 - [[sources/pi-git-install-omits-dev-deps-so-ship-ts-entry]] — pi 的 git 安装不带 devDeps，入口要写 .ts 而不是靠 prepare 构建 *(created: 2026-11-15)*
 - [[sources/slow-suite-timings-not-workers]] — 慢测试先治写死的时长，再谈并行度 *(created: 2026-11-15)*
+- [[sources/windows-ci-slow-fsync-record-write]] — Windows CI: fsync per state write outran the record wait *(created: 2026-11-16)*
 - [[sources/windows-taskkill-t-needs-force-for-console-node]] — Windows 上 taskkill /T 不加 /F 停不下控制台 node *(created: 2026-11-15)*
 
 ## Synthesiss
@@ -23,4 +24,4 @@
 - [[syntheses/verify-red-tests-handoff]] — verify 红测修复交接（5 个 integration 用例） *(created: 2026-11-16)*
 
 ---
-*Last updated: 2026-11-16T08:16:46.989Z* | *Total pages: 14*
+*Last updated: 2026-11-16T13:13:39.725Z* | *Total pages: 15*

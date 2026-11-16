@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "last_updated": "2026-11-16T08:16:46.989Z",
+  "last_updated": "2026-11-16T13:13:39.725Z",
   "pages": {
     "sources/await-state-not-bytes-in-process-tests": {
       "type": "source",
@@ -88,6 +88,15 @@
       "slug": "slow-suite-timings-not-workers",
       "created": "2026-11-15",
       "updated": "2026-11-15"
+    },
+    "sources/windows-ci-slow-fsync-record-write": {
+      "type": "source",
+      "title": "Windows CI: fsync per state write outran the record wait",
+      "category": "bugfix",
+      "status": "insight",
+      "slug": "windows-ci-slow-fsync-record-write",
+      "created": "2026-11-16",
+      "updated": "2026-11-16"
     },
     "sources/windows-taskkill-t-needs-force-for-console-node": {
       "type": "source",

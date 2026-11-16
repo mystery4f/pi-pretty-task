@@ -2,6 +2,7 @@
 
 ## 2026-11-16
 
+- **retro**: {"category":"bugfix","slug":"windows-ci-slow-fsync-record-write","title":"Windows CI: fsync per state write outran the record wait"}
 - **observe**: {"relevance":"high","slug":"obs-2026-11-16-release-design-for-pi-pretty-task-1-0-0","title":"Release design for pi-pretty-task 1.0.0"}
 
 ## 2026-11-15
