@@ -12,7 +12,7 @@
  * @author mystery4f <40482524+mystery4f@users.noreply.github.com>
  */
 
-import type { Theme, ThemeColor } from "@earendil-works/pi-coding-agent";
+import type { Theme } from "@earendil-works/pi-coding-agent";
 import {
   type Component,
   matchesKey,
@@ -20,64 +20,27 @@ import {
   truncateToWidth,
   visibleWidth,
 } from "@earendil-works/pi-tui";
-import { formatBytes, formatClockTime, formatDuration } from "../tasks/base/format.js";
-import type {
-  ChainTask,
-  CmdLoopTask,
-  FireRecord,
-  PromptLoopTask,
-  Task,
-} from "../tasks/base/task.js";
-import type { Iteration, IterationCall } from "../tasks/loop/iteration.js";
+import { formatBytes } from "../tasks/base/format.js";
+import type { CmdLoopTask, FireRecord, PromptLoopTask, Task } from "../tasks/base/task.js";
+import type { Iteration } from "../tasks/loop/iteration.js";
+import { renderDetail, renderIterationDetail } from "./panel-detail.js";
 import {
   bestFieldMatch,
-  CALL_COLOUR,
-  callsHeading,
-  callsText,
-  callTopFor,
-  dotColour,
-  exitText,
-  FIRE_COLOUR,
-  FIRE_MARK,
-  failureStreak,
-  fireLine,
-  firesHeading,
-  firesText,
-  fittedFooter,
-  formatSize,
-  ITERATION_COLOUR,
   inTab,
-  isCommandCall,
-  iterationLine,
-  iterationsText,
-  kindWord,
-  LIST_KEYS,
-  type MatchField,
   messageOf,
-  missedText,
-  nameColour,
-  nextFireText,
-  PROCESS_KEYS,
-  pad,
   pageKey,
   passesFilter,
   pastedQuery,
   type RowMatch,
-  rightText,
-  STEP_MARK,
-  singleLine,
-  stepColour,
   typedQuery,
 } from "./panel-format.js";
+import { foreign, renderList, selectedIndex, stepRecord } from "./panel-list.js";
 import {
   DEFAULT_PANEL_FILTER,
   DETAIL_OUTPUT_LINES,
   DETAIL_TAIL_LINES,
-  ID_COLUMN_WIDTH,
-  LABEL_WIDTH,
   LIST_VISIBLE_ROWS,
   PANEL_FILTERS,
-  PANEL_TABS,
   type PanelFilter,
   type PanelMode,
   type PanelSource,
@@ -86,12 +49,8 @@ import {
   type PanelTaskView,
   QUERY_MAX_LENGTH,
   READ_ONLY,
-  STRIP_CELLS,
-  TAB_EMPTY,
-  TAB_TITLE,
   type TasksPanelOptions,
 } from "./panel-model.js";
-import { STATUS_COLOUR } from "./status-colour.js";
 
 export * from "./panel-format.js";
 export * from "./panel-model.js";
@@ -130,71 +89,71 @@ function tailLines(text: string, count: number): string[] {
 }
 
 export class TasksPanel implements Component {
-  private readonly tui: Pick<TUI, "requestRender">;
-  private readonly theme: Theme;
-  private readonly done: () => void;
-  private readonly source: PanelSource;
-  private readonly now: () => number;
-  private readonly timer: ReturnType<typeof setInterval> | undefined;
+  readonly tui: Pick<TUI, "requestRender">;
+  readonly theme: Theme;
+  readonly done: () => void;
+  readonly source: PanelSource;
+  readonly now: () => number;
+  readonly timer: ReturnType<typeof setInterval> | undefined;
 
-  private mode: PanelMode = "list";
+  mode: PanelMode = "list";
   /** Width of the frame being drawn; field values are cut against it. */
-  private renderWidth = 80;
+  renderWidth = 80;
   /** What the reader may open: the filter has already been applied. */
-  private rows: readonly PanelTaskView[] = [];
+  rows: readonly PanelTaskView[] = [];
   /** Every row of the session, so the counts never depend on the filters. */
-  private allRows: readonly PanelTaskView[] = [];
+  allRows: readonly PanelTaskView[] = [];
   /** The page being read; a reopened panel starts on the remembered one (ADR-0012). */
-  private tab: PanelTab = rememberedTab;
+  tab: PanelTab = rememberedTab;
   /** The status filter `f` cycles, applied inside the open page. */
-  private filter: PanelFilter = DEFAULT_PANEL_FILTER;
+  filter: PanelFilter = DEFAULT_PANEL_FILTER;
   /**
    * Whether `o` has brought in the other sessions working in this checkout. Their
    * rows are read-only and tagged, and the counts above never include them.
    */
-  private showOthers = false;
+  showOthers = false;
   /** Roots of the other sessions, loaded on demand and merged into the page. */
-  private otherRows: PanelTaskView[] = [];
+  otherRows: PanelTaskView[] = [];
   /**
    * What each page had selected when the reader left it, keyed by page. Reopening a
    * page lands where it was left rather than at the top (ADR-0012 keeps selection by id).
    */
-  private readonly selectedByTab: Record<PanelTab, string | undefined> = {
+  readonly selectedByTab: Record<PanelTab, string | undefined> = {
     processes: undefined,
     loops: undefined,
     chains: undefined,
   };
-  private selectedId: string | undefined;
-  private listTop = 0;
+  selectedId: string | undefined;
+  listTop = 0;
   /** `/` turns keys into a query instead of navigation; `alt+q` leaves it. */
-  private searching = false;
+  searching = false;
   /** The query outlives search mode: leaving keeps it, and the header keeps showing it. */
-  private query = "";
+  query = "";
   /** Where each shown row's query landed; empty when there is no query. */
-  private readonly matchScores = new Map<PanelTaskView, RowMatch>();
+  readonly matchScores = new Map<PanelTaskView, RowMatch>();
 
-  private detailId: string | undefined;
-  private detailLines: readonly string[] = [];
-  private detailTruncated = false;
-  private detailError: string | undefined;
+  detailId: string | undefined;
+  detailLines: readonly string[] = [];
+  detailTruncated = false;
+  detailError: string | undefined;
   /** Lines the reader has scrolled up from the newest; 0 follows the tail. */
-  private scrollBack = 0;
+  scrollBack = 0;
   /** False while scrolled up: the buffer stays frozen so the view does not move. */
-  private following = true;
+  following = true;
 
   /** Which iteration of the open loop is selected, by fire number. */
-  private iterationFire: number | undefined;
+  iterationFire: number | undefined;
   /** First iteration row drawn in the loop detail's newest-first list. */
-  private iterationTop = 0;
+  iterationTop = 0;
   /** First call drawn in the iteration view, counted from the oldest call. */
-  private callTop = 0;
+  callTop = 0;
 
-  private notice: string | undefined;
+  notice: string | undefined;
   /** Bytes each task had at the previous refresh, so the list can show `+4.1KB ↑`. */
-  private readonly lastBytes = new Map<string, number>();
-  private readonly recentGrowth = new Map<string, { bytes: number; at: number }>();
+  readonly lastBytes = new Map<string, number>();
+  readonly recentGrowth = new Map<string, { bytes: number; at: number }>();
   /** Serialises async work so a keypress never races the refresh it started. */
-  private pending: Promise<void> = Promise.resolve();
+  pending: Promise<void> = Promise.resolve();
 
   constructor(options: TasksPanelOptions) {
     this.tui = options.tui;
@@ -264,7 +223,7 @@ export class TasksPanel implements Component {
    * pull its parent in (ADR-0014); the counts stay over every record and never
    * follow either narrowing (ADR-0012).
    */
-  private applyFilters(): void {
+  applyFilters(): void {
     this.matchScores.clear();
     const page = (rows: readonly PanelTaskView[]): PanelTaskView[] =>
       rows
@@ -297,11 +256,11 @@ export class TasksPanel implements Component {
    * displays its step names, so those are matchable words; nothing a row does not
    * display — a step's command, a fire's id — can bring a row back (ticket #27).
    */
-  private matchField(task: Task): RowMatch | undefined {
+  matchField(task: Task): RowMatch | undefined {
     const steps =
       task.kind === "chain"
         ? task.steps.flatMap((id, index) => {
-            const name = this.stepRecord(id)?.name ?? "";
+            const name = stepRecord(this, id)?.name ?? "";
             return name === "" ? [] : [{ name, index }];
           })
         : [];
@@ -313,7 +272,7 @@ export class TasksPanel implements Component {
    * the first row. Ranking can lift the held task above the scroll window, so the
    * window follows it; a query never hides the row a reader is standing on.
    */
-  private keepSelection(): void {
+  keepSelection(): void {
     const index = this.rows.findIndex((row) => row.task.id === this.selectedId);
     if (index < 0) {
       this.selectedId = this.rows[0]?.task.id;
@@ -328,7 +287,7 @@ export class TasksPanel implements Component {
    * `+4.1KB ↑` the way a file manager shows a download. A finished task keeps its
    * final size and shows no arrow.
    */
-  private trackGrowth(): void {
+  trackGrowth(): void {
     const now = Date.now();
     for (const row of this.rows) {
       const before = this.lastBytes.get(row.task.id);
@@ -339,7 +298,7 @@ export class TasksPanel implements Component {
   }
 
   /** The `+size ↑` a still-growing task shows for a few seconds after a refresh. */
-  private growthText(row: PanelTaskView): string {
+  growthText(row: PanelTaskView): string {
     const recent = this.recentGrowth.get(row.task.id);
     if (recent === undefined || Date.now() - recent.at >= 3000) return "";
     return ` ${this.theme.fg("warning", `+${formatBytes(recent.bytes)} ↑`)}`;
@@ -348,8 +307,8 @@ export class TasksPanel implements Component {
     // Field values are cut against the frame they sit in, so the frame never has to
     // re-measure text that already carries colour.
     this.renderWidth = width;
-    if (this.mode === "iteration") return this.renderIterationDetail(width);
-    return this.mode === "detail" ? this.renderDetail(width) : this.renderList(width);
+    if (this.mode === "iteration") return renderIterationDetail(this, width);
+    return this.mode === "detail" ? renderDetail(this, width) : renderList(this, width);
   }
 
   handleInput(data: string): void {
@@ -396,7 +355,7 @@ export class TasksPanel implements Component {
 
   // ---- input ---------------------------------------------------------------
 
-  private handleListInput(data: string): void {
+  handleListInput(data: string): void {
     if (data === "/") {
       this.searching = true;
       this.paint();
@@ -434,7 +393,7 @@ export class TasksPanel implements Component {
    * A query is typed, not navigated: the panel only filters. Paste arrives as one
    * bracketed sequence, so its newlines must not read as Enter presses.
    */
-  private handleSearchInput(data: string): void {
+  handleSearchInput(data: string): void {
     if (data === "\x7f" || data === "\b") {
       this.setQuery(this.query.slice(0, -1));
       return;
@@ -449,13 +408,13 @@ export class TasksPanel implements Component {
   }
 
   /** Set the query, filter on it at once, and paint without going through the store. */
-  private setQuery(query: string): void {
+  setQuery(query: string): void {
     this.query = query.slice(0, QUERY_MAX_LENGTH);
     this.applyFilters();
     this.paint();
   }
 
-  private handleDetailInput(data: string): void {
+  handleDetailInput(data: string): void {
     const row = this.detailRow();
     if (row?.task.kind === "prompt-loop") {
       this.handleLoopDetailInput(data, row.task);
@@ -469,7 +428,7 @@ export class TasksPanel implements Component {
   }
 
   /** A process detail scrolls its output; a loop detail walks its iterations instead. */
-  private handleProcessDetailInput(data: string): void {
+  handleProcessDetailInput(data: string): void {
     if (matchesKey(data, "left")) {
       const task = this.detailRow()?.task;
       if (task?.kind === "process" && task.parentId !== undefined) {
@@ -507,7 +466,7 @@ export class TasksPanel implements Component {
     if (data === "c") this.showOutputPath();
   }
 
-  private handleLoopDetailInput(data: string, task: PromptLoopTask): void {
+  handleLoopDetailInput(data: string, task: PromptLoopTask): void {
     if (matchesKey(data, "left")) {
       this.mode = "list";
       this.iterationTop = 0;
@@ -542,7 +501,7 @@ export class TasksPanel implements Component {
    * A command loop detail walks its fires newest first; Enter opens the selected
    * fire's own process record, an ordinary task detail (ADR-0014).
    */
-  private handleCmdLoopDetailInput(data: string, task: CmdLoopTask): void {
+  handleCmdLoopDetailInput(data: string, task: CmdLoopTask): void {
     if (matchesKey(data, "left")) {
       this.mode = "list";
       this.iterationTop = 0;
@@ -574,7 +533,7 @@ export class TasksPanel implements Component {
   }
 
   /** Walk the newest-first fire list, keeping the selected row on screen. */
-  private moveFire(delta: number, task: CmdLoopTask): void {
+  moveFire(delta: number, task: CmdLoopTask): void {
     const newestFirst = [...task.fireHistory].reverse();
     if (newestFirst.length === 0) return;
     const selected = this.currentFire(task);
@@ -592,7 +551,7 @@ export class TasksPanel implements Component {
   }
 
   /** Enter on a fire: its process record, or a notice when it never ran. */
-  private openFire(): void {
+  openFire(): void {
     const row = this.detailRow();
     if (row === undefined || row.task.kind !== "cmd-loop") return;
     const fire = this.currentFire(row.task);
@@ -621,7 +580,7 @@ export class TasksPanel implements Component {
   }
 
   /** The iteration view scrolls the turn's calls; the left arrow goes back to the loop. */
-  private handleIterationInput(data: string): void {
+  handleIterationInput(data: string): void {
     if (matchesKey(data, "left")) {
       this.mode = "detail";
       this.callTop = 0;
@@ -648,7 +607,7 @@ export class TasksPanel implements Component {
   }
 
   /** Walk the newest-first iteration list, keeping the selected row on screen. */
-  private moveIteration(delta: number, task: PromptLoopTask): void {
+  moveIteration(delta: number, task: PromptLoopTask): void {
     const newestFirst = [...task.iterations].reverse();
     if (newestFirst.length === 0) return;
     const selected = this.currentIteration(task);
@@ -665,7 +624,7 @@ export class TasksPanel implements Component {
     this.paint();
   }
 
-  private openIteration(): void {
+  openIteration(): void {
     const row = this.detailRow();
     if (row === undefined || row.task.kind !== "prompt-loop") return;
     const iteration = this.currentIteration(row.task);
@@ -680,7 +639,7 @@ export class TasksPanel implements Component {
     this.paint();
   }
 
-  private scrollCalls(delta: number): void {
+  scrollCalls(delta: number): void {
     const row = this.detailRow();
     if (row === undefined || row.task.kind !== "prompt-loop") return;
     const iteration = this.currentIteration(row.task);
@@ -692,7 +651,7 @@ export class TasksPanel implements Component {
     this.paint();
   }
 
-  private moveSelection(delta: number): void {
+  moveSelection(delta: number): void {
     if (this.rows.length === 0) return;
     const current = this.rows.findIndex((row) => row.task.id === this.selectedId);
     const base = current === -1 ? 0 : current;
@@ -703,7 +662,7 @@ export class TasksPanel implements Component {
     this.paint();
   }
 
-  private openDetail(): void {
+  openDetail(): void {
     if (this.rows.length === 0) {
       this.notice =
         "No tasks to open yet — run a command with pretty_task_bg_run and it appears here.";
@@ -731,7 +690,7 @@ export class TasksPanel implements Component {
   }
 
   /** Scroll up (`delta > 0`) or down from the newest line, freezing on the way up. */
-  private scrollDetail(delta: number): void {
+  scrollDetail(delta: number): void {
     const oldest = Math.max(0, this.detailLines.length - DETAIL_OUTPUT_LINES);
     const next = Math.min(oldest, Math.max(0, this.scrollBack + delta));
     if (next === this.scrollBack) return;
@@ -746,7 +705,7 @@ export class TasksPanel implements Component {
     this.follow();
   }
 
-  private follow(): void {
+  follow(): void {
     this.following = true;
     this.scrollBack = 0;
     this.enqueue(async () => {
@@ -755,15 +714,15 @@ export class TasksPanel implements Component {
     });
   }
 
-  private stopSelected(): void {
+  stopSelected(): void {
     // In a task detail `k` stops what is open: an expanded fire is its own record,
     // so stopping it must not end the schedule behind it (ADR-0015).
-    const row = this.mode === "detail" ? this.detailRow() : this.rows[this.selectedIndex()];
+    const row = this.mode === "detail" ? this.detailRow() : this.rows[selectedIndex(this)];
     const id = row?.task.id;
     if (id === undefined) return;
     // Another session's task belongs to that session: this panel may read it, never
     // end it, so `k` says why and leaves the store alone (ticket #27).
-    if (this.foreign(row)) {
+    if (foreign(this, row)) {
       this.notice = READ_ONLY;
       this.paint();
       return;
@@ -789,10 +748,10 @@ export class TasksPanel implements Component {
   }
 
   /** `a` stops every row the list shows, one store call at a time. */
-  private stopAll(): void {
+  stopAll(): void {
     // `o` can put another session's rows on the page, and `a` stops only the ones
     // this session owns: the rest are there to be read (ticket #27).
-    const ids = this.rows.filter((row) => !this.foreign(row)).map((row) => row.task.id);
+    const ids = this.rows.filter((row) => !foreign(this, row)).map((row) => row.task.id);
     if (ids.length === 0) {
       this.notice = this.rows.length === 0 ? "No tasks to stop." : READ_ONLY;
       this.paint();
@@ -826,7 +785,7 @@ export class TasksPanel implements Component {
    * key leaves a detail or an iteration and lands on that page's list (ADR-0012).
    * The query and the status filter stay as they were — they narrow, they do not travel.
    */
-  private selectTab(next: PanelTab): void {
+  selectTab(next: PanelTab): void {
     if (next === this.tab && this.mode === "list" && !this.searching) return;
     this.selectedByTab[this.tab] = this.selectedId;
     this.tab = next;
@@ -846,7 +805,7 @@ export class TasksPanel implements Component {
   }
 
   /** `f` walks all → running → failed → done inside the open page, and round again. */
-  private cycleFilter(): void {
+  cycleFilter(): void {
     const index = PANEL_FILTERS.indexOf(this.filter);
     this.filter = PANEL_FILTERS[(index + 1) % PANEL_FILTERS.length] ?? "all";
     this.notice = this.filter === "all" ? "showing every status" : `showing ${this.filter}`;
@@ -860,7 +819,7 @@ export class TasksPanel implements Component {
    * again. They are read only and tagged, and the counts above stay this session's
    * own (ticket #27); the store is asked only when they are shown.
    */
-  private toggleOthers(): void {
+  toggleOthers(): void {
     this.showOthers = !this.showOthers;
     if (!this.showOthers) this.otherRows = [];
     if (this.showOthers && this.source.others === undefined) {
@@ -881,10 +840,10 @@ export class TasksPanel implements Component {
   }
 
   /** `R` runs the selected command again; the old row stays as its own record. */
-  private rerunSelected(): void {
+  rerunSelected(): void {
     // The key belongs to the page in front of the reader: an open fire is a process
     // record of its own, so `R` repeats that fire, not the loop above it (ticket #35).
-    const row = this.mode === "detail" ? this.detailRow() : this.rows[this.selectedIndex()];
+    const row = this.mode === "detail" ? this.detailRow() : this.rows[selectedIndex(this)];
     if (row === undefined) {
       this.notice = "No task selected.";
       this.paint();
@@ -892,7 +851,7 @@ export class TasksPanel implements Component {
     }
     // Another session started this command, so running it again is its decision, not
     // a reader's on a page that only borrowed the row (ticket #27).
-    if (this.foreign(row)) {
+    if (foreign(this, row)) {
       this.notice = READ_ONLY;
       this.paint();
       return;
@@ -946,10 +905,10 @@ export class TasksPanel implements Component {
   }
 
   /** `c` puts the output path where it can be read, since the panel cannot copy it. */
-  private showOutputPath(): void {
+  showOutputPath(): void {
     // As with `R`: the path belongs to the page in front of the reader, so an open
     // fire names its own file and a loop detail names the loop's (ticket #35).
-    const row = this.mode === "detail" ? this.detailRow() : this.rows[this.selectedIndex()];
+    const row = this.mode === "detail" ? this.detailRow() : this.rows[selectedIndex(this)];
     if (row === undefined) {
       this.notice = "No task selected.";
       this.paint();
@@ -968,7 +927,7 @@ export class TasksPanel implements Component {
   }
 
   // ---- data ----------------------------------------------------------------
-  private detailRow(): PanelTaskView | undefined {
+  detailRow(): PanelTaskView | undefined {
     return (
       this.rows.find((row) => row.task.id === this.detailId) ??
       // A fire is not a row, so a fire detail is found among the children: the
@@ -978,7 +937,7 @@ export class TasksPanel implements Component {
   }
 
   /** The iteration under the cursor, or the newest one when the store trimmed the pick. */
-  private currentIteration(task: PromptLoopTask): Iteration | undefined {
+  currentIteration(task: PromptLoopTask): Iteration | undefined {
     if (this.iterationFire !== undefined) {
       const found = task.iterations.find((iteration) => iteration.fire === this.iterationFire);
       if (found !== undefined) return found;
@@ -987,7 +946,7 @@ export class TasksPanel implements Component {
   }
 
   /** The fire under the cursor, or the newest one when the history cap trimmed it. */
-  private currentFire(task: CmdLoopTask): FireRecord | undefined {
+  currentFire(task: CmdLoopTask): FireRecord | undefined {
     if (this.iterationFire !== undefined) {
       const found = task.fireHistory.find((fire) => fire.fire === this.iterationFire);
       if (found !== undefined) return found;
@@ -995,7 +954,7 @@ export class TasksPanel implements Component {
     return task.fireHistory.at(-1);
   }
 
-  private async readTail(): Promise<void> {
+  async readTail(): Promise<void> {
     // Only a process task has an output file; a loop detail never asks the source for one.
     const row = this.detailRow();
     if (row?.task.kind !== "process") return;
@@ -1014,11 +973,11 @@ export class TasksPanel implements Component {
     }
   }
 
-  private enqueue(work: () => Promise<void>): void {
+  enqueue(work: () => Promise<void>): void {
     this.pending = this.pending.then(work, work).catch(() => undefined);
   }
 
-  private paint(): void {
+  paint(): void {
     this.tui.requestRender();
   }
 
@@ -1029,13 +988,7 @@ export class TasksPanel implements Component {
    * counts, the body, then the keys. It mirrors the panel this plugin replaces so
    * the eye lands in the same place; colours still come from theme tokens.
    */
-  private frame(
-    title: string,
-    subtitle: string,
-    body: string[],
-    footer: string,
-    width: number,
-  ): string[] {
+  frame(title: string, subtitle: string, body: string[], footer: string, width: number): string[] {
     const theme = this.theme;
     const inner = Math.max(1, width - 2);
     const edge = (glyph: string): string => theme.fg("borderAccent", glyph);
@@ -1074,22 +1027,6 @@ export class TasksPanel implements Component {
    * failure (ADR-0012). Below them, the page band names where the reader is and
    * which status filter is on; the query line stays under it.
    */
-  private listHeader(width: number): string[] {
-    const theme = this.theme;
-    const heading = theme.fg("borderMuted", "──") + theme.fg("text", " Background Tasks ");
-    const rule = Math.max(0, width - visibleWidth("── Background Tasks "));
-    const lines = [
-      heading + theme.fg("borderMuted", "─".repeat(rule)),
-      ` ${this.countsLine()} `,
-      ` ${this.tabBand()} `,
-    ];
-    // The query stays visible after search mode is left, so the reader can see why
-    // rows are missing; the counts above still cover every task.
-    if (this.query.length > 0) {
-      lines.push(` ${theme.fg("muted", "search:")} ${theme.fg("accent", this.query)} `);
-    }
-    return lines;
-  }
 
   /**
    * `1 Processes 2 │ 2 Loops 1 │ 3 Chains · filter: running`: each tab carries how
@@ -1098,164 +1035,16 @@ export class TasksPanel implements Component {
    * so the band doubles as where-am-I and as the keys that get you elsewhere
    * (ADR-0012, `1`/`2`/`3`).
    */
-  private tabBand(): string {
-    const theme = this.theme;
-    const pages = PANEL_TABS.map((tab, index) => {
-      const live = this.liveCount(tab);
-      const title = `${String(index + 1)} ${TAB_TITLE[tab]}`;
-      const badge = theme.fg(live > 0 ? "accent" : "muted", String(live));
-      return tab === this.tab
-        ? theme.bg(
-            "selectedBg",
-            `${theme.fg("text", ` ${title} `)}${theme.fg("accent", `${badge} `)}`,
-          )
-        : `${theme.fg("muted", ` ${title} `)}${badge} `;
-    });
-    const divider = theme.fg("borderMuted", "│");
-    return `${pages.join(divider)}${theme.fg("muted", `· filter: ${this.filter}`)}`;
-  }
 
   /** How many rows on that page are live; a paused loop still counts as owed a turn. */
-  private liveCount(tab: PanelTab): number {
-    return this.allRows.filter(
-      (row) =>
-        inTab(row.task, tab) && (row.task.status === "running" || row.task.status === "paused"),
-    ).length;
-  }
 
   /** One `dot label number` per ending, in the order the reader cares about. */
-  private countsLine(): string {
-    const theme = this.theme;
-    const counts = { running: 0, succeeded: 0, failed: 0, timeout: 0, killed: 0 };
-    for (const row of this.allRows) {
-      const task = row.task;
-      switch (task.status) {
-        case "running":
-        case "paused":
-          // A paused loop is still owed a turn, so it stands with the live work.
-          counts.running += 1;
-          break;
-        case "completed":
-          counts.succeeded += 1;
-          break;
-        case "failed":
-          counts.failed += 1;
-          break;
-        case "killed":
-        case "interrupted":
-          // Only a process carries a kill reason; a loop is never killed by a limit.
-          if (task.kind === "process" && task.killReason === "timeout") counts.timeout += 1;
-          else counts.killed += 1;
-          break;
-      }
-    }
-    const parts: readonly (readonly [ThemeColor, string, number])[] = [
-      ["accent", "Running", counts.running],
-      ["success", "Succeeded", counts.succeeded],
-      ["error", "Failed", counts.failed],
-      ["warning", "Timeout", counts.timeout],
-      ["muted", "Killed", counts.killed],
-    ];
-    return parts
-      .map(
-        ([colour, label, count]) =>
-          `${theme.fg(colour, "●")} ${theme.fg("muted", label)} ${theme.fg("text", String(count))}`,
-      )
-      .join("  ");
-  }
 
   /** The list's keys, the same on every page (ADR-0012): one model, three lists. */
-  private listFooter(room: number): string {
-    return fittedFooter(LIST_KEYS, room);
-  }
 
   /** The box around the rows: the header sits above it, the keys inside the bottom. */
-  private listFrame(body: string[], width: number): string[] {
-    const theme = this.theme;
-    const inner = Math.max(1, width - 2);
-    const edge = (glyph: string): string => theme.fg("borderAccent", glyph);
-    const fitted = (text: string, room: number): string =>
-      visibleWidth(text) > room ? truncateToWidth(text, room, "…", false) : text;
-    const padded = (text: string, room: number): string => {
-      const fit = fitted(text, room);
-      return fit + " ".repeat(Math.max(0, room - visibleWidth(fit)));
-    };
-    const row = (content = ""): string => `${edge("│")}${padded(content, inner)}${edge("│")}`;
-
-    const lines = [
-      // The bands above the box are full-width lines of their own, so they are cut to
-      // the terminal rather than padded to it: a tally that does not fit loses its
-      // tail instead of pushing the panel wider (ticket #34).
-      ...this.listHeader(width).map((line) => fitted(line, width)),
-      edge(`╭${"─".repeat(inner)}╮`),
-    ];
-    for (const line of body) lines.push(row(line));
-    // The keys are chosen while still plain text: cutting a coloured string can slice
-    // an escape in half and leave the border one column off.
-    const footer = this.listFooter(inner - 1);
-    lines.push(row(), row(theme.fg("dim", ` ${footer}`)));
-    lines.push(edge(`╰${"─".repeat(inner)}╯`));
-    return lines;
-  }
-
-  private renderList(width: number): string[] {
-    const theme = this.theme;
-    const inner = Math.max(1, width - 2);
-    const body: string[] = [];
-
-    if (this.rows.length === 0) {
-      // An empty page says which of the three reasons emptied it: nothing of that
-      // kind, a status filter that keeps nothing, or a query that matches no row.
-      // It never blames the other pages, which are only a keypress away.
-      const message =
-        this.allRows.every((row) => !inTab(row.task, this.tab)) || this.allRows.length === 0
-          ? TAB_EMPTY[this.tab]
-          : this.query.length > 0
-            ? "  Nothing on this page matches the search — / , then backspace, widens it."
-            : this.filter === "running"
-              ? "  Nothing is running on this page — f shows every status, so finished work is one keypress away."
-              : "  Nothing here matches this status — f moves to the next filter.";
-      body.push("", theme.fg("dim", message));
-      return this.listFrame(body, width);
-    }
-
-    // One name column for the whole page, so the ids line up and nothing more.
-    const room = (row: PanelTaskView): number => visibleWidth(this.chainCells(row).plain);
-    const longest = this.rows.reduce(
-      (most, row) =>
-        Math.max(most, row.task.kind === "chain" ? room(row) : visibleWidth(row.task.name)),
-      12,
-    );
-    // A chain sells its name column to the steps, so the numbers beside it need less
-    // room than a process's size and age; the strip sheds its finished steps instead.
-    const nameRoom = Math.min(longest, Math.max(12, inner - (this.tab === "chains" ? 48 : 79)));
-
-    const visible = this.rows.slice(this.listTop, this.listTop + LIST_VISIBLE_ROWS);
-    visible.forEach((row, offset) => {
-      body.push(this.listRow(row, this.listTop + offset === this.selectedIndex(), inner, nameRoom));
-    });
-    if (this.rows.length > LIST_VISIBLE_ROWS) {
-      const first = this.listTop + 1;
-      const last = Math.min(this.rows.length, this.listTop + LIST_VISIBLE_ROWS);
-      body.push(
-        theme.fg(
-          "dim",
-          `  Showing ${String(first)}-${String(last)} of ${String(this.rows.length)}`,
-        ),
-      );
-    }
-    if (this.notice !== undefined) body.push(theme.fg("warning", `  ${this.notice}`));
-    return this.listFrame(body, width);
-  }
-
-  private selectedIndex(): number {
-    return this.rows.findIndex((row) => row.task.id === this.selectedId);
-  }
 
   /** True for a row `o` brought in from another session: readable, never writable. */
-  private foreign(row: PanelTaskView | undefined): boolean {
-    return row?.sessionId !== undefined && row.sessionId !== this.source.sessionId;
-  }
 
   /**
    * The field's text in its own colour, with the query's characters in the accent
@@ -1263,142 +1052,22 @@ export class TasksPanel implements Component {
    * fragment, so a theme's escapes never reach the matcher and the padding keeps
    * its width.
    */
-  private highlight(text: string, colour: ThemeColor, positions: readonly number[]): string {
-    if (positions.length === 0) return this.theme.fg(colour, text);
-    let themed = "";
-    let at = 0;
-    let index = 0;
-    while (index < positions.length) {
-      const start = positions[index] ?? 0;
-      if (start > at) themed += this.theme.fg(colour, text.slice(at, start));
-      let end = start + 1;
-      index += 1;
-      while (positions[index] === end) {
-        end += 1;
-        index += 1;
-      }
-      themed += this.theme.bold(this.theme.fg("accent", text.slice(start, end)));
-      at = end;
-    }
-    if (at < text.length) themed += this.theme.fg(colour, text.slice(at));
-    return themed;
-  }
 
   /**
    * One list row, in the shape of a process listing: pointer, live dot, name, id,
    * status, then the numbers. Every cell is padded before it is coloured, so the
    * border stays straight whatever the theme does with escapes.
    */
-  private listRow(row: PanelTaskView, selected: boolean, width: number, nameRoom: number): string {
-    const theme = this.theme;
-    const task = row.task;
-    const match = this.matchScores.get(row);
-    const lit = (field: MatchField): readonly number[] =>
-      match?.field === field ? match.positions : [];
-    const pointer = selected ? theme.fg("accent", "›") : " ";
-    const dot = theme.fg(dotColour(task), "●");
-    const id = this.highlight(pad(task.id, ID_COLUMN_WIDTH), "dim", lit("id"));
-    // A row `o` brought in says whose it is: the store names a session by a UUID, so
-    // the row carries its first six characters and the detail the whole id.
-    const tag =
-      row.sessionId === undefined ? "" : theme.fg("muted", ` @${row.sessionId.slice(0, 6)}`);
-    const tagPlain = row.sessionId === undefined ? "" : ` @${row.sessionId.slice(0, 6)}`;
-    const separator = theme.fg("dim", "·");
-    // Both kinds share one table, so the row has to say which it is: a loop runs
-    // nothing and a process wakes nobody, and their numbers mean different things.
-    const kind = this.highlight(kindWord(task.kind), "muted", lit("kind"));
-    const status = this.highlight(pad(task.status, 11), STATUS_COLOUR[task.status], lit("status"));
-    const exit = exitText(task) === "" ? "" : theme.fg("dim", ` ${exitText(task)}`);
-    // A hit in a word the row does not print still finds the row; the row names
-    // the word instead of leaving the reader to guess why it is here.
-    const notePlain = match?.hidden === true ? ` via ${match.field}` : "";
-    const note = notePlain === "" ? "" : theme.fg("muted", notePlain);
-
-    // The name column is as wide as the longest name, not as wide as the terminal:
-    // a fixed split leaves a canyon between the name and the id on a wide screen.
-    // A chain spends the column on its steps instead of a name of its own (ADR-0012).
-    const chain = task.kind === "chain" ? this.chainCells(row, nameRoom) : undefined;
-    const namePlain = pad(chain?.plain ?? task.name, nameRoom);
-    const name =
-      chain === undefined
-        ? this.highlight(namePlain, nameColour(task), lit("name"))
-        : `${chain.themed}${" ".repeat(Math.max(0, nameRoom - visibleWidth(chain.plain)))}`;
-    const growth = this.growthText(row);
-    const headPlain = ` ${pointer} ${dot} ${name} ${id}${tag} ${separator} ${kind} ${status}${exit}${note} `;
-    // The numbers get the room the head leaves, minus one space of gap, so they can
-    // shed their least important parts instead of pushing the row past the border.
-    // The room is measured on the bare cells: a theme adds markup, and only the
-    // characters a reader sees should cost a number its place.
-    const headCells = ` ${selected ? "›" : " "} ● ${namePlain} ${pad(
-      task.id,
-      ID_COLUMN_WIDTH,
-    )}${tagPlain} · ${kindWord(task.kind)} ${pad(task.status, 11)}${exitText(task) === "" ? "" : ` ${exitText(task)}`}${notePlain} `;
-    const right = theme.fg(
-      "dim",
-      rightText(
-        row,
-        this.now(),
-        width - 2 - visibleWidth(headCells) - visibleWidth(growth) - 1,
-        this.foreign(row),
-      ),
-    );
-    // The strip is a command loop's own column: the newest fires, oldest left, so a
-    // failure count can never hide a run that never happened (ADR-0015). It drops
-    // its oldest cells on a narrow row and disappears entirely before wrapping.
-    const strip =
-      task.kind === "cmd-loop"
-        ? this.fireStrip(
-            task,
-            width - 2 - visibleWidth(headPlain) - visibleWidth(right) - visibleWidth(growth) - 2,
-          )
-        : "";
-    const head = strip === "" ? headPlain : `${headPlain}${strip} `;
-    // The numbers sit against the right edge so a column of sizes can be compared
-    // by eye, which is what a reader does with them.
-    const tail = `${right}${growth}`;
-    const gap = Math.max(1, width - 2 - visibleWidth(head) - visibleWidth(tail));
-    const line = `${head}${" ".repeat(gap)}${tail}`;
-    // A selected row is washed in one block of background, the way the panel this
-    // replaces marks its cursor: the eye finds it without a colour of its own.
-    return selected
-      ? theme.bg("selectedBg", line + " ".repeat(Math.max(0, width - visibleWidth(line))))
-      : line;
-  }
 
   /**
    * The fire strip: newest STRIP_CELLS fires, oldest left, one coloured cell each.
    * On a narrow row the oldest cells drop first, and when nothing fits the strip is
    * omitted rather than wrapped, so the row keeps its shape (ADR-0015).
    */
-  private fireStrip(task: CmdLoopTask, room: number): string {
-    const theme = this.theme;
-    const newest = task.fireHistory.slice(-STRIP_CELLS);
-    // Widths are counted on the bare glyphs, so a theme's escapes never cost a
-    // cell its place in the strip.
-    let cells = newest.map((fire) => {
-      const plain = `#${String(fire.fire)}${FIRE_MARK[fire.outcome]}`;
-      return { plain, themed: theme.fg(FIRE_COLOUR[fire.outcome], plain) };
-    });
-    const fitted = (): number =>
-      cells.reduce((total, cell) => total + cell.plain.length, 0) + Math.max(0, cells.length - 1);
-    while (cells.length > 0 && fitted() > room) cells = cells.slice(1);
-    return cells.map((cell) => cell.themed).join(" ");
-  }
 
   /** The record a chain step id names, or undefined while its record is missing. */
-  private stepRecord(id: string): Task | undefined {
-    // Both stores are searched: a chain `o` brought in still has to name its steps,
-    // and those records live in the session that owns it (ticket #27).
-    return [...this.allRows, ...this.otherRows].find((row) => row.task.id === id)?.task;
-  }
 
   /** Which step a chain is on, in words a reader does not have to decode a cursor for. */
-  private chainPlace(task: ChainTask): string {
-    if (task.steps.length === 0) return "no step queued";
-    if (task.cursor >= task.steps.length)
-      return `${String(task.steps.length)} of ${String(task.steps.length)} done`;
-    return `step ${String(task.cursor + 1)} of ${String(task.steps.length)}`;
-  }
 
   /**
    * The chain's own column: its steps in run order, joined by arrows, with the step at
@@ -1406,464 +1075,32 @@ export class TasksPanel implements Component {
    * got through drop first, newest kept, and a leading ellipsis says something was
    * left out — a chain never wraps and never hides the step that is running (ADR-0012).
    */
-  private chainCells(
-    row: PanelTaskView,
-    room = Number.POSITIVE_INFINITY,
-  ): {
-    plain: string;
-    themed: string;
-  } {
-    const task = row.task;
-    const match = this.matchScores.get(row);
-    const nameLit = (): readonly number[] => (match?.field === "name" ? match.positions : []);
-    if (task.kind !== "chain")
-      return {
-        plain: task.name,
-        themed: this.highlight(task.name, nameColour(task), nameLit()),
-      };
-    if (task.steps.length === 0) {
-      return {
-        plain: task.name,
-        themed: this.highlight(task.name, nameColour(task), nameLit()),
-      };
-    }
-    const cells = task.steps.map((id) => {
-      const step = this.stepRecord(id);
-      const name = step?.name ?? id;
-      const status = step?.status ?? "waiting";
-      return { name, status };
-    });
-    const build = (from: number, to: number, markers = true): { plain: string; themed: string } => {
-      const kept = cells.slice(from, to);
-      // The ellipses stand for the steps that make way, and they are the first thing
-      // to go when the column cannot hold them beside the step it must show.
-      const lead = markers && from > 0 ? "… " : "";
-      const trail = markers && to < cells.length ? " …" : "";
-      const plain = `${lead}${kept.map((cell) => cell.name).join(" → ")}${trail}`;
-      const themed =
-        this.theme.fg("dim", lead) +
-        kept
-          .map((cell, offset) => {
-            const index = from + offset;
-            const arrow = offset === 0 ? "" : this.theme.fg("dim", " → ");
-            const lit = match?.field === "step" && match.stepIndex === index ? match.positions : [];
-            const name =
-              index === task.cursor
-                ? this.theme.bold(this.highlight(cell.name, "accent", lit))
-                : this.highlight(cell.name, stepColour(cell.status), lit);
-            return `${arrow}${name}`;
-          })
-          .join("") +
-        this.theme.fg("dim", trail);
-      return { plain, themed };
-    };
-    let from = 0;
-    let to = cells.length;
-    // The running step is the one fact the row may not lose, so shedding stops at it:
-    // finished steps go first, then the waiting ones behind, whichever end is further.
-    const fits = (): boolean => visibleWidth(build(from, to).plain) <= room;
-    while (!fits() && to - from > 1) {
-      if (task.cursor > from) from += 1;
-      else to -= 1;
-    }
-    const shown = build(from, to);
-    if (visibleWidth(shown.plain) <= room) return shown;
-    const tight = build(from, to, false);
-    if (visibleWidth(tight.plain) <= room) return tight;
-    // Even the running step alone is too wide for the column: cut it like a name.
-    const plain = truncateToWidth(tight.plain, Math.max(1, room), "…", false);
-    return { plain, themed: this.theme.fg(nameColour(task), plain) };
-  }
-
-  private renderDetail(width: number): string[] {
-    const row = this.detailRow();
-    if (row === undefined) return this.renderList(width);
-    if (row.task.kind === "prompt-loop") return this.renderLoopDetail(row, width);
-    if (row.task.kind === "cmd-loop") return this.renderCommandLoopDetail(row, width);
-    if (row.task.kind === "chain") return this.renderChainDetail(row, width);
-    return this.renderProcessDetail(width);
-  }
 
   /**
    * A chain detail: the queue in run order, one line per step with the status, the
    * duration and the exit code it ended with. The step at the cursor is marked, so
    * the list says what is running now and what never got its turn (ADR-0012).
    */
-  private renderChainDetail(row: PanelTaskView, width: number): string[] {
-    const theme = this.theme;
-    const task = row.task;
-    if (task.kind !== "chain") return this.renderList(width);
-    const colour = STATUS_COLOUR[task.status];
-    const done = task.steps.filter((id) => this.stepRecord(id)?.status === "completed").length;
-    const body: string[] = [
-      this.field("Name", theme.fg("accent", task.name)),
-      this.field("ID", theme.fg("accent", task.id)),
-      ...this.sessionField(row),
-      this.field("Status", theme.fg(colour, task.status)),
-      this.field("Runtime", formatDuration(row.elapsedMs)),
-      this.field("Updated", this.updatedText(task.updatedAt)),
-      this.field(
-        "Steps",
-        `${String(done)} of ${String(task.steps.length)} done · ${this.chainPlace(task)}`,
-      ),
-    ];
-    if (task.endedAt !== undefined) {
-      body.push(this.field("Ended", formatClockTime(task.endedAt)));
-    }
-    if (task.killReason !== undefined) body.push(this.field("Kill reason", task.killReason));
-    if (task.error !== undefined) body.push(this.field("Error", theme.fg(colour, task.error)));
-
-    body.push("", theme.fg("muted", ` Steps, in run order (${String(task.steps.length)}):`));
-    if (task.steps.length === 0) {
-      body.push(theme.fg("dim", "  no step queued yet"));
-    }
-    const room = Math.max(20, width - 4);
-    task.steps.forEach((id, index) => {
-      const step = this.stepRecord(id);
-      const status = step?.status ?? "waiting";
-      const marker = index === task.cursor ? theme.fg("accent", "›") : " ";
-      const mark = theme.fg(stepColour(status), STEP_MARK[status]);
-      const name = `${String(index + 1)}. ${step?.name ?? id}`;
-      // A step that has not run yet has no duration of its own, and a bare dash says
-      // that more honestly than the wait since it was queued does.
-      const duration =
-        step === undefined || status === "waiting"
-          ? "—"
-          : formatDuration(Math.max(0, (step.endedAt ?? this.now()) - step.createdAt));
-      const code =
-        step?.kind === "process" && step.exitCode !== undefined && step.exitCode !== null
-          ? `exit ${String(step.exitCode)}`
-          : "";
-      const line = `${marker} ${mark} ${pad(name, 20)} ${pad(status, 10)} ${pad(duration, 6)} ${code}`;
-      body.push(`${truncateToWidth(line.trimEnd(), room, "…", false)}  ${theme.fg("dim", id)}`);
-    });
-
-    if (this.notice !== undefined) body.push(theme.fg("warning", `  ${this.notice}`));
-    return this.frame(
-      `chain: ${task.name}`,
-      `${task.id} · ${task.status} · ${this.chainPlace(task)}`,
-      body,
-      "← list · k stop from the running step · alt+q close",
-      width,
-    );
-  }
-
-  private renderProcessDetail(width: number): string[] {
-    const theme = this.theme;
-    const row = this.detailRow();
-    if (row === undefined || row.task.kind !== "process") return this.renderList(width);
-    const task = row.task;
-    const colour = STATUS_COLOUR[task.status];
-    const body: string[] = [
-      this.field("Name", theme.fg("accent", task.name)),
-      this.field("ID", theme.fg("accent", task.id)),
-      ...this.sessionField(row),
-      this.field("Status", theme.fg(colour, task.status)),
-      this.field("Runtime", formatDuration(row.elapsedMs)),
-      this.field("Started", formatClockTime(task.createdAt)),
-      this.field("Updated", this.updatedText(task.updatedAt)),
-      this.field("Output", task.outputPath),
-      this.field("Size", formatSize(row)),
-    ];
-    if (task.endedAt !== undefined) {
-      body.push(this.field("Ended", formatClockTime(task.endedAt)));
-    }
-    if (task.pid !== undefined) body.push(this.field("PID", String(task.pid)));
-    body.push(this.field("Command", singleLine(task.command, Math.max(1, width - 14))));
-    if (task.cwd !== undefined) body.push(this.field("CWD", task.cwd));
-    if (task.exitCode !== undefined) {
-      body.push(this.field("Exit code", theme.fg(colour, String(task.exitCode))));
-    }
-    if (task.killReason !== undefined) body.push(this.field("Kill reason", task.killReason));
-    if (task.error !== undefined) body.push(this.field("Error", theme.fg(colour, task.error)));
-
-    body.push(theme.fg("muted", " Output tail:"));
-    body.push(...this.outputBox(width - 2));
-    body.push(theme.fg("dim", ` ${this.position()}`));
-
-    if (this.notice !== undefined) body.push(theme.fg("warning", `  ${this.notice}`));
-    const live = task.status === "running" ? "live tail refreshes every second" : "final output";
-    return this.frame(
-      `task: ${task.name}`,
-      `${task.id} · ${task.status} · ${live}`,
-      body,
-      // The keys shed whole entries on a narrow terminal: the frame would otherwise
-      // cut the last one in half and leave the border a column off (ticket #34).
-      fittedFooter(PROCESS_KEYS, Math.max(1, width - 3)),
-      width,
-    );
-  }
 
   /** The output tail, inside its own thin border so it reads as a window, not a field. */
-  private outputBox(width: number): string[] {
-    const theme = this.theme;
-    const inner = Math.max(1, width - 2);
-    const edge = (glyph: string): string => theme.fg("borderAccent", glyph);
-    const row = (content = ""): string => {
-      const cut =
-        visibleWidth(content) > inner ? truncateToWidth(content, inner, "…", false) : content;
-      return `${edge("│")}${cut}${" ".repeat(Math.max(0, inner - visibleWidth(cut)))}${edge("│")}`;
-    };
-    const lines = [edge(`╭${"─".repeat(inner)}╮`)];
-    if (this.detailError !== undefined) {
-      lines.push(row(theme.fg("error", ` output unavailable: ${this.detailError}`)));
-    } else if (this.detailLines.length === 0) {
-      lines.push(row(theme.fg("dim", " no output yet")));
-    } else {
-      const [from, to] = this.window();
-      for (const line of this.detailLines.slice(from, to)) lines.push(row(` ${line}`));
-      if (this.detailTruncated) lines.push(row(theme.fg("dim", " … older output left out")));
-    }
-    // Keep the window the same height whatever the output does: a box that grows
-    // and shrinks under the reader's eyes is harder to scan than an empty one.
-    while (lines.length < DETAIL_OUTPUT_LINES + 1) lines.push(row());
-    lines.push(edge(`╰${"─".repeat(inner)}╯`));
-    return lines;
-  }
 
   /** A loop detail: schedule facts, then the iterations it produced, newest first. */
-  private renderLoopDetail(row: PanelTaskView, width: number): string[] {
-    const theme = this.theme;
-    const task = row.task;
-    if (task.kind !== "prompt-loop") return this.renderList(width);
-    const colour = STATUS_COLOUR[task.status];
-    const body: string[] = [
-      this.field("Status", theme.fg(colour, task.status)),
-      this.field("Kind", task.kind),
-      ...this.sessionField(row),
-      this.field("Runtime", formatDuration(row.elapsedMs)),
-      this.field("Updated", this.updatedText(task.updatedAt)),
-      this.field("Schedule", task.schedule),
-      this.field("Fires", firesText(task)),
-      this.field("Next fire", nextFireText(task, row)),
-      this.field(
-        "Last fire",
-        task.lastFireAt === undefined ? "—" : formatClockTime(task.lastFireAt),
-      ),
-    ];
-    if (task.expiresAt !== undefined) {
-      body.push(this.field("Expires", formatClockTime(task.expiresAt)));
-    }
-    if (task.endedAt !== undefined) {
-      body.push(this.field("Ended", formatClockTime(task.endedAt)));
-    }
-    if (task.error !== undefined) body.push(this.field("Error", theme.fg(colour, task.error)));
-    body.push(this.field("Prompt", singleLine(task.prompt, Math.max(1, width - 14))));
-    body.push("", theme.fg("muted", iterationsText(task)));
-
-    const newestFirst = [...task.iterations].reverse();
-    if (newestFirst.length === 0) {
-      body.push(theme.fg("dim", "  no iteration recorded yet"));
-    } else {
-      const selected = this.currentIteration(task);
-      const top = Math.min(
-        Math.max(0, this.iterationTop),
-        Math.max(0, newestFirst.length - LIST_VISIBLE_ROWS),
-      );
-      const visible = newestFirst.slice(top, top + LIST_VISIBLE_ROWS);
-      if (top > 0) body.push(theme.fg("dim", `  … ${String(top)} newer above`));
-      for (const iteration of visible) {
-        const marker = iteration.fire === selected?.fire ? theme.fg("accent", "›") : " ";
-        const text = iterationLine(iteration);
-        body.push(`${marker} ${truncateToWidth(text, Math.max(1, width - 4), "…", false)}`);
-      }
-      const below = newestFirst.length - top - visible.length;
-      if (below > 0) body.push(theme.fg("dim", `  … ${String(below)} older below`));
-    }
-
-    if (this.notice !== undefined) body.push(theme.fg("warning", `  ${this.notice}`));
-    return this.frame(
-      `loop: ${task.name}`,
-      `${task.id} · ${task.status} · ${task.schedule}`,
-      body,
-      "↑/↓ select · Enter iteration · ← list · k stop · alt+q close",
-      width,
-    );
-  }
 
   /** A command loop detail: schedule facts, then the fires it produced, newest first. */
-  private renderCommandLoopDetail(row: PanelTaskView, width: number): string[] {
-    const theme = this.theme;
-    const task = row.task;
-    if (task.kind !== "cmd-loop") return this.renderList(width);
-    const colour = STATUS_COLOUR[task.status];
-    const envCount = Object.keys(task.env ?? {}).length;
-    const body: string[] = [
-      this.field("Status", theme.fg(colour, task.status)),
-      this.field("Kind", task.kind),
-      ...this.sessionField(row),
-      this.field("Runtime", formatDuration(row.elapsedMs)),
-      this.field("Updated", this.updatedText(task.updatedAt)),
-      this.field("Schedule", task.schedule),
-      this.field("Fires", `${firesText(task)}${missedText(task)}`),
-      this.field("Next fire", nextFireText(task, row, failureStreak(task) > 0)),
-      this.field(
-        "Last fire",
-        task.lastFireAt === undefined ? "—" : formatClockTime(task.lastFireAt),
-      ),
-    ];
-    // A streak explains why the next fire is later than the expression says, so
-    // it sits with the schedule facts and never rewrites them (ADR-0017).
-    const streak = failureStreak(task);
-    if (streak > 0) body.push(this.field("Failures", `${String(streak)} in a row`));
-    if (task.expiresAt !== undefined) {
-      body.push(this.field("Expires", formatClockTime(task.expiresAt)));
-    }
-    if (task.endedAt !== undefined) {
-      body.push(this.field("Ended", formatClockTime(task.endedAt)));
-    }
-    if (task.error !== undefined) body.push(this.field("Error", theme.fg(colour, task.error)));
-    body.push(this.field("Command", singleLine(task.command, Math.max(1, width - 14))));
-    if (task.cwd !== undefined) body.push(this.field("CWD", task.cwd));
-    body.push(
-      this.field(
-        "Env",
-        envCount === 0 ? "—" : `${String(envCount)} variable${envCount === 1 ? "" : "s"}`,
-      ),
-    );
-    body.push(this.field("Wake on failure", task.wakeOnFailure === false ? "off" : "on"));
-    body.push(
-      this.field("Last exit", task.lastExitCode === undefined ? "—" : String(task.lastExitCode)),
-    );
-    if (task.lastOutputPath !== undefined) {
-      body.push(this.field("Last output", task.lastOutputPath));
-    }
-    body.push(
-      this.field(
-        "Size",
-        task.lastOutputBytes === undefined ? "—" : formatBytes(task.lastOutputBytes),
-      ),
-    );
-    body.push("", theme.fg("muted", firesHeading(task)));
-
-    const newestFirst = [...task.fireHistory].reverse();
-    if (newestFirst.length === 0) {
-      body.push(theme.fg("dim", "  no fire recorded yet"));
-    } else {
-      const selected = this.currentFire(task);
-      const top = Math.min(
-        Math.max(0, this.iterationTop),
-        Math.max(0, newestFirst.length - LIST_VISIBLE_ROWS),
-      );
-      const visible = newestFirst.slice(top, top + LIST_VISIBLE_ROWS);
-      if (top > 0) body.push(theme.fg("dim", `  … ${String(top)} newer above`));
-      for (const fire of visible) {
-        const marker = fire.fire === selected?.fire ? theme.fg("accent", "›") : " ";
-        const text = fireLine(fire);
-        body.push(`${marker} ${truncateToWidth(text, Math.max(1, width - 4), "…", false)}`);
-      }
-      const below = newestFirst.length - top - visible.length;
-      if (below > 0) body.push(theme.fg("dim", `  … ${String(below)} older below`));
-    }
-
-    if (this.notice !== undefined) body.push(theme.fg("warning", `  ${this.notice}`));
-    return this.frame(
-      `loop: ${task.name}`,
-      `${task.id} · ${task.status} · ${task.schedule}`,
-      body,
-      "↑/↓ select · Enter fire · ← list · k stop · alt+q close",
-      width,
-    );
-  }
 
   /** An iteration detail: the tool calls that turn made, oldest first; `←` goes back. */
-  private renderIterationDetail(width: number): string[] {
-    const theme = this.theme;
-    const row = this.detailRow();
-    if (row === undefined || row.task.kind !== "prompt-loop") return this.renderList(width);
-    const task = row.task;
-    const iteration = this.currentIteration(task);
-    if (iteration === undefined) return this.renderLoopDetail(row, width);
-
-    const body: string[] = [
-      this.field("Status", theme.fg(ITERATION_COLOUR[iteration.status], iteration.status)),
-      this.field("Started", formatClockTime(iteration.startedAt)),
-    ];
-    if (iteration.endedAt !== undefined) {
-      body.push(this.field("Took", formatDuration(iteration.endedAt - iteration.startedAt)));
-    }
-    body.push(this.field("Calls", callsText(iteration)));
-    body.push("", theme.fg("muted", callsHeading(iteration, this.callTop)));
-
-    const top = callTopFor(iteration, this.callTop);
-    const visible = iteration.calls.slice(top, top + DETAIL_OUTPUT_LINES);
-    if (visible.length === 0) {
-      body.push(theme.fg("dim", "  no tool call in this turn"));
-    }
-    visible.forEach((call, offset) => {
-      body.push(this.callLine(call, top + offset, width - 4));
-      if (call.error !== undefined) {
-        body.push(theme.fg(STATUS_COLOUR.failed, `     error: ${call.error}`));
-      }
-    });
-    // The cap drops the oldest calls first; say so where they would have been.
-    if (iteration.droppedCalls > 0) {
-      body.push(
-        theme.fg(
-          STATUS_COLOUR.interrupted,
-          `  … +${String(iteration.droppedCalls)} earlier calls dropped`,
-        ),
-      );
-    }
-
-    if (this.notice !== undefined) body.push(theme.fg("warning", `  ${this.notice}`));
-    return this.frame(
-      `fire ${String(iteration.fire)}`,
-      `${task.name} · ${task.id} · ${iteration.status}`,
-      body,
-      "↑/↓ scroll · ← loop · k stop · alt+q close",
-      width,
-    );
-  }
 
   /** One call row: its subject (a command stands out), then its result or error. */
-  private callLine(call: IterationCall, index: number, width: number): string {
-    const theme = this.theme;
-    const prefix = ` ${String(index + 1).padStart(2)}. ${call.tool}  `;
-    const duration = call.durationMs === undefined ? "" : ` ${formatDuration(call.durationMs)}`;
-    const status = `  ${call.status}${duration}`;
-    const room = Math.max(1, width - prefix.length - status.length);
-    const subject = singleLine(call.subject, room);
-    const body =
-      subject.length === 0 ? "" : isCommandCall(call) ? theme.fg("accent", subject) : subject;
-    return `${prefix}${body}${theme.fg(CALL_COLOUR[call.status], status)}`;
-  }
 
   /** Where the visible window sits: following the newest line, or a frozen range. */
-  private position(): string {
-    if (this.following || this.detailLines.length === 0) return "following tail · ↑ scroll";
-    const [from, to] = this.window();
-    const total = this.detailLines.length;
-    return `lines ${String(from + 1)}–${String(to)} of ${String(total)} · ↑/↓ scroll · r follows`;
-  }
 
   /** Visible slice of the detail buffer, as half-open `[from, to)`. */
-  private window(): [number, number] {
-    const total = this.detailLines.length;
-    const to = Math.max(0, total - this.scrollBack);
-    return [Math.max(0, to - DETAIL_OUTPUT_LINES), to];
-  }
-
-  private field(label: string, value: string): string {
-    // Cut here, once, against the frame: the border and the label take their share first.
-    const room = Math.max(8, this.renderWidth - 2 - LABEL_WIDTH - 2);
-    const text = visibleWidth(value) > room ? truncateToWidth(value, room, "…", false) : value;
-    return `${this.theme.fg("muted", pad(`${label}:`, LABEL_WIDTH))}${text}`;
-  }
 
   /**
    * The session that owns a row, printed only when it is not this one: the list had
    * room for six characters, the detail has room to name the whole session so a
    * reader can go and ask it (ticket #27).
    */
-  private sessionField(row: PanelTaskView): string[] {
-    if (!this.foreign(row) || row.sessionId === undefined) return [];
-    return [this.field("Session", this.theme.fg("dim", row.sessionId))];
-  }
 
   /** Absolute clock plus age: the list shows only the age, the detail can afford both. */
-  private updatedText(updatedAt: number): string {
-    const age = formatDuration(Math.max(0, this.now() - updatedAt));
-    return `${formatClockTime(updatedAt)} · ${age} ago`;
-  }
 }
