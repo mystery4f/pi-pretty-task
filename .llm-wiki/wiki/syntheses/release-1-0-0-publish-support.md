@@ -33,14 +33,19 @@ status: done
 - 删掉 `dist/` 后直接 `npm pack`（不跳过 scripts）：`prepack` 成功重建 `dist/`，包内容仍是 132 files。
 - 真实 tarball `tar -tzf`：含 `package/dist/index.d.ts`、`package/dist/index.js`、`package/LICENSE`、`package/package.json`、`package/README.md`、`package/skills/pretty-task-templates/SKILL.md`、`package/src/index.ts`。
 - 提交：`0f14754 feat(release): publish to npm from GitHub Release and cut 1.0.0`，作者 `mystery4f <40482524+mystery4f@users.noreply.github.com>`（按 `AGENTS.md` 指定身份覆盖本机 `dongcheng.xie` 配置）。
+## 实际发布过程（v1.0.0 已上线）
 
-## 待用户完成的发布动作
+- token 第一次给的是不带 `Bypass 2FA` 的 granular token，`npm publish` 直接 `E403: Two-factor authentication or granular access token with bypass 2fa enabled is required to publish packages.` 换成勾了 `Bypass two-factor authentication (2FA)` 的 token 后发布通过。**首次发布必须勾这一项**，否则 CI 永远 403。
+- `gh release create v1.0.0 --target main` 建好 Release 即触发 `publish` 工作流；失败时改 Secret 后 `gh run rerun <id>` 即可，不用重建 Release。
+- 发布后 npm 会先返回成功，但注册表上是 `0.0.0-stage` 占位版本（`description: Temporary package placeholder for staged publishing`），真正的 `1.0.0` 大约过 2–5 分钟才可访问。`npm stage list` 与 `GET /-/stage` 都返回空，说明这是服务端审阅而非可自助 approve 的 staged 条目。
+- 占位版本清不掉：`npm unpublish pi-pretty-task@0.0.0-stage` 报 `E403 Granular access tokens that bypass two-factor authentication may not perform this action`（<https://gh.io/npm-gat-bypass2fa-deprecation>）。占位版本只是显示上的杂物，`dist-tags.latest` 已是 `1.0.0`，不影响安装。
+- 该报错同时说明 bypass-2FA token 正在被 npm 弃用，长期方案是迁移 OIDC trusted publishing。
 
-1. 在 npmjs.com → Access Tokens → Granular Access Token 创建 token；设置 `All packages` / `Read and write` / 勾选 `Bypass 2FA`；复制后添加到仓库 Secret `NPM_TOKEN`（`gh secret set NPM_TOKEN --repo mystery4f/pi-pretty-task`）。
-2. `git push origin main` 推送 `0f14754`；确认 `verify` job 的既有红灯情况（与发布代码无关）。
-3. 创建 GitHub Release，tag 用 `v1.0.0`，点 Publish；`publish` 工作流会自动 `npm publish`。
-4. 发布成功后把 token 收紧到 `pi-pretty-task` 单包，或迁移 OIDC 后删除 token。
-5. 本机未登录 npm（`npm whoami` 报 `ENEEDAUTH`），`gh secret list` 为空，因此端到端自动发布未在本会话执行。
+## 上线后的核对结果
+
+- `curl https://registry.npmjs.org/pi-pretty-task/1.0.0` → `200`；`dist-tags` = `{"latest":"1.0.0"}`；`description` = `Background processes and scheduled agent wake-ups for pi, behind one panel.`
+- 从官方注册表下载 `pi-pretty-task-1.0.0.tgz`：132 files，含 `package/src/index.ts`、`package/skills/pretty-task-templates/SKILL.md`、`package/dist/index.js`、`package/dist/index.d.ts`；包内 `package.json` 的 `files` 为 `["dist","src","skills"]`，`pi.extensions` 为 `["./src/index.ts"]`，`pi.skills` 为 `["./skills"]`。
+- 工作流补了一步 `Confirm the version reached the registry`：发布后轮询 `registry.npmjs.org/<name>/<version>` 最多 20×15s，超时给 `::warning::` 而不是失败，避免"发布了但永远看不到"的静默情况再次出现。
 
 ## 关联
 

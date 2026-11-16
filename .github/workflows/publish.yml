@@ -66,3 +66,24 @@ jobs:
           else
             npm publish
           fi
+
+      # A first publish of a new name returns success while the registry holds
+      # the version behind a `0.0.0-stage` placeholder, and a bypass-2FA token
+      # cannot clear that itself. Poll so a hold surfaces as a warning instead
+      # of a package that silently never appears.
+      - name: Confirm the version reached the registry
+        run: |
+          name="$(node -p "require('./package.json').name")"
+          version="$(node -p "require('./package.json').version")"
+          url="https://registry.npmjs.org/$name/$version"
+          code=""
+          for i in $(seq 1 20); do
+            code="$(curl -s -o /dev/null -w '%{http_code}' "$url")"
+            if [ "$code" = "200" ]; then
+              echo "$url is live"
+              exit 0
+            fi
+            echo "attempt $i: HTTP $code, waiting 15s"
+            sleep 15
+          done
+          echo "::warning::$version was accepted by npm but is not visible yet (HTTP $code). A new package name is held for review behind a 0.0.0-stage placeholder; recheck https://www.npmjs.com/package/$name later."
