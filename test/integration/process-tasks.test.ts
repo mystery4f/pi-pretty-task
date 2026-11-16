@@ -612,6 +612,55 @@ describe("pretty_task_bg_wait", () => {
     expect(resultText(result)).toContain("did not finish");
   });
 
+  it("ends an interrupted wait at once and leaves the task running", async () => {
+    const dir = await makeTempDir();
+    cleanup.push(dir.dispose);
+    const command = await writeScript(dir.path, "long-job.js", "setTimeout(() => {}, 60000);\n");
+    const harness = createHarness({ cwd: dir.path, sessionId: "session-wait-abort" });
+    const task = await startRunning(harness, command, "aborted wait job");
+
+    const controller = new AbortController();
+    const started = Date.now();
+    const pending = harness.call(
+      "pretty_task_bg_wait",
+      { id: task.id, timeoutSeconds: 60 },
+      undefined,
+      controller.signal,
+    );
+    // Esc after the wait is under way: the deadline is a minute away, so only the
+    // abort can end this call in time.
+    setTimeout(() => controller.abort(), 200);
+    const result = await pending;
+    const elapsed = Date.now() - started;
+    const details = result.details as TaskDetails & { waited: boolean; cancelled: boolean };
+
+    expect(details.cancelled).toBe(true);
+    expect(details.waited).toBe(false);
+    expect(details.status).toBe("running");
+    expect(elapsed).toBeLessThan(10_000);
+    expect(resultText(result)).toContain("was cancelled");
+
+    // Cancelling the watch is not a kill: the command is still there to read,
+    // and stopping it stays with pretty_task_bg_kill.
+    const viewed = await harness.call("pretty_task_bg_status", { id: task.id });
+    expect((viewed.details as TaskDetails).status).toBe("running");
+
+    // A signal that was already aborted answers at once instead of waiting.
+    const already = new AbortController();
+    already.abort();
+    const startedAgain = Date.now();
+    const second = await harness.call(
+      "pretty_task_bg_wait",
+      { id: task.id, timeoutSeconds: 60 },
+      undefined,
+      already.signal,
+    );
+    expect((second.details as TaskDetails & { cancelled: boolean }).cancelled).toBe(true);
+    expect(Date.now() - startedAgain).toBeLessThan(1000);
+
+    await harness.call("pretty_task_bg_kill", { id: task.id });
+  });
+
   it("returns at once for a task that already finished", async () => {
     const dir = await makeTempDir();
     cleanup.push(dir.dispose);

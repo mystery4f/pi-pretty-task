@@ -104,8 +104,12 @@ export interface WaitTaskResult {
    * passed first and the view is still running. A deadline is not an error.
    */
   waited: boolean;
+  /**
+   * True when the caller aborted the wait before the task ended. The task is
+   * untouched: a cancelled wait is the user stopping the watch, not the work.
+   */
+  cancelled: boolean;
 }
-
 /** What a follow read answered: the new bytes, and where the cursor now sits. */
 export interface FollowTaskResult {
   /** The record as it stood when the read returned. */
@@ -632,11 +636,17 @@ export class ProcessTasks {
   }
 
   /**
-   * Wait for one task to end, or for `timeoutMs` to pass. Undefined means the
-   * session has no such task. The deadline is an answer, not an error: the view
-   * is whatever the record says then, and `waited` says which happened.
+   * Wait for one task to end, for `timeoutMs` to pass, or for `signal` to abort.
+   * Undefined means the session has no such task. The deadline is an answer, not
+   * an error: the view is whatever the record says then, and `waited` says which
+   * happened. An aborted wait answers at once and leaves the task running.
    */
-  async wait(scope: TaskScope, id: string, timeoutMs: number): Promise<WaitTaskResult | undefined> {
+  async wait(
+    scope: TaskScope,
+    id: string,
+    timeoutMs: number,
+    signal?: AbortSignal,
+  ): Promise<WaitTaskResult | undefined> {
     const session = await this.session(scope);
     const task = session.tasks.get(id);
     if (task === undefined || task.kind !== "process") return undefined;
@@ -645,25 +655,43 @@ export class ProcessTasks {
     // still tells the truth: a record left `running` without a supervisor caught
     // no end, so it answers false even though the wait returns at once.
     if (!session.running.has(id)) {
-      return { view: this.view(session, task), waited: task.endedAt !== undefined };
+      return {
+        view: this.view(session, task),
+        waited: task.endedAt !== undefined,
+        cancelled: false,
+      };
     }
 
     // Waiting is a listener on the end event, not a poll: `finish` resolves it on
     // the same tick the record gets its final status, so the wake-up sees the end.
-    await new Promise<void>((resolve) => {
-      const waiters = session.waiters.get(id) ?? new Set<() => void>();
-      session.waiters.set(id, waiters);
-      const listener = (): void => {
-        clearTimeout(timer);
-        waiters.delete(listener);
-        if (waiters.size === 0) session.waiters.delete(id);
-        resolve();
-      };
-      const timer = setTimeout(listener, timeoutMs);
-      waiters.add(listener);
-    });
+    // An abort is a third way out and must release the turn too (issue: Esc could
+    // not interrupt a wait); it resolves the same listener without touching the
+    // process, so a cancelled wait still reports the running record.
+    // An already-aborted signal is not waited on at all: the caller asked to stop
+    // before the wait began, and the record is still the answer.
+    let cancelled = signal?.aborted === true;
+    if (signal?.aborted !== true) {
+      await new Promise<void>((resolve) => {
+        const waiters = session.waiters.get(id) ?? new Set<() => void>();
+        session.waiters.set(id, waiters);
+        const listener = (): void => {
+          cancelled = signal?.aborted === true;
+          clearTimeout(timer);
+          signal?.removeEventListener("abort", listener);
+          waiters.delete(listener);
+          if (waiters.size === 0) session.waiters.delete(id);
+          resolve();
+        };
+        const timer = setTimeout(listener, timeoutMs);
+        waiters.add(listener);
+        signal?.addEventListener("abort", listener, { once: true });
+        // An abort that landed between the check above and this registration
+        // never fires the listener, so the wait is settled here instead.
+        if (signal?.aborted === true) listener();
+      });
+    }
 
-    return { view: this.view(session, task), waited: task.endedAt !== undefined };
+    return { view: this.view(session, task), waited: task.endedAt !== undefined, cancelled };
   }
 
   /**

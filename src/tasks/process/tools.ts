@@ -683,9 +683,11 @@ export function processTaskTools(
     name: "pretty_task_bg_wait",
     label: "Wait for a background task",
     description:
-      "Wait for a background task to end, then return its final view. A timeout is not an error: it returns the running view with waited: false.",
+      "Wait for a background task to end, then return its final view. A timeout is not an error: it returns the running view with waited: false. Cancelling the call (Esc) ends the wait at once and leaves the task running.",
     parameters: WaitParameters,
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+    // The abort signal is honoured: an Esc must release the turn instead of
+    // holding it until the deadline. The task itself is never touched.
+    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const id = params.id.trim();
       if (id.length === 0) {
         return text(
@@ -703,7 +705,7 @@ export function processTaskTools(
         return text(`${reason} Nothing was waited for.`);
       }
 
-      const result = await tasks.wait(scopeOf(ctx), id, timeoutMs);
+      const result = await tasks.wait(scopeOf(ctx), id, timeoutMs, signal);
       if (result === undefined) {
         // Waiting on a chain would wait on the wrong thing: its steps come and go.
         const chain = await chains.get(scopeOf(ctx), id);
@@ -714,13 +716,15 @@ export function processTaskTools(
         );
       }
 
-      const { view, waited } = result;
+      const { view, waited, cancelled } = result;
       const headline = waited
         ? `Background task ${id} (${view.task.name}) ended as ${view.task.status} after ${formatDuration(view.elapsedMs)}.`
-        : `Background task ${id} (${view.task.name}) is still running after ${formatDuration(view.elapsedMs)}; it did not finish within the wait.`;
+        : cancelled
+          ? `The wait for ${id} (${view.task.name}) was cancelled; the task is still ${view.task.status} and was left running. Read it with pretty_task_bg_status id=${id}.`
+          : `Background task ${id} (${view.task.name}) is still running after ${formatDuration(view.elapsedMs)}; it did not finish within the wait.`;
       return {
         content: [{ type: "text", text: [headline, "", describeTask(view)].join("\n") }],
-        details: { ...taskDetails(view), waited },
+        details: { ...taskDetails(view), waited, cancelled },
       };
     },
   };

@@ -106,11 +106,15 @@ export interface Harness {
   readonly messages: readonly SentMessage[];
   /** Custom types the extension registered a message renderer for. */
   readonly rendererTypes: readonly string[];
-  /** Call a registered tool as the model would, from the given turn. */
+  /**
+   * Call a registered tool as the model would, from the given turn. `signal` is
+   * the abort the harness hands pi on an Esc; only an abort-aware tool sees it.
+   */
   call(
     toolName: string,
     params: Record<string, unknown>,
     turn?: Turn,
+    signal?: AbortSignal,
   ): Promise<AgentToolResult<unknown>>;
   /** Draw a custom message through the renderer registered for its type. */
   render(customType: string, details: unknown, options?: Partial<MessageRenderOptions>): string;
@@ -376,7 +380,7 @@ export function createHarness(defaultTurn: Turn, options: HarnessOptions = {}): 
     problems,
     messages,
     rendererTypes: [...renderers.keys()],
-    async call(toolName, params, turn = defaultTurn) {
+    async call(toolName, params, turn = defaultTurn, signal = undefined) {
       const tool = tools.find((candidate) => candidate.name === toolName);
       if (tool === undefined) {
         throw new Error(
@@ -387,7 +391,7 @@ export function createHarness(defaultTurn: Turn, options: HarnessOptions = {}): 
       return tool.execute(
         `call-${String(callCounter)}`,
         params as never,
-        undefined,
+        signal,
         undefined,
         createToolContext(turn),
       );
