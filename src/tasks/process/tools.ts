@@ -222,7 +222,6 @@ export function describeTask(view: ProcessTaskView, options: { full?: boolean } 
 }
 
 /** What a tool reports about one task, in a shape the caller can inspect. */
-/** What a tool reports about one task, in a shape the caller can inspect. */
 function taskDetails(view: ProcessTaskView) {
   return {
     id: view.task.id,
@@ -303,6 +302,24 @@ function chainDetails(view: ChainTaskView, steps: readonly (ProcessTaskView | un
  * Read by the model, so it has to say plainly why a freshly written template is
  * not in the list yet: the file is read once at load, not per call.
  */
+/**
+ * One task as the text a model reads and the details a caller inspects, built in
+ * one place: the two are renderings of the same view, and written apart a field
+ * added to a task lands in one and is forgotten in the other.
+ */
+function taskReport(view: ProcessTaskView, options: { full?: boolean } = {}) {
+  return {
+    content: [{ type: "text" as const, text: describeTask(view, options) }],
+    details: taskDetails(view),
+  };
+}
+/** The same pairing for a queue: the block, plus each step's own record. */
+function chainReport(view: ChainTaskView, steps: readonly (ProcessTaskView | undefined)[]) {
+  return {
+    content: [{ type: "text" as const, text: describeChain(view, steps) }],
+    details: chainDetails(view, steps),
+  };
+}
 const RELOAD_NOTE =
   "Templates are read when the extension loads, so a file edited during this session applies only after /reload or a new session.";
 /**
@@ -366,13 +383,34 @@ function commandHint(command: string): string {
   return flat.length <= room ? flat : `${flat.slice(0, room - 1)}…`;
 }
 
-/** The process-task tools, bound to one store and this session's templates. */
 /** The process-task tools, bound to one store, this session's templates and the queue. */
+/** What an id names in this session: a process task, or the queue that holds steps. */
+type Address =
+  | { readonly kind: "task"; readonly view: ProcessTaskView }
+  | { readonly kind: "chain"; readonly view: ChainTaskView };
+/**
+ * The sentence a tool answers a miss with. One copy, because seven copies of it
+ * are seven chances for the tools to describe the same absence differently.
+ */
+function missing(id: string): string {
+  return `No background task with id ${id} in this session.`;
+}
 export function processTaskTools(
   tasks: ProcessTasks,
   chains: ChainTasks,
   templates: ReadonlyMap<string, CommandTemplate> = new Map(),
 ): ToolDefinition[] {
+  /**
+   * What an id names here, decided once. Every tool that takes an id asks this
+   * instead of guessing the same way twice, so a chain is found the same way by
+   * all of them and "there is no such task" is one sentence.
+   */
+  const address = async (scope: TaskScope, id: string): Promise<Address | undefined> => {
+    const task = await tasks.get(scope, id);
+    if (task !== undefined) return { kind: "task", view: task };
+    const chain = await chains.get(scope, id);
+    return chain === undefined ? undefined : { kind: "chain", view: chain };
+  };
   /** A chain's steps, read through the process store: the queue holds ids, not copies. */
   const stepViews = async (
     scope: TaskScope,
@@ -541,24 +579,13 @@ export function processTaskTools(
       const full = params.full === true;
 
       if (wantedId !== undefined && wantedId.length > 0) {
-        const view = await tasks.get(scope, wantedId);
-        if (view !== undefined) {
-          return {
-            content: [{ type: "text", text: describeTask(view, { full }) }],
-            details: taskDetails(view),
-          };
-        }
         // A chain is a task of this session too. Asking for it shows the queue with
         // each step's own record, which is the only place a step's outcome lives.
-        const chain = await chains.get(scope, wantedId);
-        if (chain === undefined) {
-          return text(`No background task with id ${wantedId} in this session.`);
-        }
-        const steps = await stepViews(scope, chain.task.steps);
-        return {
-          content: [{ type: "text", text: describeChain(chain, steps) }],
-          details: chainDetails(chain, steps),
-        };
+        const found = await address(scope, wantedId);
+        if (found === undefined) return text(missing(wantedId));
+        return found.kind === "task"
+          ? taskReport(found.view, { full })
+          : chainReport(found.view, await stepViews(scope, found.view.task.steps));
       }
 
       const [roots, queues] = await Promise.all([tasks.list(scope), chains.list(scope)]);
@@ -603,9 +630,7 @@ export function processTaskTools(
         if (followed === undefined) {
           const chain = await chains.get(scopeOf(ctx), params.id.trim());
           return text(
-            chain === undefined
-              ? `No background task with id ${params.id} in this session.`
-              : chainOutputHint(chain.task.id, chain),
+            chain === undefined ? missing(params.id) : chainOutputHint(chain.task.id, chain),
           );
         }
 
@@ -649,9 +674,7 @@ export function processTaskTools(
       if (found === undefined) {
         const chain = await chains.get(scopeOf(ctx), params.id.trim());
         return text(
-          chain === undefined
-            ? `No background task with id ${params.id} in this session.`
-            : chainOutputHint(chain.task.id, chain),
+          chain === undefined ? missing(params.id) : chainOutputHint(chain.task.id, chain),
         );
       }
 
@@ -711,7 +734,7 @@ export function processTaskTools(
         const chain = await chains.get(scopeOf(ctx), id);
         return text(
           chain === undefined
-            ? `No background task with id ${id} in this session.`
+            ? missing(id)
             : `Task ${id} is a chain; wait for its step instead. pretty_task_bg_status id=${id} names the step at the cursor.`,
         );
       }
@@ -747,15 +770,10 @@ export function processTaskTools(
         );
       }
 
-      const view = await tasks.get(scopeOf(ctx), id);
-      if (view === undefined) {
-        const chain = await chains.get(scopeOf(ctx), id);
-        return text(
-          chain === undefined
-            ? `No background task with id ${id} in this session.`
-            : chainOutputHint(chain.task.id, chain),
-        );
-      }
+      const found = await address(scopeOf(ctx), id);
+      if (found === undefined) return text(missing(id));
+      if (found.kind === "chain") return text(chainOutputHint(found.view.task.id, found.view));
+      const view = found.view;
 
       const ignoreCase = params.ignoreCase !== false;
       const maxMatches = clampSearchMatches(params.maxMatches);
@@ -833,14 +851,13 @@ export function processTaskTools(
       }
 
       const scope = scopeOf(ctx);
+      const found = await address(scope, id);
+      if (found === undefined) return text(missing(id));
       // A chain is stopped as a queue, not as a process: the step at the cursor is
       // killed and the ones behind it are told they will never run (ADR-0013).
-      const chain = await chains.get(scope, id);
-      if (chain !== undefined) {
+      if (found.kind === "chain") {
         const stopped = await chains.stop(scope, id);
-        if (stopped === undefined) {
-          return text(`No background task with id ${id} in this session.`);
-        }
+        if (stopped === undefined) return text(missing(id));
         const steps = await stepViews(scope, stopped.view.task.steps);
         const headline =
           stopped.outcome === "stopped"
@@ -863,9 +880,7 @@ export function processTaskTools(
       }
 
       const result = await tasks.stop(scope, id);
-      if (result === undefined) {
-        return text(`No background task with id ${id} in this session.`);
-      }
+      if (result === undefined) return text(missing(id));
 
       const headline =
         result.outcome === "killed"
