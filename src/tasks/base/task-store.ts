@@ -367,12 +367,15 @@ async function writeAtomic(path: string, data: string): Promise<void> {
   const handle = await open(tempPath, "w");
   try {
     await handle.writeFile(data, "utf8");
-    // Rename is atomic, but only fsync makes the bytes durable: without it a
-    // crash can leave a renamed file whose content never reached the disk.
-    await handle.sync();
   } finally {
     await handle.close();
   }
+  // Atomicity, not durability: rename is what stops a reader seeing half a file,
+  // and that is the only promise this record needs. A power cut may lose the
+  // newest generation, which the loader already treats as "no record" and
+  // rebuilds — while an explicit flush costs a real FlushFileBuffers per write,
+  // slow enough on a scanned Windows volume to make the newest generation look
+  // lost while it is still queued behind the last one.
   await rename(tempPath, path);
 }
 

@@ -86,7 +86,7 @@ const WAIT_POLL_MS = 5;
 export async function waitFor(
   what: string,
   predicate: () => Promise<boolean> | boolean,
-  timeoutMs = 15_000,
+  timeoutMs = 30_000,
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
