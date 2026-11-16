@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "last_updated": "2026-11-16T07:11:31.037Z",
+  "last_updated": "2026-11-16T08:16:46.989Z",
   "pages": {
     "sources/await-state-not-bytes-in-process-tests": {
       "type": "source",
@@ -124,11 +124,19 @@
       "updated": "2026-11-14"
     },
     "syntheses/release-1-0-0-publish-support": {
-      "type": "source",
+      "type": "synthesis",
       "title": "pi-pretty-task 1.0.0 发布支持落地记录",
       "category": "release",
       "status": "done",
       "slug": "release-1-0-0-publish-support",
+      "created": "2026-11-16",
+      "updated": "2026-11-16"
+    },
+    "syntheses/verify-red-tests-handoff": {
+      "type": "synthesis",
+      "title": "verify 红测修复交接（5 个 integration 用例）",
+      "status": "open",
+      "slug": "verify-red-tests-handoff",
       "created": "2026-11-16",
       "updated": "2026-11-16"
     }

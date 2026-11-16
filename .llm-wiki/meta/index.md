@@ -12,7 +12,6 @@
 - [[sources/pi-git-install-omits-dev-deps-so-ship-ts-entry]] — pi 的 git 安装不带 devDeps，入口要写 .ts 而不是靠 prepare 构建 *(created: 2026-11-15)*
 - [[sources/slow-suite-timings-not-workers]] — 慢测试先治写死的时长，再谈并行度 *(created: 2026-11-15)*
 - [[sources/windows-taskkill-t-needs-force-for-console-node]] — Windows 上 taskkill /T 不加 /F 停不下控制台 node *(created: 2026-11-15)*
-- [[syntheses/release-1-0-0-publish-support]] — pi-pretty-task 1.0.0 发布支持落地记录 *(created: 2026-11-16)*
 
 ## Synthesiss
 
@@ -20,6 +19,8 @@
 - [[syntheses/pi-loop-源码调研]] — pi-loop 源码调研 *(created: 2026-11-13)*
 - [[syntheses/pi-pretty-task-交接v02-收尾状态]] — pi-pretty-task 交接：v0.2 收尾状态 *(created: 2026-11-15)*
 - [[syntheses/pi-pretty-task-文档索引]] — pi-pretty-task 文档索引 *(created: 2026-11-13)*
+- [[syntheses/release-1-0-0-publish-support]] — pi-pretty-task 1.0.0 发布支持落地记录 *(created: 2026-11-16)*
+- [[syntheses/verify-red-tests-handoff]] — verify 红测修复交接（5 个 integration 用例） *(created: 2026-11-16)*
 
 ---
-*Last updated: 2026-11-16T07:11:31.037Z* | *Total pages: 13*
+*Last updated: 2026-11-16T08:16:46.989Z* | *Total pages: 14*

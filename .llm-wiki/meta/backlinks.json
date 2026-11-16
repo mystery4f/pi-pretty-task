@@ -1,5 +1,7 @@
 {
-  "sources/await-state-not-bytes-in-process-tests": [],
+  "sources/await-state-not-bytes-in-process-tests": [
+    "syntheses/verify-red-tests-handoff"
+  ],
   "sources/delete-remote-branch-via-gh-api": [],
   "sources/obs-2026-11-14-kill-path-skipped-persist-and-notice-in-pi-pretty-task": [],
   "sources/obs-2026-11-14-loop-wake-backlog-storms-after-a-long-turn": [],
@@ -27,7 +29,12 @@
     "sources/slow-suite-timings-not-workers",
     "sources/windows-taskkill-t-needs-force-for-console-node",
     "syntheses/pi-pretty-task-交接v02-收尾状态",
-    "syntheses/release-1-0-0-publish-support"
+    "syntheses/release-1-0-0-publish-support",
+    "syntheses/verify-red-tests-handoff"
   ],
-  "syntheses/release-1-0-0-publish-support": []
+  "syntheses/release-1-0-0-publish-support": [
+    "syntheses/pi-pretty-task-文档索引",
+    "syntheses/verify-red-tests-handoff"
+  ],
+  "syntheses/verify-red-tests-handoff": []
 }
