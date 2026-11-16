@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "last_updated": "2026-11-15T06:18:29.445Z",
+  "last_updated": "2026-11-16T07:11:31.037Z",
   "pages": {
     "sources/await-state-not-bytes-in-process-tests": {
       "type": "source",
@@ -54,6 +54,23 @@
       "created": "2026-11-14",
       "updated": "2026-11-14"
     },
+    "sources/obs-2026-11-16-release-design-for-pi-pretty-task-1-0-0": {
+      "type": "source",
+      "title": "Observation: Release design for pi-pretty-task 1.0.0",
+      "tags": [
+        "release",
+        "npm",
+        "ci",
+        "packaging"
+      ],
+      "status": "observation",
+      "slug": "obs-2026-11-16-release-design-for-pi-pretty-task-1-0-0",
+      "relevance": "high",
+      "observed_at": "2026-11-16T07:10:32.902Z",
+      "source_context": "Adding release-triggered npm auto-publish and packaging 1.0.0",
+      "created": "2026-11-16",
+      "updated": "2026-11-16"
+    },
     "sources/pi-git-install-omits-dev-deps-so-ship-ts-entry": {
       "type": "source",
       "title": "pi 的 git 安装不带 devDeps，入口要写 .ts 而不是靠 prepare 构建",
@@ -105,6 +122,15 @@
       "title": "pi-pretty-task 文档索引",
       "created": "2026-11-13",
       "updated": "2026-11-14"
+    },
+    "syntheses/release-1-0-0-publish-support": {
+      "type": "source",
+      "title": "pi-pretty-task 1.0.0 发布支持落地记录",
+      "category": "release",
+      "status": "done",
+      "slug": "release-1-0-0-publish-support",
+      "created": "2026-11-16",
+      "updated": "2026-11-16"
     }
   }
 }

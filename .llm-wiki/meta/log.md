@@ -38,3 +38,6 @@
 ## [2026-11-15T06:18:29.441Z] ensure_page
 - page_type: "synthesis", title: "pi-pretty-task 交接：v0.2 收尾状态", path: "syntheses/pi-pretty-task-交接v02-收尾状态"
 
+## [2026-11-16T07:10:32.911Z] observe
+- slug: "obs-2026-11-16-release-design-for-pi-pretty-task-1-0-0", title: "Release design for pi-pretty-task 1.0.0", relevance: "high"
+

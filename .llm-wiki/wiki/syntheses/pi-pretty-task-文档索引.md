@@ -50,10 +50,10 @@ updated: 2026-11-14
 | `biome.json` | 格式化（双引号、分号、lineWidth 100、trailingCommas all）+ lint（`preset: "recommended"`，再收紧 `noExplicitAny`、`noUnusedVariables`、`noNonNullAssertion`） |
 | `tsconfig.json` | 构建：ES2022 / NodeNext / strict / `noUncheckedIndexedAccess` / `verbatimModuleSyntax`，输出 `dist/` |
 | `tsconfig.dev.json` | 类型检查：`noEmit`，同时覆盖 `src/` 与 `test/` |
-| `package.json` | `pi.extensions: ["./dist/index.js"]`；scripts：`check` / `build` / `lint` / `lint:fix` / `format` / `test` |
+| `package.json` | `pi.extensions: ["./src/index.ts"]`（pi 自行转译，git 安装免构建）、`pi.skills: ["./skills"]`；`files` 必须同时含 `dist`/`src`/`skills`；scripts：`check` / `build` / `lint` / `lint:fix` / `format` / `test` / `prepack` / `verify` |
 | `.gitignore` | `node_modules/`、`dist/`、`.pi/`、`.tmp/`、`*.tsbuildinfo` 等 |
 
-`dist/` 是构建产物，不入库；`*.tsbuildinfo` 同理。仓库目前还不是 git 仓库，`git init` 待用户许可。
+`dist/` 是构建产物，不入库；`*.tsbuildinfo` 同理。发布到 npm 走 GitHub Release 事件触发 `.github/workflows/publish.yml`，细节见 [1.0.0 发布支持落地记录](release-1-0-0-publish-support.md)。
 
 ## 外部参考
 

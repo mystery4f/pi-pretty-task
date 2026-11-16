@@ -10,3 +10,4 @@
 {"slug":"pi-git-install-omits-dev-deps-so-ship-ts-entry","title":"pi 的 git 安装不带 devDeps，入口要写 .ts 而不是靠 prepare 构建","category":"devops","timestamp":"2026-11-15T05:39:16.822Z","kind":"retro"}
 {"slug":"delete-remote-branch-via-gh-api","title":"删远端分支走 gh API，git push --delete 会被拦","category":"devops","timestamp":"2026-11-15T06:05:04.692Z","kind":"retro"}
 {"page_type":"synthesis","title":"pi-pretty-task 交接：v0.2 收尾状态","path":"syntheses/pi-pretty-task-交接v02-收尾状态","timestamp":"2026-11-15T06:18:29.441Z","kind":"ensure_page"}
+{"slug":"obs-2026-11-16-release-design-for-pi-pretty-task-1-0-0","title":"Release design for pi-pretty-task 1.0.0","relevance":"high","timestamp":"2026-11-16T07:10:32.911Z","kind":"observe"}

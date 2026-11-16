@@ -1,5 +1,9 @@
 # Wiki Update Log
 
+## 2026-11-16
+
+- **observe**: {"relevance":"high","slug":"obs-2026-11-16-release-design-for-pi-pretty-task-1-0-0","title":"Release design for pi-pretty-task 1.0.0"}
+
 ## 2026-11-15
 
 - **ensure\_page**: {"page_type":"synthesis","path":"syntheses/pi-pretty-task-交接v02-收尾状态","title":"pi-pretty-task 交接：v0.2 收尾状态"}
