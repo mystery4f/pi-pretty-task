@@ -71,3 +71,9 @@
 ## [2026-11-16T18:34:15.155Z] observe
 - slug: "obs-2026-11-16-docs-reviews", title: "评审报告进 docs/reviews 并登记索引", relevance: "medium"
 
+## [2026-11-17T16:36:33.350Z] observe
+- slug: "obs-2026-11-17-pi-dev-gallery-index-misses-pi-pretty-task-publish-event", title: "pi.dev gallery index misses pi-pretty-task publish event", relevance: "high"
+
+## [2026-11-17T16:36:42.179Z] observe
+- slug: "obs-2026-11-17-readme-key-list-is-test-guarded-against-panel-drift", title: "README key list is test-guarded against panel drift", relevance: "high"
+

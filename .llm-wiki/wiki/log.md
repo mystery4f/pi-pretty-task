@@ -1,5 +1,10 @@
 # Wiki Update Log
 
+## 2026-11-17
+
+- **observe**: {"relevance":"high","slug":"obs-2026-11-17-readme-key-list-is-test-guarded-against-panel-drift","title":"README key list is test-guarded against panel drift"}
+- **observe**: {"relevance":"high","slug":"obs-2026-11-17-pi-dev-gallery-index-misses-pi-pretty-task-publish-event","title":"pi.dev gallery index misses pi-pretty-task publish event"}
+
 ## 2026-11-16
 
 - **observe**: {"relevance":"medium","slug":"obs-2026-11-16-docs-reviews","title":"评审报告进 docs/reviews 并登记索引"}

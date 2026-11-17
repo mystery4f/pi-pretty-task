@@ -21,3 +21,5 @@
 {"slug":"obs-2026-11-16-biome-noimportcycles","title":"Biome noImportCycles 代替环依赖检查脚本","relevance":"high","timestamp":"2026-11-16T18:34:05.832Z","kind":"observe"}
 {"slug":"obs-2026-11-16-skills-lint-skills-mjs","title":"skills 结构检查脚本 lint-skills.mjs","relevance":"medium","timestamp":"2026-11-16T18:34:15.153Z","kind":"observe"}
 {"slug":"obs-2026-11-16-docs-reviews","title":"评审报告进 docs/reviews 并登记索引","relevance":"medium","timestamp":"2026-11-16T18:34:15.155Z","kind":"observe"}
+{"slug":"obs-2026-11-17-pi-dev-gallery-index-misses-pi-pretty-task-publish-event","title":"pi.dev gallery index misses pi-pretty-task publish event","relevance":"high","timestamp":"2026-11-17T16:36:33.350Z","kind":"observe"}
+{"slug":"obs-2026-11-17-readme-key-list-is-test-guarded-against-panel-drift","title":"README key list is test-guarded against panel drift","relevance":"high","timestamp":"2026-11-17T16:36:42.179Z","kind":"observe"}

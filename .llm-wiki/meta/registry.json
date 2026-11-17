@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "last_updated": "2026-11-16T18:34:15.161Z",
+  "last_updated": "2026-11-17T16:36:42.188Z",
   "pages": {
     "sources/await-state-not-bytes-in-process-tests": {
       "type": "source",
@@ -155,6 +155,41 @@
       "source_context": "给 ~/.agents/skills 加结构检查",
       "created": "2026-11-16",
       "updated": "2026-11-16"
+    },
+    "sources/obs-2026-11-17-pi-dev-gallery-index-misses-pi-pretty-task-publish-event": {
+      "type": "source",
+      "title": "Observation: pi.dev gallery index misses pi-pretty-task publish event",
+      "tags": [
+        "pi.dev",
+        "gallery",
+        "npm",
+        "publish",
+        "visibility"
+      ],
+      "status": "observation",
+      "slug": "obs-2026-11-17-pi-dev-gallery-index-misses-pi-pretty-task-publish-event",
+      "relevance": "high",
+      "observed_at": "2026-11-17T16:36:33.345Z",
+      "source_context": "README/visibility improvement work for pi-pretty-task v1.0.3",
+      "created": "2026-11-17",
+      "updated": "2026-11-17"
+    },
+    "sources/obs-2026-11-17-readme-key-list-is-test-guarded-against-panel-drift": {
+      "type": "source",
+      "title": "Observation: README key list is test-guarded against panel drift",
+      "tags": [
+        "readme",
+        "test-guard",
+        "keys",
+        "panel"
+      ],
+      "status": "observation",
+      "slug": "obs-2026-11-17-readme-key-list-is-test-guarded-against-panel-drift",
+      "relevance": "high",
+      "observed_at": "2026-11-17T16:36:42.178Z",
+      "source_context": "README restructure of pi-pretty-task",
+      "created": "2026-11-17",
+      "updated": "2026-11-17"
     },
     "sources/pi-git-install-omits-dev-deps-so-ship-ts-entry": {
       "type": "source",

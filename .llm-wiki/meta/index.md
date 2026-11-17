@@ -14,6 +14,8 @@
 - [[sources/obs-2026-11-16-pi-plugin-six-phase-skill-chain-created]] — Observation: pi-plugin six-phase skill chain created *(created: 2026-11-16)*
 - [[sources/obs-2026-11-16-release-design-for-pi-pretty-task-1-0-0]] — Observation: Release design for pi-pretty-task 1.0.0 *(created: 2026-11-16)*
 - [[sources/obs-2026-11-16-skills-lint-skills-mjs]] — Observation: skills 结构检查脚本 lint-skills.mjs *(created: 2026-11-16)*
+- [[sources/obs-2026-11-17-pi-dev-gallery-index-misses-pi-pretty-task-publish-event]] — Observation: pi.dev gallery index misses pi-pretty-task publish event *(created: 2026-11-17)*
+- [[sources/obs-2026-11-17-readme-key-list-is-test-guarded-against-panel-drift]] — Observation: README key list is test-guarded against panel drift *(created: 2026-11-17)*
 - [[sources/pi-git-install-omits-dev-deps-so-ship-ts-entry]] — pi 的 git 安装不带 devDeps，入口要写 .ts 而不是靠 prepare 构建 *(created: 2026-11-15)*
 - [[sources/pi-pretty-task-one-projection-and-formula]] — 一个形状一处投影，一个式子一处实现 *(created: 2026-11-16)*
 - [[sources/pi-pretty-task-panel-intents-and-view]] — 面板：键盘说意图，渲染方拿只读视图 *(created: 2026-11-16)*
@@ -33,4 +35,4 @@
 - [[syntheses/verify-red-tests-handoff]] — verify 红测修复交接（5 个 integration 用例） *(created: 2026-11-16)*
 
 ---
-*Last updated: 2026-11-16T18:34:15.161Z* | *Total pages: 24*
+*Last updated: 2026-11-17T16:36:42.188Z* | *Total pages: 26*
