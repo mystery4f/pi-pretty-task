@@ -26,6 +26,7 @@
     "node": ">=22.19.0"
   },
   "pi": {
+    "image": "https://raw.githubusercontent.com/mystery4f/pi-pretty-task/main/docs/preview.png",
     "extensions": [
       "./src/index.ts"
     ],
@@ -42,7 +43,8 @@
   "files": [
     "dist",
     "src",
-    "skills"
+    "skills",
+    "docs/preview.png"
   ],
   "publishConfig": {
     "access": "public",
