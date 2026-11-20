@@ -459,6 +459,9 @@ export class ProcessTasks {
   ): Promise<void> {
     let running: RunningProcess;
     try {
+      // The spawn opens the output file, so the session directory has to exist
+      // before it: this is the one write that does not go through the store.
+      await session.store.ensureDirectory();
       running = this.spawn(session, task, plan);
     } catch (error) {
       fail(errorMessage(error));

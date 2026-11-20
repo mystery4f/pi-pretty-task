@@ -11,7 +11,6 @@
  */
 
 import { randomInt } from "node:crypto";
-import { mkdir } from "node:fs/promises";
 
 import type { TaskScope } from "./runtime-state.js";
 import { sessionTaskDirectory } from "./runtime-state.js";
@@ -86,8 +85,9 @@ export class TaskSessions {
   }
 
   /**
-   * The session's records, adopted by this hub: its directory is made, the map is
-   * shared with every other store, and it may be persisted and fired.
+   * The session's records, adopted by this hub: the map is shared with every
+   * other store, and it may be persisted and fired. Its directory is not made
+   * here — the store makes it when something is actually written.
    */
   session(scope: TaskScope): Promise<OwnedTaskSession> {
     const directory = sessionTaskDirectory(scope.cwd, scope.sessionId);
@@ -148,9 +148,8 @@ export class TaskSessions {
     for (const record of await store.load()) tasks.set(record.id, record);
     return { store, tasks };
   }
-  /** Adopt: make the directory, keep the store, share the map. */
+  /** Adopt: keep the store, share the map, and leave the directory to the first write. */
   private async adopt(directory: string): Promise<OwnedTaskSession> {
-    await mkdir(directory, { recursive: true });
     const { store, tasks } = await this.fill(directory);
     return { directory, store, tasks, owned: true };
   }

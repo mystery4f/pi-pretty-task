@@ -6,7 +6,7 @@
  * @author mystery4f <40482524+mystery4f@users.noreply.github.com>
  */
 
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -241,6 +241,20 @@ describe("the task record file", () => {
   it("has no records before the first write, and never throws for that", async () => {
     const directory = await stateDirectory();
     expect(await new TaskStore(directory).load()).toEqual([]);
+  });
+
+  it("makes its directory only when something is written", async () => {
+    const root = await stateDirectory();
+    const directory = join(root, ".pi", "tasks", "session-unused");
+    const store = new TaskStore(directory);
+
+    expect(await store.load()).toEqual([]);
+    await expect(stat(directory)).rejects.toMatchObject({ code: "ENOENT" });
+
+    await store.save([processTask()]);
+
+    expect((await stat(directory)).isDirectory()).toBe(true);
+    expect(await new TaskStore(directory).load()).toHaveLength(1);
   });
 
   it("falls back to the previous generation when the current file is corrupt", async () => {

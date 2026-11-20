@@ -9,7 +9,7 @@
  * @author mystery4f <40482524+mystery4f@users.noreply.github.com>
  */
 
-import { open, readFile, rename } from "node:fs/promises";
+import { mkdir, open, readFile, rename } from "node:fs/promises";
 import type {
   Iteration,
   IterationCall,
@@ -514,6 +514,12 @@ export class TaskStore {
   private writes: Promise<void> | undefined;
   /** The newest generation waiting to be written; older ones are superseded. */
   private pending: string | undefined;
+  /**
+   * The directory, made on first use. A session that never records anything
+   * leaves the filesystem exactly as it was, so merely opening pi in a project
+   * does not create `.pi/tasks/<session>` for nobody to read.
+   */
+  private directoryReady: Promise<void> | undefined;
 
   constructor(directory: string, options: TaskStoreOptions = {}) {
     this.directory = directory;
@@ -550,6 +556,28 @@ export class TaskStore {
   }
 
   /**
+   * Make the session directory, once. The write paths call this themselves, so
+   * a caller only needs it when it writes into the directory by another route —
+   * a process's output file is opened by the spawn, not by {@link save}.
+   *
+   * A failure is not remembered: the next attempt tries again, and the records
+   * in memory are already correct.
+   */
+  ensureDirectory(): Promise<void> {
+    const ready = this.directoryReady;
+    if (ready !== undefined) return ready;
+    const made = mkdir(this.directory, { recursive: true }).then(
+      () => undefined,
+      (error: unknown) => {
+        this.directoryReady = undefined;
+        throw error;
+      },
+    );
+    this.directoryReady = made;
+    return made;
+  }
+
+  /**
    * Replace the file with this set of records, keeping the last good generation
    * as `.prev`. Updates are queued, so two writes in a row cannot interleave
    * their temp files and hand each other a half-written document.
@@ -583,6 +611,9 @@ export class TaskStore {
 
   private async writeGeneration(generation: string): Promise<void> {
     try {
+      // Both generation files land here, so the directory exists before the
+      // first one is written — this is the only place that creates it.
+      await this.ensureDirectory();
       if (this.lastGeneration !== undefined && this.lastGeneration !== generation) {
         await writeAtomic(previousTaskRecordPath(this.directory), this.lastGeneration);
       }
