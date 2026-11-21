@@ -190,6 +190,31 @@ const NAME_LIMIT = 48;
 const BACKOFF_DOUBLINGS = 4;
 const MAX_BACKOFF_MS = 3_600_000;
 
+/**
+ * The shortest gap between one fire and the next. A fire that starts off its
+ * slot can otherwise take a boundary that is only seconds away and collide with
+ * the slot it just passed (ADR-0018).
+ */
+export const MIN_FIRE_GAP_MS = 30_000;
+
+/**
+ * The next due time, held at least {@link MIN_FIRE_GAP_MS} away from `at`.
+ *
+ * A fire that starts off its slot — caught up after the pump was away, or
+ * pushed aside by a backoff — used to take whichever boundary came next, which
+ * can be seconds later. The fire before it is usually still running then, so
+ * the following one is recorded as skipped and its observation is lost. An
+ * interval keeps its own period: flooring a 10s schedule at 30s would rewrite
+ * the cadence, not protect it.
+ */
+function nextFireBeyondGap(recurrence: Recurrence, at: number): number | null {
+  const floor = Math.min(MIN_FIRE_GAP_MS, recurrence.periodMs ?? MIN_FIRE_GAP_MS);
+  const earliest = at + floor;
+  let candidate = recurrence.nextFire(at);
+  while (candidate !== null && candidate < earliest) candidate = recurrence.nextFire(candidate);
+  return candidate;
+}
+
 export interface LoopTasksOptions {
   readonly sessions: TaskSessions;
   /** Clock seam for tests; defaults to `Date.now`. */
@@ -735,7 +760,7 @@ export class LoopTasks {
       this.finish(task, at, "completed");
       return;
     }
-    const nextFireAt = recurrence.nextFire(at);
+    const nextFireAt = nextFireBeyondGap(recurrence, at);
     if (nextFireAt === null) {
       this.finish(task, at, "completed");
     } else {

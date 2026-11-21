@@ -15,6 +15,12 @@ export interface Recurrence {
   readonly expression: string;
   /** Epoch milliseconds of the first fire strictly after `after`, or null when none follows. */
   nextFire(after: number): number | null;
+  /**
+   * The spacing of an interval schedule, or undefined for a calendar schedule.
+   * The pump floors its next-fire gap by this when the period is shorter than
+   * that floor (ADR-0018).
+   */
+  readonly periodMs?: number;
 }
 
 /** Sub-second schedules are not offered; the pump itself may tick every second. */
@@ -69,6 +75,7 @@ export function resolveSchedule(expression: string): ScheduleResolution {
         expression: text,
         // An interval always has another fire; only calendar schedules can run out.
         nextFire: (after) => after + intervalMs,
+        periodMs: intervalMs,
       },
     };
   }

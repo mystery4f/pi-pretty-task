@@ -159,6 +159,24 @@ describe("LoopTasks", () => {
     expect(view?.task.status).toBe("running");
   });
 
+  it("pushes a caught-up fire away from the boundary it almost landed on", async () => {
+    const task = await setup();
+    const created = await task.loops.create({
+      ...task.scope,
+      schedule: "*/10 * * * *",
+      prompt: "check",
+    });
+    expect(created.task.nextFireAt).toBe(Date.UTC(2026, 0, 1, 9, 10, 0));
+
+    // The pump was away and catches up five seconds before the next slot: the
+    // shape that used to start two fires inside ten seconds (ADR-0018).
+    task.advance(19 * 60_000 + 55_000);
+    expect(await task.loops.pump(task.now)).toHaveLength(1);
+
+    const view = await task.loops.get(task.scope, created.task.id);
+    expect(view?.task.lastFireAt).toBe(task.now);
+    expect(view?.task.nextFireAt).toBe(Date.UTC(2026, 0, 1, 9, 30, 0));
+  });
   it("coalesces missed fires into one wake per pump", async () => {
     const task = await setup();
     const created = await task.loops.create({
