@@ -13,7 +13,9 @@
   "sources/obs-2026-11-16-skills-lint-skills-mjs": [],
   "sources/obs-2026-11-17-pi-dev-gallery-index-misses-pi-pretty-task-publish-event": [],
   "sources/obs-2026-11-17-pi-plugin-skills-reference": [],
-  "sources/obs-2026-11-17-readme-key-list-is-test-guarded-against-panel-drift": [],
+  "sources/obs-2026-11-17-readme-key-list-is-test-guarded-against-panel-drift": [
+    "sources/pi-pretty-task-preview-from-the-built-panel"
+  ],
   "sources/obs-2026-11-21-": [],
   "sources/pi-git-install-omits-dev-deps-so-ship-ts-entry": [
     "syntheses/release-1-0-0-publish-support"
@@ -22,8 +24,10 @@
     "sources/pi-pretty-task-side-index-to-field"
   ],
   "sources/pi-pretty-task-panel-intents-and-view": [
+    "sources/pi-pretty-task-preview-from-the-built-panel",
     "sources/pi-pretty-task-session-hub-required"
   ],
+  "sources/pi-pretty-task-preview-from-the-built-panel": [],
   "sources/pi-pretty-task-session-hub-required": [
     "sources/pi-pretty-task-panel-intents-and-view"
   ],

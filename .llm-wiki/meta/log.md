@@ -83,3 +83,6 @@
 ## [2026-11-21T06:10:16.867Z] observe
 - slug: "obs-2026-11-21-", title: "订阅模式不做「一行一触发」，订阅也不新开页签", relevance: "high"
 
+## [2026-11-21T23:10:39.377Z] retro
+- slug: "pi-pretty-task-preview-from-the-built-panel", title: "README 截图从 dist 里的真面板渲染，三处状态陷阱", category: "design"
+

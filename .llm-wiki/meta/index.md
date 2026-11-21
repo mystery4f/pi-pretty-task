@@ -21,6 +21,7 @@
 - [[sources/pi-git-install-omits-dev-deps-so-ship-ts-entry]] — pi 的 git 安装不带 devDeps，入口要写 .ts 而不是靠 prepare 构建 *(created: 2026-11-15)*
 - [[sources/pi-pretty-task-one-projection-and-formula]] — 一个形状一处投影，一个式子一处实现 *(created: 2026-11-16)*
 - [[sources/pi-pretty-task-panel-intents-and-view]] — 面板：键盘说意图，渲染方拿只读视图 *(created: 2026-11-16)*
+- [[sources/pi-pretty-task-preview-from-the-built-panel]] — README 截图从 dist 里的真面板渲染，三处状态陷阱 *(created: 2026-11-21)*
 - [[sources/pi-pretty-task-session-hub-required]] — 会话 hub 必须由入口注入，默认值会分裂写入权 *(created: 2026-11-16)*
 - [[sources/pi-pretty-task-side-index-to-field]] — 并行索引应当塌回记录上的一个字段 *(created: 2026-11-16)*
 - [[sources/slow-suite-timings-not-workers]] — 慢测试先治写死的时长，再谈并行度 *(created: 2026-11-15)*
@@ -37,4 +38,4 @@
 - [[syntheses/verify-red-tests-handoff]] — verify 红测修复交接（5 个 integration 用例） *(created: 2026-11-16)*
 
 ---
-*Last updated: 2026-11-21T06:10:16.915Z* | *Total pages: 28*
+*Last updated: 2026-11-21T23:10:39.391Z* | *Total pages: 29*

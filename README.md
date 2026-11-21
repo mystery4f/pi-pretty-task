@@ -9,7 +9,7 @@ Background processes and scheduled agent wake-ups for [pi](https://github.com/ea
 
 A build that takes six minutes. A watcher that runs all afternoon. A loop that wakes the model every ten minutes. They all land in the same list — readable, searchable, stoppable — and the output is still on disk when the turn is over.
 
-![The /tasks panel: every process, loop and chain in one list, with the dev server's row still growing](docs/preview.png)
+![The /tasks panel: every process, loop and chain in one list, with the dev server's row still growing](https://raw.githubusercontent.com/mystery4f/pi-pretty-task/main/docs/preview.png)
 
 ## Install
 
@@ -37,12 +37,12 @@ Requires pi and Node >= 22.19. A local checkout works too: `pi install ./path/to
 
 - **Task** — a long-lived shell command in the background, watched, with its whole process tree killable. Output goes to a file, so "what did it print?" survives the turn.
 
-  ![A task opened: npm run dev under way, its output tail refreshing once a second](docs/preview-tail.png)
+  ![A task opened: npm run dev under way, its output tail refreshing once a second](https://raw.githubusercontent.com/mystery4f/pi-pretty-task/main/docs/preview-tail.png)
 
 - **Chain** — a command queued behind another task or chain instead of started now. A step is recorded as `waiting` and starts only after the step ahead ends with exit 0; a failing step leaves the ones behind it `skipped`.
 - **Loop / Iteration** — wake the LLM on a schedule with a preset prompt (`30s`/`10m`/`2h`, or five-field cron such as `0 9 * * 1-5`), and record every tool call of the turn that follows, so "what did that loop actually run?" has an answer. Wakes wait for an idle agent instead of interrupting a turn.
 
-  ![A loop fire opened: the twelve tool calls that one wake-up made](docs/preview-iteration.png)
+  ![A loop fire opened: the twelve tool calls that one wake-up made](https://raw.githubusercontent.com/mystery4f/pi-pretty-task/main/docs/preview-iteration.png)
 
 A fire that comes due while the previous one still runs is skipped and counted, never queued. An id says its kind on sight: `bg-` runs a command, `lp-` wakes the assistant, `ch-` is a chain.
 
@@ -58,7 +58,7 @@ List keys: `↑/↓` select, `Enter` open, `←` back, `k` stop, `a` stop all, `
 ↑/↓ · Enter logs · k stop · f filter · o others · 1/2/3 tabs · / search · R rerun · a stop all · alt+q close
 ```
 
-![Walking the panel: processes, loops, chains, then a search for the dev server](docs/preview.gif)
+![Walking the panel: processes, loops, chains, then a search for the dev server](https://raw.githubusercontent.com/mystery4f/pi-pretty-task/main/docs/preview.gif)
 
 Every image on this page is a screenshot of the shipped panel, not a mock-up: `npm run preview` renders them from `TasksPanel` itself, so a change in `src/ui/panel/` shows up in the next run instead of drifting away from the picture.
 

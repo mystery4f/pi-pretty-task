@@ -2,6 +2,7 @@
 
 ## 2026-11-21
 
+- **retro**: {"category":"design","slug":"pi-pretty-task-preview-from-the-built-panel","title":"README 截图从 dist 里的真面板渲染，三处状态陷阱"}
 - **observe**: {"relevance":"high","slug":"obs-2026-11-21-","title":"订阅模式不做「一行一触发」，订阅也不新开页签"}
 
 ## 2026-11-17

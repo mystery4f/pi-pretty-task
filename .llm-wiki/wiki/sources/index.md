@@ -19,6 +19,7 @@
 - [pi 的 git 安装不带 devDeps，入口要写 .ts 而不是靠 prepare 构建](pi-git-install-omits-dev-deps-so-ship-ts-entry.md)
 - [一个形状一处投影，一个式子一处实现](pi-pretty-task-one-projection-and-formula.md)
 - [面板：键盘说意图，渲染方拿只读视图](pi-pretty-task-panel-intents-and-view.md)
+- [README 截图从 dist 里的真面板渲染，三处状态陷阱](pi-pretty-task-preview-from-the-built-panel.md)
 - [会话 hub 必须由入口注入，默认值会分裂写入权](pi-pretty-task-session-hub-required.md)
 - [并行索引应当塌回记录上的一个字段](pi-pretty-task-side-index-to-field.md)
 - [慢测试先治写死的时长，再谈并行度](slow-suite-timings-not-workers.md)

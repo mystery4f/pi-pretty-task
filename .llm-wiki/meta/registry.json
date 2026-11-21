@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "last_updated": "2026-11-21T06:10:16.915Z",
+  "last_updated": "2026-11-21T23:10:39.391Z",
   "pages": {
     "sources/await-state-not-bytes-in-process-tests": {
       "type": "source",
@@ -252,6 +252,15 @@
       "created": "2026-11-16",
       "updated": "2026-11-16"
     },
+    "sources/pi-pretty-task-preview-from-the-built-panel": {
+      "type": "source",
+      "title": "README 截图从 dist 里的真面板渲染，三处状态陷阱",
+      "category": "design",
+      "status": "insight",
+      "slug": "pi-pretty-task-preview-from-the-built-panel",
+      "created": "2026-11-21",
+      "updated": "2026-11-21"
+    },
     "sources/pi-pretty-task-session-hub-required": {
       "type": "source",
       "title": "会话 hub 必须由入口注入，默认值会分裂写入权",
@@ -320,7 +329,7 @@
       "type": "synthesis",
       "title": "pi-pretty-task 文档索引",
       "created": "2026-11-13",
-      "updated": "2026-11-14"
+      "updated": "2026-11-21"
     },
     "syntheses/release-1-0-0-publish-support": {
       "type": "synthesis",
