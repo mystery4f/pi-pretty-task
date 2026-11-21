@@ -38,7 +38,7 @@ updated: 2026-11-21
 
 ## 下次开工第一件事
 
-读本页 → `gh issue view 31` 判断是否开工 → 若要动 UI，先拆 `src/ui/tasks-panel.ts` 再改。
+读本页 → 动手第二步：`FireOutcome` 加 `signalled`、`CmdLoopTask` 加 `notifyExitCodes` / `signalRaised`、loop 级唤醒卡、面板四处（ADR-0018 已定稿）。最小间隔已落 `9eecf53`，闸门 `check`/`lint`/`test` 全绿。
 
 ## 2026-11-21 订阅型 cmd loop 与两个 issue 稿
 
@@ -48,7 +48,7 @@ updated: 2026-11-21
 - 离格后整点塌陷：`#57 05:40:38.492Z`（跑 1m32s）→ `#58 05:50:00.706Z`，只隔 9m22s；老例 17:29:55 与 17:30:00 隔 5 秒，前者未完 → 后者 `skipped`，那一轮报告丢失。
 - resume 补发也离格：pump 停 2h20m（`#56 03:20:00.672Z` → `#57 05:40:38.492Z`），塌陷不需要先失败一次。
 
-本轮只落文档与 ADR，代码未动：`docs/adr/0018-signal-outcome-and-minimum-fire-gap.md`；`pretty_task_loop_create` 描述补上「失败会移动下次触发、成功归位」；`docs/scope-v1.md` 的 event/idle 延后行指向 ADR-0018。
+本轮落了两步：ADR-0018 定稿（`cd40ee2`）与最小间隔（`9eecf53`，`advanceSchedule` 走 `nextFireBeyondGap`，`Recurrence.periodMs` 让短间隔不被改频）；`pretty_task_loop_create` 描述补上「失败会移动下次触发、成功归位」；`docs/scope-v1.md` 的 event/idle 延后行指向 ADR-0018。信号语义（`notifyExitCodes`、`signalRaised`、`signalled` 结局、面板四处）尚未动，ADR 里已定稿，`未决` 已清空。
 
 ### 待开的两个 issue（GitHub 不通，写了正文等能推时再贴）
 
