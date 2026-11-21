@@ -175,6 +175,11 @@ export function failureStreak(task: Task): number {
   return task.kind === "cmd-loop" ? (task.consecutiveFailures ?? 0) : 0;
 }
 
+/** A raised signal on a command loop: the check has something outstanding (ADR-0018). */
+export function signalWord(task: Task): string {
+  return task.kind === "cmd-loop" && task.signalRaised === true ? "⚑ signal" : "";
+}
+
 /** Fires that never ran because the previous one still was, appended to the count. */
 export function missedText(task: CmdLoopTask): string {
   const missed = task.missedFires ?? 0;
@@ -232,6 +237,7 @@ export const FIRE_MARK: Record<FireOutcome, string> = {
   running: "•",
   success: "✓",
   failed: "✗",
+  signalled: "⚑",
   skipped: "–",
   interrupted: "!",
 };
@@ -241,6 +247,7 @@ export const FIRE_COLOUR: Record<FireOutcome, ThemeColor> = {
   running: STATUS_COLOUR.running,
   success: STATUS_COLOUR.completed,
   failed: STATUS_COLOUR.failed,
+  signalled: "warning",
   skipped: "muted",
   interrupted: STATUS_COLOUR.interrupted,
 };

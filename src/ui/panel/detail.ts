@@ -287,6 +287,21 @@ export function renderCommandLoopDetail(
     ),
   );
   body.push(field(panel, "Wake on failure", task.wakeOnFailure === false ? "off" : "on"));
+  // A subscriber's own facts: which exit codes mean "something to report", and
+  // whether one is outstanding (ADR-0018). The fires themselves stay in the list.
+  if (task.notifyExitCodes !== undefined && task.notifyExitCodes.length > 0) {
+    const codes = task.notifyExitCodes.map((code) => `exit ${String(code)}`).join(", ");
+    body.push(field(panel, "Signal on", codes));
+    const since =
+      task.signalRaisedAt === undefined ? "" : ` since ${formatClockTime(task.signalRaisedAt)}`;
+    body.push(
+      field(
+        panel,
+        "Signal",
+        task.signalRaised === true ? theme.fg("warning", `raised${since}`) : "clear",
+      ),
+    );
+  }
   body.push(
     field(panel, "Last exit", task.lastExitCode === undefined ? "—" : String(task.lastExitCode)),
   );

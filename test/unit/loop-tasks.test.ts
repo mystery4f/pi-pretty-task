@@ -127,6 +127,19 @@ describe("LoopTasks", () => {
     ).rejects.toThrow(/expiresIn "2d": .*30s, 10m or 2h/);
   });
 
+  it("rejects notify exit codes that cannot carry a signal, and refuses them on a prompt loop", async () => {
+    const task = await setup();
+    await expect(
+      task.loops.create({ ...task.scope, schedule: "10m", command: "true", notifyExitCodes: [0] }),
+    ).rejects.toThrow(/notifyExitCodes/);
+    await expect(
+      task.loops.create({ ...task.scope, schedule: "10m", command: "true", notifyExitCodes: [] }),
+    ).rejects.toThrow(/notifyExitCodes/);
+    await expect(
+      task.loops.create({ ...task.scope, schedule: "10m", prompt: "go", notifyExitCodes: [1] }),
+    ).rejects.toThrow(/Invalid notifyExitCodes for a prompt loop/);
+  });
+
   it("fires five times in about a minute on a ten-second interval", async () => {
     const task = await setup();
     const created = await task.loops.create({

@@ -18,6 +18,7 @@ import {
   kindWord,
   nameColour,
   rightText,
+  signalWord,
   stepColour,
 } from "./format.js";
 import { fittedFooter, LIST_KEYS, pad } from "./keys.js";
@@ -223,6 +224,9 @@ export function listRow(
   const kind = highlight(panel, kindWord(task.kind), "muted", lit("kind"));
   const status = highlight(panel, pad(task.status, 11), STATUS_COLOUR[task.status], lit("status"));
   const exit = exitText(task) === "" ? "" : theme.fg("dim", ` ${exitText(task)}`);
+  // A raised signal rides beside the status word: the loop is running, and the
+  // check has something outstanding (ADR-0018).
+  const signal = signalWord(task) === "" ? "" : theme.fg("warning", ` ${signalWord(task)}`);
   // A hit in a word the row does not print still finds the row; the row names
   // the word instead of leaving the reader to guess why it is here.
   const notePlain = match?.hidden === true ? ` via ${match.field}` : "";
@@ -238,7 +242,7 @@ export function listRow(
       ? highlight(panel, namePlain, nameColour(task), lit("name"))
       : `${chain.themed}${" ".repeat(Math.max(0, nameRoom - visibleWidth(chain.plain)))}`;
   const growth = panel.growthText(row);
-  const headPlain = ` ${pointer} ${dot} ${name} ${id}${tag} ${separator} ${kind} ${status}${exit}${note} `;
+  const headPlain = ` ${pointer} ${dot} ${name} ${id}${tag} ${separator} ${kind} ${status}${exit}${signal}${note} `;
   // The numbers get the room the head leaves, minus one space of gap, so they can
   // shed their least important parts instead of pushing the row past the border.
   // The room is measured on the bare cells: a theme adds markup, and only the
@@ -246,7 +250,7 @@ export function listRow(
   const headCells = ` ${selected ? "›" : " "} ● ${namePlain} ${pad(
     task.id,
     ID_COLUMN_WIDTH,
-  )}${tagPlain} · ${kindWord(task.kind)} ${pad(task.status, 11)}${exitText(task) === "" ? "" : ` ${exitText(task)}`}${notePlain} `;
+  )}${tagPlain} · ${kindWord(task.kind)} ${pad(task.status, 11)}${exitText(task) === "" ? "" : ` ${exitText(task)}`}${signalWord(task) === "" ? "" : ` ${signalWord(task)}`}${notePlain} `;
   const right = theme.fg(
     "dim",
     rightText(

@@ -111,7 +111,18 @@ export interface ProcessTask extends TaskBase {
  * record lives on the loop so the panel can show the last fires without loading
  * their process records (ADR-0015); `taskId` points at the child when it exists.
  */
-export type FireOutcome = "running" | "success" | "failed" | "skipped" | "interrupted";
+/**
+ * How a fire ended. `signalled` belongs to a command loop that declared
+ * `notifyExitCodes`: the check has something to report, which is not the same
+ * as the loop being broken (ADR-0018).
+ */
+export type FireOutcome =
+  | "running"
+  | "success"
+  | "failed"
+  | "signalled"
+  | "skipped"
+  | "interrupted";
 
 /** How one fire of a cmd loop ended, as the loop's history keeps it. */
 export interface FireRecord {
@@ -201,6 +212,17 @@ export interface CmdLoopTask extends LoopBase {
   readonly env?: Record<string, string>;
   /** Send a notice when a fire exits non-zero; absent means on, the tool's default. */
   readonly wakeOnFailure?: boolean;
+  /**
+   * Exit codes that mean "the check has something to report" rather than "the
+   * loop is broken" (ADR-0018). A fire with one of them is recorded as
+   * `signalled`: it wakes once, keeps its schedule and does not back off. Its
+   * presence is what makes the loop a subscriber; there is no separate mode field.
+   */
+  readonly notifyExitCodes?: readonly number[];
+  /** Set while a signal is outstanding; a repeated signal at the same condition stays silent. */
+  signalRaised?: boolean;
+  /** Epoch milliseconds the outstanding signal was raised, so a listing can say since when. */
+  signalRaisedAt?: number;
   /**
    * The most recent fires, oldest first, capped by FIRE_HISTORY_LIMIT. The three
    * newest feed the row's strip; the whole list feeds the expansion (ADR-0015).

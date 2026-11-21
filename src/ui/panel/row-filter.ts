@@ -38,6 +38,10 @@ export function passesFilter(task: Task, filter: PanelFilter): boolean {
       return true;
     case "running":
       return task.status === "running" || task.status === "paused";
+    case "signal":
+      // A raised signal is its own answer: the loop waits for its next slot, so
+      // it is neither a failure nor an ordinary running row (ADR-0018).
+      return task.kind === "cmd-loop" && task.signalRaised === true;
     case "failed":
       return task.status === "failed";
     case "done":

@@ -25,7 +25,10 @@ import { loadTemplates } from "./tasks/process/templates.js";
 import { processTaskTools } from "./tasks/process/tools.js";
 import { LOOP_WAKE_CUSTOM_TYPE, renderLoopWake, sendLoopWake } from "./ui/loop-wake.js";
 import {
+  LOOP_SIGNAL_CUSTOM_TYPE,
+  notifyLoopSignal,
   notifyTaskFinished,
+  renderLoopSignal,
   renderTaskFinished,
   TASK_FINISHED_CUSTOM_TYPE,
 } from "./ui/notification.js";
@@ -321,7 +324,25 @@ export function createExtension(
       error: view.task.error,
       endedAt: view.task.endedAt,
     });
-    if (completed === undefined || !completed.failed) return;
+    if (completed === undefined) return;
+    if (completed.signalled) {
+      // A signal is the check speaking, not the loop breaking: it wakes once per
+      // raised condition, its schedule is untouched, and a repeat stays silent
+      // (ADR-0018). No failure vocabulary, so it never borrows the finish notice.
+      if (!completed.raised) return;
+      await notifyLoopSignal(pi, {
+        id: completed.loop.id,
+        name: completed.loop.name,
+        command: completed.loop.command,
+        fire: completed.fire.fire,
+        exitCode: completed.fire.exitCode,
+        durationMs: completed.fire.durationMs ?? view.elapsedMs,
+        endedAt: completed.fire.endedAt ?? now(),
+        outputPath: view.task.outputPath,
+      });
+      return;
+    }
+    if (!completed.failed) return;
     if (completed.loop.wakeOnFailure === false) return;
     // The child is already named `loop #N`, which is the alias the notice shows.
     await notifyTaskFinished(pi, view);
@@ -330,6 +351,7 @@ export function createExtension(
     pi.registerTool(tool);
   for (const tool of loopTaskTools(loops)) pi.registerTool(tool);
   pi.registerMessageRenderer(TASK_FINISHED_CUSTOM_TYPE, renderTaskFinished);
+  pi.registerMessageRenderer(LOOP_SIGNAL_CUSTOM_TYPE, renderLoopSignal);
   pi.registerMessageRenderer(LOOP_WAKE_CUSTOM_TYPE, renderLoopWake);
   registerTasksCommand(pi, processTasks, loops, chainTasks);
 

@@ -91,6 +91,10 @@ export interface CompletedFire {
   readonly fire: FireRecord;
   /** Exit code non-zero, killed by the output cap, or never started. */
   readonly failed: boolean;
+  /** The exit code was one the loop declared as a signal, so this is not a failure (ADR-0018). */
+  readonly signalled: boolean;
+  /** True when this signalled fire raised the latch, so the caller wakes exactly once. */
+  readonly raised: boolean;
 }
 
 export interface CreateLoopInput extends TaskScope {
@@ -109,6 +113,13 @@ export interface CreateLoopInput extends TaskScope {
   env?: Record<string, string>;
   /** Send a notice when a fire fails; only valid with `command`. Defaults to on. */
   wakeOnFailure?: boolean;
+  /**
+   * Exit codes that mean "the check has something to report" rather than "the
+   * loop is broken" (ADR-0018); declaring them makes this loop a subscriber that
+   * wakes once per raised condition and keeps its schedule. Only valid with
+   * `command`.
+   */
+  notifyExitCodes?: readonly number[];
   name?: string;
   /** Stop after this many fires; omitted means no limit. */
   maxFires?: number;
@@ -323,6 +334,7 @@ export class LoopTasks {
         input.workingDirectory !== undefined ? "cwd" : undefined,
         input.env !== undefined ? "env" : undefined,
         input.wakeOnFailure !== undefined ? "wakeOnFailure" : undefined,
+        input.notifyExitCodes !== undefined ? "notifyExitCodes" : undefined,
       ].filter((option): option is string => option !== undefined);
       if (misplaced.length > 0) {
         throw new LoopInputError(
@@ -335,6 +347,18 @@ export class LoopTasks {
       throw new LoopInputError(
         `Invalid maxFires ${String(input.maxFires)}: use a whole number of at least 1.`,
       );
+    }
+
+    const notifyExitCodes = input.notifyExitCodes?.slice();
+    if (notifyExitCodes !== undefined) {
+      const unusable = notifyExitCodes.filter(
+        (code) => !Number.isInteger(code) || code < 1 || code > 255,
+      );
+      if (notifyExitCodes.length === 0 || unusable.length > 0) {
+        throw new LoopInputError(
+          "Invalid notifyExitCodes: use whole exit codes from 1 to 255, for example [1]. Exit 0 already means the check is healthy, so listing it would say nothing; omit the option for a loop that only reports failures.",
+        );
+      }
     }
 
     let expiresAt: number | undefined;
@@ -404,6 +428,7 @@ export class LoopTasks {
               : {}),
             ...(input.env !== undefined ? { env: { ...input.env } } : {}),
             ...(input.wakeOnFailure !== undefined ? { wakeOnFailure: input.wakeOnFailure } : {}),
+            ...(notifyExitCodes !== undefined ? { notifyExitCodes } : {}),
             fireHistory: [],
           };
 
@@ -615,7 +640,9 @@ export class LoopTasks {
           ? "success"
           : result.killReason === "user"
             ? "interrupted"
-            : "failed";
+            : this.isSignal(loop, result)
+              ? "signalled"
+              : "failed";
       if (result.exitCode !== undefined && result.exitCode !== null) {
         fire.exitCode = result.exitCode;
       }
@@ -629,14 +656,30 @@ export class LoopTasks {
       loop.lastOutputBytes = result.outputBytes;
       loop.updatedAt = at;
 
+      // A signal wakes once per raised condition, so the latch turns repeat
+      // reports into history rather than a wall of wakes (ADR-0018).
+      const raised = fire.outcome === "signalled" && loop.signalRaised !== true;
       if (fire.outcome === "failed") {
         this.noteFailure(loop, at);
       } else if (fire.outcome === "success") {
+        // A healthy round clears both the failure streak and the outstanding
+        // signal: `exit 0` means the condition is gone (ADR-0018).
         loop.consecutiveFailures = 0;
+        delete loop.signalRaised;
+        delete loop.signalRaisedAt;
+      } else if (raised) {
+        loop.signalRaised = true;
+        loop.signalRaisedAt = at;
       }
 
       await this.sessions.persist(session);
-      return { loop, fire, failed: fire.outcome === "failed" };
+      return {
+        loop,
+        fire,
+        failed: fire.outcome === "failed",
+        signalled: fire.outcome === "signalled",
+        raised,
+      };
     }
     return undefined;
   }
@@ -811,6 +854,20 @@ export class LoopTasks {
    * The next natural fire time is never pulled earlier: a long schedule keeps
    * its spacing and a short one gets the room the failure asked for.
    */
+  /**
+   * True when a finished fire's exit code means "the check has something to
+   * report" rather than "the loop is broken" (ADR-0018). Exit 0 is success by
+   * definition and a kill by the user is not the command's own word, so neither
+   * can be a signal.
+   */
+  private isSignal(loop: CmdLoopTask, result: FireResult): boolean {
+    if (result.status === "completed" || result.killReason === "user") return false;
+    const codes = loop.notifyExitCodes;
+    if (codes === undefined || result.exitCode === undefined) return false;
+    if (result.exitCode === null) return false;
+    return codes.includes(result.exitCode);
+  }
+
   private noteFailure(loop: CmdLoopTask, at: number): void {
     loop.consecutiveFailures = (loop.consecutiveFailures ?? 0) + 1;
     if (loop.status !== "running" || loop.nextFireAt === undefined) return;

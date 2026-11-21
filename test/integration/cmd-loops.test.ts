@@ -6,7 +6,8 @@
  * @author mystery4f <40482524+mystery4f@users.noreply.github.com>
  */
 
-import { readFile } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
@@ -37,6 +38,9 @@ interface CmdDetails {
   command?: string;
   cwd?: string;
   wakeOnFailure?: boolean;
+  notifyExitCodes?: number[];
+  signalRaised?: boolean;
+  signalRaisedAt?: number;
   fires: number;
   missedFires?: number;
   consecutiveFailures?: number;
@@ -382,6 +386,107 @@ describe("command loops", () => {
     await task.harness.emit({ type: "agent_settled", aborted: false });
     await task.harness.flushWakes();
     expect(task.harness.messages).toHaveLength(2);
+  });
+
+  it("signals once per raised condition, keeps the schedule and clears the latch when healthy", async () => {
+    const task = await setup();
+    // A check that prints its findings and exits 1 while the flag file exists:
+    // the same command reports, stays quiet, and reports again.
+    const flag = join(task.directory.path, "report.flag");
+    const script = await writeScript(
+      task.directory.path,
+      "check.js",
+      [
+        'const fs = require("node:fs");',
+        `if (!fs.existsSync(${JSON.stringify(flag)})) {`,
+        '  console.log("nothing new");',
+        "  process.exit(0);",
+        "}",
+        'console.log("2 new issues");',
+        'console.log("#123 fix the build");',
+        "process.exit(1);",
+        "",
+      ].join("\n"),
+    );
+    await writeFile(flag, "");
+    const loop = await createCmd(task.harness, {
+      command: script,
+      name: "watch",
+      schedule: "10m",
+      notifyExitCodes: [1],
+    });
+
+    await fireDue(task, loop);
+    const first = await waitForFire(task.harness, loop.id, 1, "signalled");
+    await waitFor("the signal notice", () => task.harness.messages.length === 1);
+
+    const notice = task.harness.messages[0];
+    expect(first.exitCode).toBe(1);
+    expect(notice?.customType).toBe("loop-signal");
+    expect(notice?.options).toEqual({ deliverAs: "followUp", triggerTurn: true });
+    expect(notice?.content).toContain("name: watch");
+    expect(notice?.content).toContain("fire: #1 signalled");
+    expect(notice?.content).toContain("exit code: 1");
+    // The report opens with the check's findings, not with the end of its run.
+    const quoted = notice?.content.split("\n").filter((line) => line.startsWith("  "));
+    expect(quoted).toEqual(["  2 new issues", "  #123 fix the build"]);
+    expect(notice?.content).toContain(`read more: pretty_task_loop_list id=${loop.id}`);
+
+    // A signal is not a failure: no streak, no backoff, and the schedule keeps
+    // the expression's ten minutes (ADR-0018).
+    const raised = await loopDetails(task.harness, loop.id);
+    expect(raised.consecutiveFailures ?? 0).toBe(0);
+    expect(raised.signalRaised).toBe(true);
+    expect(raised.nextFireAt).toBe(task.now + 600_000);
+
+    // The renderer draws it from the details, in the signal's own vocabulary.
+    const drawn = task.harness.render(notice?.customType ?? "", notice?.details);
+    expect(drawn).toContain("⚑ signalled");
+    expect(drawn).toContain("#123 fix the build");
+
+    // The same condition reported again stays silent: one wake per raising.
+    await fireDue(task, raised);
+    await waitForFire(task.harness, loop.id, 2, "signalled");
+    await task.harness.flushWakes();
+    expect(task.harness.messages).toHaveLength(1);
+
+    // A healthy fire means the condition is gone, so the latch clears.
+    await rm(flag);
+    const repeat = await loopDetails(task.harness, loop.id);
+    await fireDue(task, repeat);
+    await waitForFire(task.harness, loop.id, 3, "success");
+    const cleared = await loopDetails(task.harness, loop.id);
+    expect(cleared.signalRaised).toBeUndefined();
+    expect(cleared.consecutiveFailures ?? 0).toBe(0);
+
+    // A new report after the healthy one wakes again.
+    await writeFile(flag, "");
+    const healthy = await loopDetails(task.harness, loop.id);
+    await fireDue(task, healthy);
+    await waitForFire(task.harness, loop.id, 4, "signalled");
+    await waitFor("the second signal notice", () => task.harness.messages.length === 2);
+    expect(task.harness.messages[1]?.content).toContain("fire: #4 signalled");
+  });
+
+  it("still records an exit code the loop did not declare as a failure and backs off", async () => {
+    const task = await setup();
+    const script = await writeScript(task.directory.path, "broken.js", "process.exit(4);\n");
+    const loop = await createCmd(task.harness, {
+      command: script,
+      name: "broken",
+      schedule: "10m",
+      notifyExitCodes: [1],
+    });
+
+    await fireDue(task, loop);
+    await waitForFire(task.harness, loop.id, 1, "failed");
+    const after = await loopDetails(task.harness, loop.id);
+    expect(after.consecutiveFailures).toBe(1);
+    expect(after.signalRaised).toBeUndefined();
+    // Ten minutes doubled once by the failure: the old policy is untouched.
+    expect(after.nextFireAt).toBe(task.now + 1_200_000);
+    await waitFor("the failure notice", () => task.harness.messages.length === 1);
+    expect(task.harness.messages[0]?.customType).toBe("task-finished");
   });
 
   it("stays silent when wake on failure is off, and still records the failure", async () => {

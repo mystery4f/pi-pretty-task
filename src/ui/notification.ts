@@ -13,7 +13,7 @@
 import type { ExtensionAPI, MessageRenderer } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { formatDuration } from "../tasks/base/format.js";
-import { readOutputTail } from "../tasks/base/output.js";
+import { readOutputFrom, readOutputTail } from "../tasks/base/output.js";
 import type { TaskKind, TaskStatus } from "../tasks/base/task.js";
 import type { ProcessTaskView } from "../tasks/process/process-tasks.js";
 import { STATUS_COLOUR } from "./status-colour.js";
@@ -149,6 +149,127 @@ export const renderTaskFinished: MessageRenderer<FinishedTaskDetails> = (
   }
   if (details.outputTruncated === true) {
     lines.push(theme.fg("dim", `… older output left out — pretty_task_bg_logs id=${details.id}`));
+  }
+  return new Text(lines.join("\n"), 0, 0);
+};
+
+/** Custom message type a signalled fire's notice is registered under. */
+export const LOOP_SIGNAL_CUSTOM_TYPE = "loop-signal";
+
+/**
+ * Leading output lines a signal notice quotes. A check's report opens with its
+ * findings, so the head is the part worth reading; the rest stays in the file.
+ */
+export const SIGNAL_OUTPUT_LINES = 10;
+
+/** What a signal notice carries: the loop, the fire and the head of its report. */
+export interface LoopSignalDetails {
+  readonly id: string;
+  readonly name: string;
+  readonly command: string;
+  /** One-based fire number of the loop, the same number the child process carries. */
+  readonly fire: number;
+  /** The exit code the loop declared as a signal. */
+  readonly exitCode?: number | null;
+  /** Milliseconds the fire ran. */
+  readonly durationMs: number;
+  /** Epoch milliseconds the fire ended. */
+  readonly endedAt: number;
+  /** The fire's own report, first lines only. */
+  readonly outputHead?: string;
+  /** Lines the fire wrote, so a cut report says how much it left out. */
+  readonly outputLines?: number;
+  /** Output file of the fire, for the lines the notice does not quote. */
+  readonly outputPath?: string;
+}
+
+/** The prose the model reads: the same facts the renderer draws. */
+function signalText(details: LoopSignalDetails): string {
+  const lines = [
+    `name: ${details.name}`,
+    `id: ${details.id}`,
+    "kind: cmd-loop",
+    `fire: #${String(details.fire)} signalled at ${new Date(details.endedAt).toISOString()}`,
+  ];
+  if (details.exitCode !== undefined && details.exitCode !== null) {
+    lines.push(`exit code: ${String(details.exitCode)}`);
+  }
+  lines.push(`ran for: ${formatDuration(details.durationMs)}`);
+  const head = tailLines(details.outputHead);
+  if (head.length > 0) {
+    const total = details.outputLines ?? head.length;
+    lines.push(`report (${String(head.length)} of ${String(total)} lines):`);
+    for (const line of head) lines.push(`  ${line}`);
+  }
+  if (details.outputPath !== undefined) lines.push(`full output: ${details.outputPath}`);
+  lines.push(`read more: pretty_task_loop_list id=${details.id}`);
+  return lines.join("\n");
+}
+
+/**
+ * The report a check produced: its leading lines and how many it wrote. Reading
+ * the whole file is what makes the total honest, and a report is bounded by the
+ * output cap; an unreadable file costs the notice its quote, not its existence.
+ */
+async function readSignalReport(
+  path: string | undefined,
+): Promise<Pick<LoopSignalDetails, "outputHead" | "outputLines">> {
+  if (path === undefined) return {};
+  try {
+    const { text } = await readOutputFrom(path, 0);
+    const all = tailLines(text);
+    return {
+      outputHead: all.slice(0, SIGNAL_OUTPUT_LINES).join("\n"),
+      outputLines: all.length,
+    };
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Announce one signalled fire. A signal is the check speaking, not the loop
+ * breaking, so this message carries no failure vocabulary (ADR-0018).
+ */
+export async function notifyLoopSignal(
+  pi: ExtensionAPI,
+  details: LoopSignalDetails,
+): Promise<void> {
+  const report = await readSignalReport(details.outputPath);
+  const message = { ...details, ...report };
+  pi.sendMessage(
+    {
+      customType: LOOP_SIGNAL_CUSTOM_TYPE,
+      content: signalText(message),
+      display: true,
+      details: message,
+    },
+    { deliverAs: "followUp", triggerTurn: true },
+  );
+}
+
+/** Draws one signal notice: the check's report, never a failure badge. */
+export const renderLoopSignal: MessageRenderer<LoopSignalDetails> = (message, _options, theme) => {
+  const details = message.details;
+  if (details === undefined) return undefined;
+  const header = [
+    theme.fg("warning", "⚑ signalled"),
+    theme.bold(details.name),
+    theme.fg("muted", `(${details.id})`),
+    theme.fg("muted", `· fire #${String(details.fire)} · ${formatDuration(details.durationMs)}`),
+  ].join(" ");
+  const lines = [header];
+  if (details.exitCode !== undefined && details.exitCode !== null) {
+    lines.push(theme.fg("muted", `exit code: ${String(details.exitCode)}`));
+  }
+  const head = tailLines(details.outputHead);
+  if (head.length > 0) {
+    const total = details.outputLines ?? head.length;
+    lines.push(theme.fg("muted", `report (${String(head.length)} of ${String(total)} lines):`));
+    for (const line of head) lines.push(theme.fg("dim", `  ${line}`));
+  }
+  if (details.outputPath !== undefined) {
+    lines.push(theme.fg("dim", `full output: ${details.outputPath}`));
   }
   return new Text(lines.join("\n"), 0, 0);
 };

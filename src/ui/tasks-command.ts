@@ -58,9 +58,15 @@ export const STATUS_LINE_KEY = SUMMARY_KEY;
  */
 export function statusLineText(tasks: readonly Task[]): string {
   const running = tasks.filter((task) => task.status === "running").length;
+  // A signal is counted beside the running count, not instead of it: the loop is
+  // still live and its condition is still raised (ADR-0018).
+  const signalled = tasks.filter(
+    (task) => task.kind === "cmd-loop" && task.signalRaised === true,
+  ).length;
   const finished = tasks.length - running;
   const parts: string[] = [];
   if (running > 0) parts.push(`${String(running)} running`);
+  if (signalled > 0) parts.push(`${String(signalled)} signal`);
   if (finished > 0) parts.push(`${String(finished)} finished`);
   return `${parts.join(" · ")} · ${TASKS_HINT}`;
 }

@@ -326,6 +326,12 @@ function tabKey(choice: PanelTab | PanelFilter): string {
   }
 }
 
+// `handleInput` reads one key per call (`f` is matched exactly), so a test that
+// walks to a filter sends the presses one at a time.
+function pressFilter(panel: TasksPanel, choice: PanelFilter): void {
+  for (const key of tabKey(choice)) panel.handleInput(key);
+}
+
 /** `f` walks running → failed → done → all, so the archive is three presses away. */
 function showAll(panel: TasksPanel): void {
   for (let press = 0; press < PANEL_FILTERS.length - 1; press += 1) panel.handleInput("f");
@@ -1175,7 +1181,7 @@ describe("the list header", () => {
 
     // The filter narrows the rows, never the tally: with `failed` on, only `lint`
     // is listed and the header still names all five endings (ADR-0012).
-    panel.handleInput("f");
+    pressFilter(panel, "failed");
     expect(plain(drawn())).toContain("filter: failed");
     expect(drawn()).toContain("lint");
     expect(drawn()).not.toContain("server");
@@ -1199,31 +1205,30 @@ describe("the status filter", () => {
     return source;
   }
 
-  it("walks all, running, failed and done on f, and names the filter in the header", async () => {
+  it("walks the status filters on f in list order, and names each in the header", async () => {
     const { panel, drawn } = openPanel(byStatus());
     await panel.settle();
 
-    // `running` is where the panel opens: the past is one keypress group away.
-    expect(plain(drawn())).toContain("filter: running");
+    // `running` is where the panel opens: the past is a keypress group away.
+    expect(plain(drawn())).toContain(`filter: ${DEFAULT_PANEL_FILTER}`);
     expect(drawn()).toContain("server");
     expect(drawn()).not.toContain("lint");
 
-    panel.handleInput("f");
-    expect(plain(drawn())).toContain("filter: failed");
-    expect(drawn()).toContain("lint");
-    expect(drawn()).not.toContain("server");
-
-    // A killed task finished without failing, so it is done, not failed.
-    panel.handleInput("f");
-    expect(plain(drawn())).toContain("filter: done");
-    expect(drawn()).toContain("watch");
-    expect(drawn()).toContain("deploy");
-    expect(drawn()).toContain("build");
-    expect(drawn()).not.toContain("lint");
-
-    panel.handleInput("f");
-    expect(plain(drawn())).toContain("filter: all");
-    expect(drawn()).toContain("build");
+    // The walk and the rows it shows are read off the filter list, so a filter
+    // added between two others moves this test with it instead of turning red.
+    const listed: Partial<Record<PanelFilter, readonly string[]>> = {
+      // A killed task finished without failing, so it is done, not failed.
+      done: ["build", "deploy", "watch"],
+      all: ["server", "build", "lint"],
+      failed: ["lint"],
+    };
+    const start = PANEL_FILTERS.indexOf(DEFAULT_PANEL_FILTER);
+    for (const next of [...PANEL_FILTERS.slice(start + 1), ...PANEL_FILTERS.slice(0, start + 1)]) {
+      panel.handleInput("f");
+      expect(plain(drawn())).toContain(`filter: ${next}`);
+      for (const name of listed[next] ?? []) expect(drawn()).toContain(name);
+      if (next === "failed") expect(drawn()).not.toContain("server");
+    }
 
     panel.dispose();
   });
@@ -1249,7 +1254,7 @@ describe("the status filter", () => {
     expect(plain(drawn())).toContain("deploy east");
     expect(plain(drawn())).not.toContain("deploy west");
 
-    panel.handleInput("f");
+    pressFilter(panel, "failed");
     expect(plain(drawn())).toContain("deploy west");
     expect(plain(drawn())).not.toContain("deploy east");
 
@@ -1270,8 +1275,7 @@ describe("the status filter", () => {
     const { panel, drawn } = await openOn("loops", byStatus());
     expect(drawn()).toContain("review loop");
 
-    panel.handleInput("f");
-    panel.handleInput("f");
+    pressFilter(panel, "done");
     // Done: the paused loop is not done, so the page empties.
     expect(drawn()).toContain("Nothing here matches this status");
 
@@ -1295,11 +1299,30 @@ describe("the status filter", () => {
     expect(drawn()).toContain("ship it");
     expect(drawn()).not.toContain("old news");
 
-    // Failed, then done: the finished queue is the only one left on the page.
-    panel.handleInput("f");
-    panel.handleInput("f");
+    // Done: the finished queue is the only one left on the page.
+    pressFilter(panel, "done");
     expect(drawn()).toContain("old news");
     expect(drawn()).not.toContain("ship it");
+
+    panel.dispose();
+  });
+  it("shows a raised signal under its own filter and keeps the running queue", async () => {
+    const source = new FakeSource();
+    source.rows = [
+      cmdLoopView("lc-raised", { name: "issue watch", signalRaised: true }),
+      cmdLoopView("lc-quiet1", { name: "nightly probe" }),
+    ];
+    const { panel, drawn } = await openOn("loops", source);
+
+    // Both loops are live, so running lists both; the raised one says why it
+    // last woke the agent (ADR-0018).
+    expect(drawn()).toContain("issue watch");
+    expect(drawn()).toContain("⚑ signal");
+
+    pressFilter(panel, "signal");
+    expect(plain(drawn())).toContain("filter: signal");
+    expect(drawn()).toContain("issue watch");
+    expect(drawn()).not.toContain("nightly probe");
 
     panel.dispose();
   });

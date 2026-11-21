@@ -133,13 +133,13 @@ export type PanelMode = "list" | "detail" | "iteration";
 export type PanelTab = "processes" | "loops" | "chains";
 
 /** The status filter `f` cycles, applied inside whichever page is open (ADR-0012). */
-export type PanelFilter = "all" | "running" | "failed" | "done";
+export type PanelFilter = "all" | "running" | "signal" | "failed" | "done";
 
 /** The pages in the order `1`, `2`, `3` and the `tab` key walk them. */
 export const PANEL_TABS: readonly PanelTab[] = ["processes", "loops", "chains"];
 
 /** The filters in the order `f` walks them, starting from the one the panel opens on. */
-export const PANEL_FILTERS: readonly PanelFilter[] = ["all", "running", "failed", "done"];
+export const PANEL_FILTERS: readonly PanelFilter[] = ["all", "running", "signal", "failed", "done"];
 
 /** The filter a freshly opened panel starts on: live work, not the archive. */
 export const DEFAULT_PANEL_FILTER: PanelFilter = "running";

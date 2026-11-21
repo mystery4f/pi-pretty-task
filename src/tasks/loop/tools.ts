@@ -49,10 +49,16 @@ const CreateParameters = Type.Object({
         "Extra environment variables for a command loop, layered over the session environment. Only valid with `command`.",
     }),
   ),
+  notifyExitCodes: Type.Optional(
+    Type.Array(Type.Integer({ minimum: 1, maximum: 255 }), {
+      description:
+        "Exit codes that mean `the check has something to report`, not `the loop is broken`, for example [1]. A fire with one of them is recorded as signalled: it wakes this session once per raised condition, keeps its schedule and never backs off; a later success clears the signal. Exit 0 is always success. Only valid with `command`.",
+    }),
+  ),
   wakeOnFailure: Type.Optional(
     Type.Boolean({
       description:
-        "Send a notice into this session when a fire fails (exit code, duration, last output lines); a healthy fire stays silent. Defaults to true. Only valid with `command`.",
+        "Send a notice into this session when a fire fails (exit code, duration, last output lines); a healthy fire stays silent. Defaults to true. A fire whose exit code is listed in `notifyExitCodes` is a signal rather than a failure and wakes the session either way. Only valid with `command`.",
     }),
   ),
   name: Type.Optional(
@@ -155,6 +161,15 @@ export function describeLoop(view: LoopTaskView): string {
   } else {
     if (task.cwd !== undefined) lines.push(`cwd: ${task.cwd}`);
     if (task.wakeOnFailure === false) lines.push("wake on failure: off");
+    if (task.notifyExitCodes !== undefined && task.notifyExitCodes.length > 0) {
+      const codes = task.notifyExitCodes.map((code) => `exit ${String(code)}`).join(", ");
+      lines.push(`signal on: ${codes}`);
+      const since =
+        task.signalRaisedAt === undefined
+          ? ""
+          : ` since ${new Date(task.signalRaisedAt).toISOString()}`;
+      lines.push(`latch: ${task.signalRaised === true ? "raised" : "clear"}${since}`);
+    }
     if (task.lastOutputPath !== undefined) {
       const exit =
         task.lastExitCode === undefined || task.lastExitCode === null
@@ -323,6 +338,9 @@ function loopDetails(
     command: task.command,
     cwd: task.cwd,
     wakeOnFailure: task.wakeOnFailure,
+    notifyExitCodes: task.notifyExitCodes,
+    signalRaised: task.signalRaised,
+    signalRaisedAt: task.signalRaisedAt,
     lastExitCode: task.lastExitCode,
     lastOutputPath: task.lastOutputPath,
     lastOutputBytes: task.lastOutputBytes,
@@ -368,7 +386,7 @@ export function loopTaskTools(loops: LoopTasks): ToolDefinition[] {
     name: "pretty_task_loop_create",
     label: "Create a loop",
     description:
-      "Schedule something to happen on a recurrence. With `prompt`, each fire sends that message into this session and starts a new agent turn; the wake is delivered when the agent is idle, so a busy agent delays it instead of losing it. With `command`, each fire runs that shell command as an ordinary background process task (like pretty_task_bg_run) and nothing is sent into the session unless the fire fails and wakeOnFailure is on; a fire that comes due while the previous one still runs is skipped and recorded as skipped. A fire that fails backs the schedule off: its next fire moves later, doubling on each consecutive failure up to one hour, and the first success puts it back on the slot — so a loop that keeps failing runs less often than its expression says. Give exactly one of prompt and command. The schedule is an interval (30s, 10m, 2h) or a five-field cron expression in local time (0 9 * * 1-5). Use pretty_task_loop_list to watch it and pretty_task_loop_delete to stop it.",
+      "Schedule something to happen on a recurrence. With `prompt`, each fire sends that message into this session and starts a new agent turn; the wake is delivered when the agent is idle, so a busy agent delays it instead of losing it. With `command`, each fire runs that shell command as an ordinary background process task (like pretty_task_bg_run) and nothing is sent into the session unless the fire fails and wakeOnFailure is on, or its exit code is one of `notifyExitCodes` (a signal: it wakes once per raised condition and keeps its schedule); a fire that comes due while the previous one still runs is skipped and recorded as skipped. A fire that fails backs the schedule off: its next fire moves later, doubling on each consecutive failure up to one hour, and the first success puts it back on the slot — so a loop that keeps failing runs less often than its expression says. Give exactly one of prompt and command. The schedule is an interval (30s, 10m, 2h) or a five-field cron expression in local time (0 9 * * 1-5). Use pretty_task_loop_list to watch it and pretty_task_loop_delete to stop it.",
     parameters: CreateParameters,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       try {
@@ -380,6 +398,9 @@ export function loopTaskTools(loops: LoopTasks): ToolDefinition[] {
           ...(params.cwd === undefined ? {} : { workingDirectory: params.cwd }),
           ...(params.env === undefined ? {} : { env: params.env }),
           ...(params.wakeOnFailure === undefined ? {} : { wakeOnFailure: params.wakeOnFailure }),
+          ...(params.notifyExitCodes === undefined
+            ? {}
+            : { notifyExitCodes: params.notifyExitCodes }),
           ...(params.name === undefined ? {} : { name: params.name }),
           ...(params.maxFires === undefined ? {} : { maxFires: params.maxFires }),
           ...(params.expiresIn === undefined ? {} : { expiresIn: params.expiresIn }),
