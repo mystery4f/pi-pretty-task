@@ -12,15 +12,15 @@ updated: 2026-11-21
 
 ## 仓库与代码
 
-- `D:/work/Code/AI/pi/pi-pretty-task`，`main` = `84cf029 fix(pkg): point pi at src/index.ts so a git install needs no build`，已推送，工作树仅剩 wiki 元数据改动（`.llm-wiki/meta/*.json|l`）。
+- `D:/work/Code/AI/pi/pi-pretty-task`，`main` = `cb93417 docs(adr): record how the signal shows up and that both steps landed`，本地领先 `origin/main` 5 个提交（`cd40ee2` `9eecf53` `c5a7ebb` `ae363e2` `cb93417`），**未推送**：GitHub 连接被重置。工作树干净。
 - 集成分支 `feat/v0.2-tasks` 已全部合并，`ticket/*` 分支与 `.tmp/wt/*` worktree 已清理，远端只有 `main`。
 - 安装方式：`~/.pi/agent/settings.json` 第 159 行 `"git:github.com/mystery4f/pi-pretty-task"`；入口 `./src/index.ts`（pi 自己转译），所以**本机改完代码不必 build**，但 `dist/` 不再是安装物。
 - 工具面：十个 `pretty_task_*`（含 `pretty_task_bg_wait`），无旧别名。
-- 闸门：`npm run check` / `npm run lint` / `npm test`（427 测试，约 46s）/ `npm run build` / `npm run verify`；CI `.github/workflows/verify.yml` 跑前三项。
+- 闸门：`npm run check` / `npm run lint` / `npm test`（448 测试）/ `npm run build` / `npm run verify`；CI `.github/workflows/verify.yml` 跑前三项。**集成测试在这台机器上现在不绿**：2026-11-21 实测 `vitest run test/integration` 在 `HEAD` 干净树上也有 29 个失败（`process-stop` 里「waits only as long as the store tells it to」断言 4195ms < 3000ms 直接超）。原因不在代码：是残留的测试子进程 + 慢盘，先 `powershell -File .tmp/ps-kill-strays.ps1` 清掉 `%TEMP%\pi-pretty-task-*` 下的孤儿 node 再跑，仍会剩下时间敏感的假失败。判绿看单元工程与改到的集成文件（`cmd-loops` / `tasks-command` / `terminal-notification`）。
 
 ## 已上线能力
 
-进程任务（run/status/logs/grep/follow/kill/wait/rerun、cwd/env、模板、完成通知、OSC 9 终端通知、输出与时长上限、通知与上限两条环境变量）、提示词 Loop（间隔 + 五段 cron、改期、暂停、跳过重叠、失败退避、失败唤醒、每次触发的迭代记录）、命令 Loop（每次触发是一条带 `parentId` 的进程任务）、链（`after:` 串步骤、`/tasks` 里的 Chains 页）、保留期清理、事件总线、面板三页（`1/2/3`、`f` 过滤默认 running、`/` 模糊搜索、`h` 历史、`R` 重跑、`o` 其他会话只读）。
+进程任务（run/status/logs/grep/follow/kill/wait/rerun、cwd/env、模板、完成通知、OSC 9 终端通知、输出与时长上限、通知与上限两条环境变量）、提示词 Loop（间隔 + 五段 cron、改期、暂停、跳过重叠、失败退避、失败唤醒、每次触发的迭代记录）、命令 Loop（每次触发是一条带 `parentId` 的进程任务；声明 `notifyExitCodes` 后按退出码报警，`signalled` 结局 + 边沿闩，不退避不改档期）、链（`after:` 串步骤、`/tasks` 里的 Chains 页）、保留期清理、事件总线、面板三页（`1/2/3`、`f` 过滤默认 running、`/` 模糊搜索、`h` 历史、`R` 重跑、`o` 其他会话只读）。
 
 ## 未完成
 
@@ -48,7 +48,9 @@ updated: 2026-11-21
 - 离格后整点塌陷：`#57 05:40:38.492Z`（跑 1m32s）→ `#58 05:50:00.706Z`，只隔 9m22s；老例 17:29:55 与 17:30:00 隔 5 秒，前者未完 → 后者 `skipped`，那一轮报告丢失。
 - resume 补发也离格：pump 停 2h20m（`#56 03:20:00.672Z` → `#57 05:40:38.492Z`），塌陷不需要先失败一次。
 
-本轮落了两步：ADR-0018 定稿（`cd40ee2`）与最小间隔（`9eecf53`，`advanceSchedule` 走 `nextFireBeyondGap`，`Recurrence.periodMs` 让短间隔不被改频）；`pretty_task_loop_create` 描述补上「失败会移动下次触发、成功归位」；`docs/scope-v1.md` 的 event/idle 延后行指向 ADR-0018。信号语义（`notifyExitCodes`、`signalRaised`、`signalled` 结局、面板四处）尚未动，ADR 里已定稿，`未决` 已清空。
+两步都已落：ADR-0018 定稿（`cd40ee2`）、最小间隔（`9eecf53`：`advanceSchedule` 走 `nextFireBeyondGap`，`Recurrence.periodMs` 让短间隔不被改频）、信号语义整批（`ae363e2`：`FireOutcome` 的 `"signalled"`、`notifyExitCodes` 校验 `1..255` 且拒 0 与空表、`signalRaised`/`signalRaisedAt` 闩、`loop-signal` 唤醒卡带前 10 行、面板徽标与 `signal` 过滤器与状态栏计数、`loop_list` 的 `signal on:` / `latch:`），文档收口（`cb93417`：ADR 后果段改成实际形状、`GLOSSARY.md` 加 Signal 与 Latch 两个词）。`pretty_task_loop_create` 描述同时补上「失败会移动下次触发、成功归位」；`docs/scope-v1.md` 的 event/idle 延后行指向 ADR-0018。
+与 ADR 原文的一处偏离，已回改 ADR：行里的状态词不动（`running` 是记录的事实），改成旁边一个 `⚑ signal` 徽标；退避的事实仍由既有的 `Failures: N in a row` 承担，不另开 `backoff` 字段。
+**还没做**：ADR-0018「手动动作」里的 `action=rearm` / `action=clear-signal` 与 `pretty_task_loop_fire`（run-now）——`clear-signal` 是闩的唯一人工出口，现在只能靠一发 `success` 落闩。
 
 ### 待开的两个 issue（GitHub 不通，写了正文等能推时再贴）
 
