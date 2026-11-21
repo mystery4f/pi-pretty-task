@@ -25,7 +25,7 @@ Cmd loop task 的一次触发，落在一个子 Process task 上。它有自己�
 _Avoid_: run, tick, execution
 
 **Signal**:
-一次 Fire 的结局 `signalled`：Cmd loop task 声明了 `notifyExitCodes`，而这一发退出的码在列表里——检查有话说，loop 本身没坏。它不移动下次触发时刻、不进失败连击，只在闩从落着变成立起时唤醒一轮。列表外的非零码仍是 `failed`，照旧退避。手动发（`pretty_task_loop_fire`）可以记成 `signalled`，但永不立闩——手动跑一次是探针，不代表到点那一发观测到了什么。
+一次 Fire 的结局 `signalled`：Cmd loop task 声明了 `notifyExitCodes`，而这一发退出的码在列表里——检查有话说，loop 本身没坏。它不移动下次触发时刻、不进失败连击，只在闩从落着变成立起时唤醒一轮。列表外的非零码仍是 `failed`，照旧退避。手动发（`pretty_task_loop_fire`）可以记成 `signalled`，但永不立闩——手动跑一次是探针，不代表到点那一发观测到了什么。注意两层说法不同：那一发的**子进程**仍记 `failed`（进程只看得见非零退出码），`pretty_task_bg_status` / `bg_wait` 报的就是这个；`signalled` 是 loop 层的判决，看它要读 `loop_list`。
 _Avoid_: alert, notification, event, warning
 
 **Latch**:
