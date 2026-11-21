@@ -24,7 +24,7 @@ import {
 import { fittedFooter, LIST_KEYS, pad } from "./keys.js";
 import {
   ID_COLUMN_WIDTH,
-  LIST_VISIBLE_ROWS,
+  listWindow,
   PANEL_TABS,
   type PanelTab,
   type PanelTaskView,
@@ -68,15 +68,18 @@ export function renderList(panel: PanelView, width: number): string[] {
   // room than a process's size and age; the strip sheds its finished steps instead.
   const nameRoom = Math.min(longest, Math.max(12, inner - (panel.tab === "chains" ? 48 : 79)));
 
-  const visible = panel.rows.slice(panel.listTop, panel.listTop + LIST_VISIBLE_ROWS);
+  // The paging line says how much is hidden, so it is paid for out of the window
+  // rather than pushing the frame past the pane.
+  const { rows: shown, paged } = listWindow(panel.rows.length, panel.renderHeight);
+  const visible = panel.rows.slice(panel.listTop, panel.listTop + shown);
   visible.forEach((row, offset) => {
     body.push(
       listRow(panel, row, panel.listTop + offset === selectedIndex(panel), inner, nameRoom),
     );
   });
-  if (panel.rows.length > LIST_VISIBLE_ROWS) {
+  if (paged) {
     const first = panel.listTop + 1;
-    const last = Math.min(panel.rows.length, panel.listTop + LIST_VISIBLE_ROWS);
+    const last = Math.min(panel.rows.length, panel.listTop + shown);
     body.push(
       theme.fg("dim", `  Showing ${String(first)}-${String(last)} of ${String(panel.rows.length)}`),
     );

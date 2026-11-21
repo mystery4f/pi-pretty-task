@@ -12,17 +12,19 @@
  */
 import { matchesKey } from "@earendil-works/pi-tui";
 import type { CmdLoopTask, PromptLoopTask } from "../../tasks/base/task.js";
+import { detailRows, windowRowsFor } from "./detail.js";
 import { messageOf } from "./format.js";
 import { pageKey } from "./keys.js";
 import { foreign, selectedIndex } from "./list.js";
-import {
-  DETAIL_OUTPUT_LINES,
-  LIST_VISIBLE_ROWS,
-  type PanelStopResult,
-  READ_ONLY,
-} from "./model.js";
+import { LIST_VISIBLE_ROWS, listWindow, type PanelStopResult, READ_ONLY } from "./model.js";
 import { pastedQuery, typedQuery } from "./query.js";
 import type { TasksPanel } from "./tasks-panel.js";
+
+/** One page of a detail's history: the rows its window draws, without the two
+ *  lines that say what is scrolled out. */
+function detailWindowRows(panel: TasksPanel): number {
+  return Math.max(1, detailRows(panel.renderHeight, 2, LIST_VISIBLE_ROWS, 2).window - 2);
+}
 
 export function handlePanelInput(panel: TasksPanel, data: string): void {
   if (matchesKey(data, "alt+q")) {
@@ -71,11 +73,11 @@ function handleListInput(panel: TasksPanel, data: string): void {
     return;
   }
   if (matchesKey(data, "pageUp")) {
-    panel.moveCursor(-LIST_VISIBLE_ROWS);
+    panel.moveCursor(-listWindow(panel.rows.length, panel.renderHeight).rows);
     return;
   }
   if (matchesKey(data, "pageDown")) {
-    panel.moveCursor(LIST_VISIBLE_ROWS);
+    panel.moveCursor(listWindow(panel.rows.length, panel.renderHeight).rows);
     return;
   }
   if (matchesKey(data, "enter") || matchesKey(data, "right")) {
@@ -139,11 +141,11 @@ function handleProcessDetailInput(panel: TasksPanel, data: string): void {
     return;
   }
   if (matchesKey(data, "pageUp")) {
-    panel.scrollTail(DETAIL_OUTPUT_LINES);
+    panel.scrollTail(windowRowsFor(panel.renderHeight));
     return;
   }
   if (matchesKey(data, "pageDown")) {
-    panel.scrollTail(-DETAIL_OUTPUT_LINES);
+    panel.scrollTail(-windowRowsFor(panel.renderHeight));
     return;
   }
   if (data === "r") {
@@ -171,11 +173,11 @@ function handleLoopDetailInput(panel: TasksPanel, data: string, task: PromptLoop
     return;
   }
   if (matchesKey(data, "pageUp")) {
-    moveIteration(panel, -LIST_VISIBLE_ROWS, task);
+    moveIteration(panel, -detailWindowRows(panel), task);
     return;
   }
   if (matchesKey(data, "pageDown")) {
-    moveIteration(panel, LIST_VISIBLE_ROWS, task);
+    moveIteration(panel, detailWindowRows(panel), task);
     return;
   }
   if (matchesKey(data, "enter") || matchesKey(data, "right")) {
@@ -200,11 +202,11 @@ function handleCmdLoopDetailInput(panel: TasksPanel, data: string, task: CmdLoop
     return;
   }
   if (matchesKey(data, "pageUp")) {
-    moveFire(panel, -LIST_VISIBLE_ROWS, task);
+    moveFire(panel, -detailWindowRows(panel), task);
     return;
   }
   if (matchesKey(data, "pageDown")) {
-    moveFire(panel, LIST_VISIBLE_ROWS, task);
+    moveFire(panel, detailWindowRows(panel), task);
     return;
   }
   if (matchesKey(data, "enter") || matchesKey(data, "right")) {
@@ -263,11 +265,11 @@ function handleIterationInput(panel: TasksPanel, data: string): void {
     return;
   }
   if (matchesKey(data, "pageUp")) {
-    scrollCalls(panel, -DETAIL_OUTPUT_LINES);
+    scrollCalls(panel, -detailWindowRows(panel));
     return;
   }
   if (matchesKey(data, "pageDown")) {
-    scrollCalls(panel, DETAIL_OUTPUT_LINES);
+    scrollCalls(panel, detailWindowRows(panel));
     return;
   }
   if (data === "k") stopSelected(panel);

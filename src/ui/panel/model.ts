@@ -8,13 +8,20 @@
  */
 
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import type { TUI } from "@earendil-works/pi-tui";
+import type { Terminal, TUI } from "@earendil-works/pi-tui";
 import { elapsedOf } from "../../tasks/base/format.js";
 import type { OutputTail } from "../../tasks/base/output.js";
 import type { Task } from "../../tasks/base/task.js";
 
 /** Output lines the detail view shows at once. */
+/** Output lines a tall panel's detail window shows at once. */
 export const DETAIL_OUTPUT_LINES = 12;
+
+/**
+ * Output lines a detail keeps even in a short pane: below this the tail says
+ * nothing about the run, and the reader is left scrolling blind.
+ */
+export const DETAIL_MIN_OUTPUT_LINES = 3;
 
 /**
  * Output lines the detail view keeps in hand while the reader scrolls up: more
@@ -22,11 +29,82 @@ export const DETAIL_OUTPUT_LINES = 12;
  */
 export const DETAIL_TAIL_LINES = 200;
 
-/** Task rows drawn at once in the list. */
+/** Task rows a tall panel's list draws at once. */
 export const LIST_VISIBLE_ROWS = 12;
 
 /** Width of a detail label column, colon included, so the values line up. */
 export const LABEL_WIDTH = 12;
+/** Width from which a detail keeps a value on the line of its own label. */
+export const DETAIL_WIDE_MIN_WIDTH = 60;
+
+/**
+ * Rows a boxed page spends besides its body: border, title, subtitle, the blank
+ * line above and below the body, the keys and the bottom border.
+ */
+export const FRAME_ROWS = 7;
+/**
+ * Rows kept back for a detail's fields before the window under them takes its
+ * share: the core facts of a process, rounded up. A pane shorter than this keeps
+ * the window at its floor and cuts fields instead, because the output tail is
+ * what a reader opens a process to see.
+ */
+export const DETAIL_FIELD_RESERVE = 11;
+
+/**
+ * Rows a panel draws when it cannot measure its pane (no terminal, as in tests):
+ * a common terminal height, so a page is planned rather than guessed.
+ */
+export const DEFAULT_RENDER_ROWS = 50;
+
+/**
+ * Rows a list frame spends besides its rows: the header bands (a query line
+ * included), the box, the `Showing` line and the keys. The worst case, so a long
+ * query can never push the rows out of the frame.
+ */
+export const LIST_OVERHEAD_ROWS = 9;
+
+/**
+ * Share of the terminal height the panel's overlay may take. The command builds
+ * its `maxHeight` from this number, so what the panel reserves and what pi lets
+ * it draw cannot disagree.
+ */
+export const PANEL_HEIGHT_SHARE = 0.8;
+
+/** Rows kept clear above and below the overlay: the command's `margin`. */
+export const PANEL_MARGIN = 1;
+
+/**
+ * Rows the panel may draw in a terminal `rows` high. pi's overlay clamps its
+ * `maxHeight` to the terminal less its margins and cuts the frame from the top,
+ * so a panel drawing more than this loses its keys and its output tail first.
+ */
+export function panelHeightBudget(rows: number): number {
+  const available = Math.max(1, rows - PANEL_MARGIN * 2);
+  const share = Math.floor(rows * PANEL_HEIGHT_SHARE);
+  return Math.max(1, Math.min(share, available));
+}
+/**
+ * Rows the list may draw in a pane `height` rows high: what the header bands,
+ * the box, the `Showing` line and the keys leave, capped so a tall pane does not
+ * spend all of it on rows.
+ */
+export function listRowsFor(height: number): number {
+  return Math.max(1, Math.min(LIST_VISIBLE_ROWS, height - LIST_OVERHEAD_ROWS));
+}
+
+/**
+ * Rows of a list page for a pane: the paging line costs one row of the window,
+ * so a list too long to fit shows one row fewer — the scroll clamp and the
+ * renderer both read this, or the last row would stay below the fold.
+ */
+export function listWindow(
+  rowCount: number,
+  height: number,
+): { readonly rows: number; readonly paged: boolean } {
+  const rows = listRowsFor(height);
+  const paged = rowCount > rows;
+  return { paged, rows: Math.max(1, paged ? rows - 1 : rows) };
+}
 
 /** An id carries its kind, so the column holds all of `bg-1a2cf` and pads the old six. */
 export const ID_COLUMN_WIDTH = 8;
@@ -111,8 +189,17 @@ export interface PanelSource {
   rerun?(id: string): Promise<PanelTaskView | undefined>;
 }
 
+/**
+ * The slice of a terminal the panel uses. The height is optional because a
+ * caller may drive the panel without a terminal at all; the panel then keeps the
+ * tall default rather than guessing a pane that may not be there.
+ */
+export type PanelTerminal = Pick<TUI, "requestRender"> & {
+  readonly terminal?: Pick<Terminal, "rows">;
+};
 export interface TasksPanelOptions {
-  readonly tui: Pick<TUI, "requestRender">;
+  /** What the panel may ask of the terminal: a repaint, and how tall the pane is. */
+  readonly tui: PanelTerminal;
   readonly theme: Theme;
   /** Called once when the panel should close; pi then disposes the component. */
   readonly done: () => void;

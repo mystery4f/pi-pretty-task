@@ -19,9 +19,12 @@ import type {
   PromptLoopTask,
 } from "../../src/tasks/base/task.js";
 import type { Iteration, IterationCall } from "../../src/tasks/loop/iteration.js";
+import { block, detailRows } from "../../src/ui/panel/detail.js";
 import {
   DEFAULT_PANEL_FILTER,
+  DEFAULT_RENDER_ROWS,
   DETAIL_OUTPUT_LINES,
+  LIST_VISIBLE_ROWS,
   PANEL_FILTERS,
   PANEL_TABS,
   type PanelFilter,
@@ -32,6 +35,7 @@ import {
   rememberPanelTab,
   TasksPanel,
 } from "../../src/ui/panel/tasks-panel.js";
+import type { PanelView } from "../../src/ui/panel/view.js";
 import { plainTheme } from "../support/extension-harness.js";
 
 const UP = "\u001b[A";
@@ -246,6 +250,8 @@ interface Opened {
   readonly source: FakeSource;
   readonly done: ReturnType<typeof vi.fn>;
   drawn(): string;
+  /** The frame at another width, for the panes narrower than {@link WIDTH}. */
+  render(width: number): string[];
 }
 
 /**
@@ -276,10 +282,13 @@ function openPanel(
   source: FakeSource,
   now: () => number = () => 13_000,
   theme: Theme = plainTheme(),
+  rows = DEFAULT_RENDER_ROWS,
 ): Opened {
   const done = vi.fn();
   const panel = new TasksPanel({
-    tui: { requestRender: () => undefined },
+    // The rows are pi's to give: the overlay keeps the first rows it is handed,
+    // so a panel that draws more loses its own bottom.
+    tui: { requestRender: () => undefined, terminal: { rows } },
     theme,
     done,
     source,
@@ -288,7 +297,13 @@ function openPanel(
     // A pinned clock keeps the ages on rows and in details exact.
     now,
   });
-  return { panel, source, done, drawn: () => panel.render(WIDTH).join("\n") };
+  return {
+    panel,
+    source,
+    done,
+    drawn: () => panel.render(WIDTH).join("\n"),
+    render: (width) => panel.render(width),
+  };
 }
 
 /**
@@ -2240,11 +2255,12 @@ describe("chains in the list and in the detail", () => {
     expect(build).toBeGreaterThan(-1);
     expect(build).toBeLessThan(deploy);
     expect(deploy).toBeLessThan(smoke);
-    // Every line carries its status, its duration and, where it has one, its exit code.
-    expect(text).toMatch(/1\. build\s+completed\s+2\.0s\s+exit 0/);
-    expect(text).toMatch(/2\. deploy\s+running\s+10\.0s\b/);
+    // Every line leads with its status and its name, and the numbers trail: a
+    // narrow pane then keeps what the step is instead of what it took.
+    expect(text).toMatch(/completed\s+1\. build · exit 0 · 2\.0s/);
+    expect(text).toMatch(/running\s+2\. deploy · 10\.0s\b/);
     // A step that has not run yet has no duration and no exit code to report.
-    expect(text).toMatch(/3\. smoke\s+waiting\s+—/);
+    expect(text).toMatch(/waiting\s+3\. smoke · —/);
 
     panel.dispose();
   });
@@ -2599,5 +2615,75 @@ describe("the frame never draws past the terminal", () => {
     expect(narrow).toContain("review loop");
 
     panel.dispose();
+  });
+});
+
+/**
+ * A Herdr pane is not a 100-column terminal. These cases drive the page at the
+ * size a reader actually has: the overlay keeps the first rows it is handed, so
+ * anything past the pane's height is gone, and the bottom of a page is where the
+ * tail a reader came for sits.
+ */
+describe("a pane too narrow and too short for the full page", () => {
+  /** A half-screen pane beside another one. */
+  const PANE_WIDTH = 27;
+  const PANE_ROWS = 14;
+
+  it("splits the pane's rows between the fields and the window under them", () => {
+    expect(detailRows(40, 3)).toEqual({ fields: 16, window: DETAIL_OUTPUT_LINES });
+    // A 14-row pane has room for two lines of tail or one field: the tail wins.
+    expect(detailRows(PANE_ROWS, 3)).toEqual({ fields: 0, window: 2 });
+    expect(detailRows(20, 2, LIST_VISIBLE_ROWS, 2)).toEqual({ fields: 7, window: 2 });
+  });
+
+  it("draws no more rows than the pane holds, and keeps the output tail", async () => {
+    const source = new FakeSource();
+    source.rows = [view("bg-narrow1")];
+    source.tails.set("bg-narrow1", tailOf(numberedOutput(20)));
+    const { panel, render } = openPanel(source, () => 13_000, plainTheme(), PANE_ROWS);
+    await panel.settle();
+    panel.handleInput(ENTER);
+    await panel.settle();
+
+    const lines = render(PANE_WIDTH);
+    // The overlay slices from the top, so a body taller than the pane is itself
+    // whatever the reader is not shown.
+    expect(lines.length).toBeLessThanOrEqual(PANE_ROWS);
+    for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(PANE_WIDTH);
+    const text = lines.join("\n");
+    expect(text).toContain("Output tail:");
+    expect(text).toContain("output-20");
+
+    panel.dispose();
+  });
+
+  it("names the fields a short pane had to drop", async () => {
+    const source = new FakeSource();
+    source.rows = [view("bg-short1")];
+    const { panel, render } = openPanel(source, () => 13_000, plainTheme(), 22);
+    await panel.settle();
+    panel.handleInput(ENTER);
+    await panel.settle();
+
+    const lines = render(WIDTH);
+    const text = lines.join("\n");
+    expect(lines.length).toBeLessThanOrEqual(22);
+    expect(text).toContain("Name:");
+    expect(text).toContain("more field");
+    expect(text).toContain("a taller pane shows them");
+
+    panel.dispose();
+  });
+
+  it("wraps a long value instead of cutting it to an ellipsis", () => {
+    const panel = { renderWidth: PANE_WIDTH, theme: plainTheme() } as unknown as PanelView;
+    // The frame keeps two columns for its border, which is what a wrapped value
+    // still has to fit inside.
+    const lines = block(panel, "Command", "node build.js --nightly --watch");
+    for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(PANE_WIDTH - 2);
+    const text = lines.map((line) => line.trim()).join(" ");
+    expect(text).not.toContain("…");
+    expect(text).toContain("--watch");
+    expect(text).toContain("node build.js");
   });
 });

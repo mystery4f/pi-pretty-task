@@ -13,25 +13,28 @@
  */
 
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import { type Component, type TUI, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { type Component, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { formatBytes } from "../../tasks/base/format.js";
 import type { CmdLoopTask, FireRecord, PromptLoopTask, Task } from "../../tasks/base/task.js";
 import type { Iteration } from "../../tasks/loop/iteration.js";
-import { renderDetail, renderIterationDetail } from "./detail.js";
+import { renderDetail, renderIterationDetail, windowRowsFor } from "./detail.js";
 import { messageOf } from "./format.js";
 import { handlePanelInput } from "./input.js";
 import { renderList, stepRecord } from "./list.js";
 import {
   DEFAULT_PANEL_FILTER,
-  DETAIL_OUTPUT_LINES,
+  DEFAULT_RENDER_ROWS,
   DETAIL_TAIL_LINES,
   LIST_VISIBLE_ROWS,
+  listWindow,
   PANEL_FILTERS,
   type PanelFilter,
   type PanelMode,
   type PanelSource,
   type PanelTab,
   type PanelTaskView,
+  type PanelTerminal,
+  panelHeightBudget,
   QUERY_MAX_LENGTH,
   type TasksPanelOptions,
 } from "./model.js";
@@ -79,7 +82,7 @@ function tailLines(text: string, count: number): string[] {
 }
 
 export class TasksPanel implements Component, PanelView {
-  readonly tui: Pick<TUI, "requestRender">;
+  readonly tui: PanelTerminal;
   readonly theme: Theme;
   readonly done: () => void;
   readonly source: PanelSource;
@@ -89,6 +92,12 @@ export class TasksPanel implements Component, PanelView {
   mode: PanelMode = "list";
   /** Width of the frame being drawn; field values are cut against it. */
   renderWidth = 80;
+  /**
+   * Rows the pane leaves the panel, measured on every render. A caller without a
+   * terminal falls back to a tall default, so a test and a headless view keep
+   * every field instead of drawing into a pane that may not exist.
+   */
+  renderHeight = DEFAULT_RENDER_ROWS;
   /** What the reader may open: the filter has already been applied. */
   rows: readonly PanelTaskView[] = [];
   /** Every row of the session, so the counts never depend on the filters. */
@@ -270,7 +279,8 @@ export class TasksPanel implements Component, PanelView {
       return;
     }
     if (index < this.listTop) this.listTop = index;
-    if (index >= this.listTop + LIST_VISIBLE_ROWS) this.listTop = index - LIST_VISIBLE_ROWS + 1;
+    const rows = listWindow(this.rows.length, this.renderHeight).rows;
+    if (index >= this.listTop + rows) this.listTop = index - rows + 1;
   }
   /**
    * Remember how much each task grew since the last look, so a list row can say
@@ -297,6 +307,12 @@ export class TasksPanel implements Component, PanelView {
     // Field values are cut against the frame they sit in, so the frame never has to
     // re-measure text that already carries colour.
     this.renderWidth = width;
+    // A real terminal answers how tall the pane is; pi's overlay clamps the frame
+    // to this budget and cuts from the top, so the pages plan against it.
+    this.renderHeight =
+      this.tui.terminal === undefined
+        ? DEFAULT_RENDER_ROWS
+        : panelHeightBudget(this.tui.terminal.rows);
     if (this.mode === "iteration") return renderIterationDetail(this, width);
     return this.mode === "detail" ? renderDetail(this, width) : renderList(this, width);
   }
@@ -367,7 +383,8 @@ export class TasksPanel implements Component, PanelView {
   /** Keep row `index` inside the list window. */
   private scrollListTo(index: number): void {
     if (index < this.listTop) this.listTop = index;
-    if (index >= this.listTop + LIST_VISIBLE_ROWS) this.listTop = index - LIST_VISIBLE_ROWS + 1;
+    const rows = listWindow(this.rows.length, this.renderHeight).rows;
+    if (index >= this.listTop + rows) this.listTop = index - rows + 1;
   }
 
   /** Enter on the list: open the selected record, or say there is nothing to open. */
@@ -452,15 +469,16 @@ export class TasksPanel implements Component, PanelView {
   showFire(fire: number, index: number): void {
     this.iterationFire = fire;
     if (index < this.iterationTop) this.iterationTop = index;
-    if (index >= this.iterationTop + LIST_VISIBLE_ROWS) {
-      this.iterationTop = index - LIST_VISIBLE_ROWS + 1;
+    const rows = windowRowsFor(this.renderHeight, LIST_VISIBLE_ROWS, 2);
+    if (index >= this.iterationTop + rows) {
+      this.iterationTop = index - rows + 1;
     }
     this.paint();
   }
 
   /** Two new lines come from the reader scrolling back through the output. */
   scrollTail(delta: number): void {
-    const oldest = Math.max(0, this.detailLines.length - DETAIL_OUTPUT_LINES);
+    const oldest = Math.max(0, this.detailLines.length - windowRowsFor(this.renderHeight));
     const next = Math.min(oldest, Math.max(0, this.scrollBack + delta));
     if (next === this.scrollBack) return;
     this.scrollBack = next;
@@ -486,7 +504,7 @@ export class TasksPanel implements Component, PanelView {
 
   /** Move the call cursor inside one iteration, never past its oldest call. */
   scrollCalls(delta: number, calls: number): void {
-    const oldest = Math.max(0, calls - DETAIL_OUTPUT_LINES);
+    const oldest = Math.max(0, calls - windowRowsFor(this.renderHeight));
     const next = Math.min(oldest, Math.max(0, this.callTop + delta));
     if (next === this.callTop) return;
     this.callTop = next;

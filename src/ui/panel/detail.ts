@@ -6,7 +6,7 @@
  * @author mystery4f <40482524+mystery4f@users.noreply.github.com>
  */
 
-import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { formatBytes, formatClockTime, formatDuration } from "../../tasks/base/format.js";
 import type { IterationCall } from "../../tasks/loop/iteration.js";
 import { STATUS_COLOUR } from "../status-colour.js";
@@ -33,7 +33,11 @@ import {
 import { fittedFooter, PROCESS_KEYS, pad } from "./keys.js";
 import { chainPlace, foreign, renderList, stepRecord } from "./list.js";
 import {
+  DETAIL_FIELD_RESERVE,
+  DETAIL_MIN_OUTPUT_LINES,
   DETAIL_OUTPUT_LINES,
+  DETAIL_WIDE_MIN_WIDTH,
+  FRAME_ROWS,
   LABEL_WIDTH,
   LIST_VISIBLE_ROWS,
   type PanelTaskView,
@@ -55,10 +59,10 @@ export function renderChainDetail(panel: PanelView, row: PanelTaskView, width: n
   if (task.kind !== "chain") return renderList(panel, width);
   const colour = STATUS_COLOUR[task.status];
   const done = task.steps.filter((id) => stepRecord(panel, id)?.status === "completed").length;
-  const body: string[] = [
+  const groups: string[][] = [
     field(panel, "Name", theme.fg("accent", task.name)),
     field(panel, "ID", theme.fg("accent", task.id)),
-    ...sessionField(panel, row),
+    sessionField(panel, row),
     field(panel, "Status", theme.fg(colour, task.status)),
     field(panel, "Runtime", formatDuration(row.elapsedMs)),
     field(panel, "Updated", updatedText(panel, task.updatedAt)),
@@ -67,19 +71,30 @@ export function renderChainDetail(panel: PanelView, row: PanelTaskView, width: n
       "Steps",
       `${String(done)} of ${String(task.steps.length)} done · ${chainPlace(panel, task)}`,
     ),
+    task.endedAt === undefined ? [] : field(panel, "Ended", formatClockTime(task.endedAt)),
+    task.killReason === undefined ? [] : field(panel, "Kill reason", task.killReason),
+    task.error === undefined ? [] : block(panel, "Error", theme.fg(colour, task.error)),
   ];
-  if (task.endedAt !== undefined) {
-    body.push(field(panel, "Ended", formatClockTime(task.endedAt)));
-  }
-  if (task.killReason !== undefined) body.push(field(panel, "Kill reason", task.killReason));
-  if (task.error !== undefined) body.push(field(panel, "Error", theme.fg(colour, task.error)));
 
+  // The steps get what the pane leaves once the fields and the keys are paid
+  // for, and the fields shed first: the step a chain is stuck on is why this
+  // page was opened.
+  const notice = panel.notice === undefined ? 0 : 1;
+  const budget = detailRows(panel.renderHeight, 2 + notice, LIST_VISIBLE_ROWS, 2);
+  const stepRows = budget.window;
+  const body = fitFields(panel, groups, budget.fields);
   body.push("", theme.fg("muted", ` Steps, in run order (${String(task.steps.length)}):`));
   if (task.steps.length === 0) {
     body.push(theme.fg("dim", "  no step queued yet"));
   }
+  // Two lines say how much is hidden, one above and one below, so they are taken
+  // from the window rather than pushing the frame past the pane.
+  const rows = Math.max(1, task.steps.length > stepRows ? stepRows - 2 : stepRows);
+  const top = Math.max(0, Math.min(task.cursor - rows + 1, task.steps.length - rows));
   const room = Math.max(20, width - 4);
-  task.steps.forEach((id, index) => {
+  if (top > 0) body.push(theme.fg("dim", `  … ${String(top)} earlier above`));
+  task.steps.slice(top, top + rows).forEach((id, offset) => {
+    const index = top + offset;
     const step = stepRecord(panel, id);
     const status = step?.status ?? "waiting";
     const marker = index === task.cursor ? theme.fg("accent", "›") : " ";
@@ -95,9 +110,15 @@ export function renderChainDetail(panel: PanelView, row: PanelTaskView, width: n
       step?.kind === "process" && step.exitCode !== undefined && step.exitCode !== null
         ? `exit ${String(step.exitCode)}`
         : "";
-    const line = `${marker} ${mark} ${pad(name, 20)} ${pad(status, 10)} ${pad(duration, 6)} ${code}`;
+    // Status and name lead, so a narrow pane keeps the fact that explains the
+    // chain and the step it is on; the numbers trail and go first when cut.
+    const facts = [code, duration].filter((cell) => cell.length > 0).join(" · ");
+    const line = `${marker} ${mark} ${pad(status, 9)} ${name}${facts.length > 0 ? ` · ${facts}` : ""}`;
     body.push(`${truncateToWidth(line.trimEnd(), room, "…", false)}  ${theme.fg("dim", id)}`);
   });
+  const below = Math.max(0, task.steps.length - top - rows);
+  if (below > 0)
+    body.push(theme.fg("dim", `  … ${String(below)} more step${below === 1 ? "" : "s"}`));
 
   if (panel.notice !== undefined) body.push(theme.fg("warning", `  ${panel.notice}`));
   return panel.frame(
@@ -115,31 +136,38 @@ export function renderProcessDetail(panel: PanelView, width: number): string[] {
   if (row === undefined || row.task.kind !== "process") return renderList(panel, width);
   const task = row.task;
   const colour = STATUS_COLOUR[task.status];
-  const body: string[] = [
+  // Facts in the order a stuck run is diagnosed — what it is, whether it still
+  // runs, how it ended — and the paperwork (paths, size) after that, so a short
+  // pane keeps the verdict and hides the last lines instead of the tail output.
+  const groups: string[][] = [
     field(panel, "Name", theme.fg("accent", task.name)),
     field(panel, "ID", theme.fg("accent", task.id)),
-    ...sessionField(panel, row),
+    sessionField(panel, row),
     field(panel, "Status", theme.fg(colour, task.status)),
     field(panel, "Runtime", formatDuration(row.elapsedMs)),
-    field(panel, "Started", formatClockTime(task.createdAt)),
     field(panel, "Updated", updatedText(panel, task.updatedAt)),
-    field(panel, "Output", task.outputPath),
+    task.exitCode === undefined
+      ? []
+      : field(panel, "Exit code", theme.fg(colour, String(task.exitCode))),
+    task.killReason === undefined ? [] : field(panel, "Kill reason", task.killReason),
+    task.error === undefined ? [] : block(panel, "Error", theme.fg(colour, task.error)),
+    task.endedAt === undefined ? [] : field(panel, "Ended", formatClockTime(task.endedAt)),
+    block(panel, "Command", task.command),
+    task.cwd === undefined ? [] : block(panel, "CWD", task.cwd),
+    block(panel, "Output", task.outputPath),
     field(panel, "Size", formatSize(row)),
+    field(panel, "Started", formatClockTime(task.createdAt)),
+    task.pid === undefined ? [] : field(panel, "PID", String(task.pid)),
   ];
-  if (task.endedAt !== undefined) {
-    body.push(field(panel, "Ended", formatClockTime(task.endedAt)));
-  }
-  if (task.pid !== undefined) body.push(field(panel, "PID", String(task.pid)));
-  body.push(field(panel, "Command", singleLine(task.command, Math.max(1, width - 14))));
-  if (task.cwd !== undefined) body.push(field(panel, "CWD", task.cwd));
-  if (task.exitCode !== undefined) {
-    body.push(field(panel, "Exit code", theme.fg(colour, String(task.exitCode))));
-  }
-  if (task.killReason !== undefined) body.push(field(panel, "Kill reason", task.killReason));
-  if (task.error !== undefined) body.push(field(panel, "Error", theme.fg(colour, task.error)));
 
-  body.push(theme.fg("muted", " Output tail:"));
-  body.push(...outputBox(panel, width - 2));
+  // The tail keeps whatever the pane has once the frame and the fields are paid
+  // for; under the box sit one blank line, its heading and the position line.
+  const notice = panel.notice === undefined ? 0 : 1;
+  const budget = detailRows(panel.renderHeight, 3 + notice);
+  const tailRows = budget.window;
+  const body = fitFields(panel, groups, budget.fields);
+  body.push("", theme.fg("muted", " Output tail:"));
+  body.push(...outputBox(panel, width - 2, tailRows));
   body.push(theme.fg("dim", ` ${position(panel)}`));
 
   if (panel.notice !== undefined) body.push(theme.fg("warning", `  ${panel.notice}`));
@@ -155,7 +183,11 @@ export function renderProcessDetail(panel: PanelView, width: number): string[] {
   );
 }
 
-export function outputBox(panel: PanelView, width: number): string[] {
+export function outputBox(
+  panel: PanelView,
+  width: number,
+  rows = windowRowsFor(panel.renderHeight),
+): string[] {
   const theme = panel.theme;
   const inner = Math.max(1, width - 2);
   const edge = (glyph: string): string => theme.fg("borderAccent", glyph);
@@ -176,7 +208,7 @@ export function outputBox(panel: PanelView, width: number): string[] {
   }
   // Keep the window the same height whatever the output does: a box that grows
   // and shrinks under the reader's eyes is harder to scan than an empty one.
-  while (lines.length < DETAIL_OUTPUT_LINES + 1) lines.push(row());
+  while (lines.length < rows + 1) lines.push(row());
   lines.push(edge(`╰${"─".repeat(inner)}╯`));
   return lines;
 }
@@ -186,10 +218,10 @@ export function renderLoopDetail(panel: PanelView, row: PanelTaskView, width: nu
   const task = row.task;
   if (task.kind !== "prompt-loop") return renderList(panel, width);
   const colour = STATUS_COLOUR[task.status];
-  const body: string[] = [
+  const groups: string[][] = [
     field(panel, "Status", theme.fg(colour, task.status)),
     field(panel, "Kind", task.kind),
-    ...sessionField(panel, row),
+    sessionField(panel, row),
     field(panel, "Runtime", formatDuration(row.elapsedMs)),
     field(panel, "Updated", updatedText(panel, task.updatedAt)),
     field(panel, "Schedule", task.schedule),
@@ -200,27 +232,28 @@ export function renderLoopDetail(panel: PanelView, row: PanelTaskView, width: nu
       "Last fire",
       task.lastFireAt === undefined ? "—" : formatClockTime(task.lastFireAt),
     ),
+    task.expiresAt === undefined ? [] : field(panel, "Expires", formatClockTime(task.expiresAt)),
+    task.endedAt === undefined ? [] : field(panel, "Ended", formatClockTime(task.endedAt)),
+    task.error === undefined ? [] : block(panel, "Error", theme.fg(colour, task.error)),
+    block(panel, "Prompt", task.prompt),
   ];
-  if (task.expiresAt !== undefined) {
-    body.push(field(panel, "Expires", formatClockTime(task.expiresAt)));
-  }
-  if (task.endedAt !== undefined) {
-    body.push(field(panel, "Ended", formatClockTime(task.endedAt)));
-  }
-  if (task.error !== undefined) body.push(field(panel, "Error", theme.fg(colour, task.error)));
-  body.push(field(panel, "Prompt", singleLine(task.prompt, Math.max(1, width - 14))));
+
+  const notice = panel.notice === undefined ? 0 : 1;
+  const budget = detailRows(panel.renderHeight, 2 + notice, LIST_VISIBLE_ROWS, 2);
+  const listRows = budget.window;
+  const body = fitFields(panel, groups, budget.fields);
   body.push("", theme.fg("muted", iterationsText(task)));
 
+  // What is scrolled out is said on two lines, so the list gives them up rather
+  // than drawing past the pane.
+  const rows = Math.max(1, listRows - 2);
   const newestFirst = [...task.iterations].reverse();
   if (newestFirst.length === 0) {
     body.push(theme.fg("dim", "  no iteration recorded yet"));
   } else {
     const selected = panel.currentIteration(task);
-    const top = Math.min(
-      Math.max(0, panel.iterationTop),
-      Math.max(0, newestFirst.length - LIST_VISIBLE_ROWS),
-    );
-    const visible = newestFirst.slice(top, top + LIST_VISIBLE_ROWS);
+    const top = Math.min(Math.max(0, panel.iterationTop), Math.max(0, newestFirst.length - rows));
+    const visible = newestFirst.slice(top, top + rows);
     if (top > 0) body.push(theme.fg("dim", `  … ${String(top)} newer above`));
     for (const iteration of visible) {
       const marker = iteration.fire === selected?.fire ? theme.fg("accent", "›") : " ";
@@ -251,82 +284,79 @@ export function renderCommandLoopDetail(
   if (task.kind !== "cmd-loop") return renderList(panel, width);
   const colour = STATUS_COLOUR[task.status];
   const envCount = Object.keys(task.env ?? {}).length;
-  const body: string[] = [
-    field(panel, "Status", theme.fg(colour, task.status)),
-    field(panel, "Kind", task.kind),
-    ...sessionField(panel, row),
-    field(panel, "Runtime", formatDuration(row.elapsedMs)),
-    field(panel, "Updated", updatedText(panel, task.updatedAt)),
-    field(panel, "Schedule", task.schedule),
-    field(panel, "Fires", `${firesText(task)}${missedText(task)}`),
-    field(panel, "Next fire", nextFireText(task, row, failureStreak(task) > 0)),
-    field(
-      panel,
-      "Last fire",
-      task.lastFireAt === undefined ? "—" : formatClockTime(task.lastFireAt),
-    ),
-  ];
-  // A streak explains why the next fire is later than the expression says, so
-  // it sits with the schedule facts and never rewrites them (ADR-0017).
   const streak = failureStreak(task);
-  if (streak > 0) body.push(field(panel, "Failures", `${String(streak)} in a row`));
-  if (task.expiresAt !== undefined) {
-    body.push(field(panel, "Expires", formatClockTime(task.expiresAt)));
-  }
-  if (task.endedAt !== undefined) {
-    body.push(field(panel, "Ended", formatClockTime(task.endedAt)));
-  }
-  if (task.error !== undefined) body.push(field(panel, "Error", theme.fg(colour, task.error)));
-  body.push(field(panel, "Command", singleLine(task.command, Math.max(1, width - 14))));
-  if (task.cwd !== undefined) body.push(field(panel, "CWD", task.cwd));
-  body.push(
-    field(
-      panel,
-      "Env",
-      envCount === 0 ? "—" : `${String(envCount)} variable${envCount === 1 ? "" : "s"}`,
-    ),
-  );
-  body.push(field(panel, "Wake on failure", task.wakeOnFailure === false ? "off" : "on"));
-  // A subscriber's own facts: which exit codes mean "something to report", and
-  // whether one is outstanding (ADR-0018). The fires themselves stay in the list.
+  // A streak explains why the next fire is later than the expression says, so it
+  // sits with the schedule facts and never rewrites them (ADR-0017). The signal
+  // and the last exit follow the same rule (ADR-0018): what a subscriber reports
+  // is a fact about the command, not part of its schedule.
+  const streakFacts: string[] =
+    streak > 0 ? field(panel, "Failures", `${String(streak)} in a row`) : [];
+  const signalFacts: string[] = [];
   if (task.notifyExitCodes !== undefined && task.notifyExitCodes.length > 0) {
     const codes = task.notifyExitCodes.map((code) => `exit ${String(code)}`).join(", ");
-    body.push(field(panel, "Signal on", codes));
+    signalFacts.push(...field(panel, "Signal on", codes));
     const since =
       task.signalRaisedAt === undefined ? "" : ` since ${formatClockTime(task.signalRaisedAt)}`;
-    body.push(
-      field(
+    signalFacts.push(
+      ...field(
         panel,
         "Signal",
         task.signalRaised === true ? theme.fg("warning", `raised${since}`) : "clear",
       ),
     );
   }
-  body.push(
+  // A short pane keeps the schedule, the streak, the signal and the last exit —
+  // everything that says whether this loop is healthy — and drops paths first.
+  const groups: string[][] = [
+    field(panel, "Status", theme.fg(colour, task.status)),
+    field(panel, "Kind", task.kind),
+    sessionField(panel, row),
+    field(panel, "Runtime", formatDuration(row.elapsedMs)),
+    field(panel, "Updated", updatedText(panel, task.updatedAt)),
+    field(panel, "Schedule", task.schedule),
+    field(panel, "Fires", `${firesText(task)}${missedText(task)}`),
+    field(panel, "Next fire", nextFireText(task, row, streak > 0)),
+    field(
+      panel,
+      "Last fire",
+      task.lastFireAt === undefined ? "—" : formatClockTime(task.lastFireAt),
+    ),
+    streakFacts,
+    signalFacts,
     field(panel, "Last exit", task.lastExitCode === undefined ? "—" : String(task.lastExitCode)),
-  );
-  if (task.lastOutputPath !== undefined) {
-    body.push(field(panel, "Last output", task.lastOutputPath));
-  }
-  body.push(
+    field(
+      panel,
+      "Env",
+      envCount === 0 ? "—" : `${String(envCount)} variable${envCount === 1 ? "" : "s"}`,
+    ),
+    field(panel, "Wake on failure", task.wakeOnFailure === false ? "off" : "on"),
+    task.expiresAt === undefined ? [] : field(panel, "Expires", formatClockTime(task.expiresAt)),
+    task.endedAt === undefined ? [] : field(panel, "Ended", formatClockTime(task.endedAt)),
+    task.error === undefined ? [] : block(panel, "Error", theme.fg(colour, task.error)),
+    block(panel, "Command", task.command),
+    task.cwd === undefined ? [] : block(panel, "CWD", task.cwd),
+    task.lastOutputPath === undefined ? [] : block(panel, "Last output", task.lastOutputPath),
     field(
       panel,
       "Size",
       task.lastOutputBytes === undefined ? "—" : formatBytes(task.lastOutputBytes),
     ),
-  );
+  ];
+
+  const notice = panel.notice === undefined ? 0 : 1;
+  const budget = detailRows(panel.renderHeight, 2 + notice, LIST_VISIBLE_ROWS, 2);
+  const listRows = budget.window;
+  const body = fitFields(panel, groups, budget.fields);
   body.push("", theme.fg("muted", firesHeading(task)));
 
+  const rows = Math.max(1, listRows - 2);
   const newestFirst = [...task.fireHistory].reverse();
   if (newestFirst.length === 0) {
     body.push(theme.fg("dim", "  no fire recorded yet"));
   } else {
     const selected = panel.currentFire(task);
-    const top = Math.min(
-      Math.max(0, panel.iterationTop),
-      Math.max(0, newestFirst.length - LIST_VISIBLE_ROWS),
-    );
-    const visible = newestFirst.slice(top, top + LIST_VISIBLE_ROWS);
+    const top = Math.min(Math.max(0, panel.iterationTop), Math.max(0, newestFirst.length - rows));
+    const visible = newestFirst.slice(top, top + rows);
     if (top > 0) body.push(theme.fg("dim", `  … ${String(top)} newer above`));
     for (const fire of visible) {
       const marker = fire.fire === selected?.fire ? theme.fg("accent", "›") : " ";
@@ -355,29 +385,51 @@ export function renderIterationDetail(panel: PanelView, width: number): string[]
   const iteration = panel.currentIteration(task);
   if (iteration === undefined) return renderLoopDetail(panel, row, width);
 
-  const body: string[] = [
+  const groups: string[][] = [
     field(panel, "Status", theme.fg(ITERATION_COLOUR[iteration.status], iteration.status)),
     field(panel, "Started", formatClockTime(iteration.startedAt)),
+    iteration.endedAt === undefined
+      ? []
+      : field(panel, "Took", formatDuration(iteration.endedAt - iteration.startedAt)),
+    field(panel, "Calls", callsText(iteration)),
   ];
-  if (iteration.endedAt !== undefined) {
-    body.push(field(panel, "Took", formatDuration(iteration.endedAt - iteration.startedAt)));
-  }
-  body.push(field(panel, "Calls", callsText(iteration)));
-  body.push("", theme.fg("muted", callsHeading(iteration, panel.callTop)));
 
-  const top = callTopFor(iteration, panel.callTop);
-  const visible = iteration.calls.slice(top, top + DETAIL_OUTPUT_LINES);
-  if (visible.length === 0) {
+  // The calls are why this page exists: they keep the room the pane gives them,
+  // and the two header fields give theirs up first.
+  const notice = panel.notice === undefined ? 0 : 1;
+  const budget = detailRows(panel.renderHeight, 2 + notice);
+  const callRows = budget.window;
+  const body = fitFields(panel, groups, budget.fields);
+  const top = callTopFor(iteration, panel.callTop, callRows);
+  // A call's error takes a line of its own, so the window fills call by call and
+  // says what it could not show instead of drawing past the pane.
+  const drawn: string[] = [];
+  let shown = 0;
+  for (const [offset, call] of iteration.calls.slice(top).entries()) {
+    const errorLine =
+      call.error === undefined ? [] : [theme.fg(STATUS_COLOUR.failed, `     error: ${call.error}`)];
+    if (drawn.length + 1 + errorLine.length > callRows) break;
+    drawn.push(callLine(panel, call, top + offset, width - 4), ...errorLine);
+    shown += 1;
+  }
+  body.push(
+    "",
+    theme.fg("muted", callsHeading(iteration, panel.callTop, Math.max(1, drawn.length))),
+  );
+  if (iteration.calls.length === 0) {
     body.push(theme.fg("dim", "  no tool call in this turn"));
   }
-  visible.forEach((call, offset) => {
-    body.push(callLine(panel, call, top + offset, width - 4));
-    if (call.error !== undefined) {
-      body.push(theme.fg(STATUS_COLOUR.failed, `     error: ${call.error}`));
-    }
-  });
+  body.push(...drawn);
+  const leftOut = iteration.calls.length - top - shown;
   // The cap drops the oldest calls first; say so where they would have been.
-  if (iteration.droppedCalls > 0) {
+  if (leftOut > 0) {
+    body.push(
+      theme.fg(
+        STATUS_COLOUR.interrupted,
+        `  … ${String(leftOut)} more call${leftOut === 1 ? "" : "s"} not shown`,
+      ),
+    );
+  } else if (iteration.droppedCalls > 0) {
     body.push(
       theme.fg(
         STATUS_COLOUR.interrupted,
@@ -420,22 +472,113 @@ export function position(panel: PanelView): string {
   return `lines ${String(from + 1)}–${String(to)} of ${String(total)} · ↑/↓ scroll · r follows`;
 }
 
+/**
+ * How a pane's rows split between a detail's fields and the window under them.
+ *
+ * The window is what the reader came for — the tail, the calls, the fires — so it
+ * takes `DETAIL_MIN_OUTPUT_LINES` first and grows only towards `cap`. The fields
+ * take the rest of `DETAIL_FIELD_RESERVE` or less, and are what a pane too short
+ * for both goes without. `below` counts the lines a page draws under the window
+ * (a blank, a heading, a notice); the two box borders are added here.
+ */
+export function detailRows(
+  height: number,
+  below: number,
+  cap = DETAIL_OUTPUT_LINES,
+  least = DETAIL_MIN_OUTPUT_LINES,
+): { readonly window: number; readonly fields: number } {
+  const available = Math.max(1, height - FRAME_ROWS - 2 - below);
+  const window = Math.min(
+    available,
+    Math.min(cap, Math.max(least, available - DETAIL_FIELD_RESERVE)),
+  );
+  return { window, fields: Math.max(0, available - window) };
+}
+
+/** The window under a page whose body draws three lines below it. */
+export function windowRowsFor(
+  height: number,
+  cap = DETAIL_OUTPUT_LINES,
+  least = DETAIL_MIN_OUTPUT_LINES,
+): number {
+  return detailRows(height, 3, cap, least).window;
+}
+
+/**
+ * The fields that fit, in reading order. A page passes one group per line block,
+ * and a group is kept or dropped whole so a field never leaves half a block
+ * behind; what did not fit is named in one line at the end, because a page that
+ * silently drops its own facts reads as a page that had none.
+ */
+export function fitFields(
+  panel: PanelView,
+  groups: readonly (readonly string[])[],
+  room: number,
+): string[] {
+  const total = groups.reduce((sum, group) => sum + group.length, 0);
+  if (total <= room) return groups.flat();
+  // The marker costs a line of its own, so the fields get one less.
+  const kept: string[] = [];
+  let dropped = 0;
+  for (let index = 0; index < groups.length; index += 1) {
+    const group = groups[index] ?? [];
+    if (kept.length + group.length > room - 1) {
+      dropped = groups.length - index;
+      break;
+    }
+    kept.push(...group);
+  }
+  if (dropped === 0) return kept;
+  if (kept.length + 1 > room) return kept;
+  const hidden = `  … ${String(dropped)} more field${dropped === 1 ? "" : "s"} — a taller pane shows them`;
+  return [...kept, panel.theme.fg("dim", hidden)];
+}
+
 export function window(panel: PanelView): [number, number] {
   const total = panel.detailLines.length;
   const to = Math.max(0, total - panel.scrollBack);
-  return [Math.max(0, to - DETAIL_OUTPUT_LINES), to];
+  return [Math.max(0, to - windowRowsFor(panel.renderHeight)), to];
 }
 
-export function field(panel: PanelView, label: string, value: string): string {
-  // Cut here, once, against the frame: the border and the label take their share first.
-  const room = Math.max(8, panel.renderWidth - 2 - LABEL_WIDTH - 2);
-  const text = visibleWidth(value) > room ? truncateToWidth(value, room, "…", false) : value;
-  return `${panel.theme.fg("muted", pad(`${label}:`, LABEL_WIDTH))}${text}`;
+export function field(panel: PanelView, label: string, value: string): string[] {
+  // Wide enough for the label column: one line, the value cut against the frame.
+  if (panel.renderWidth >= DETAIL_WIDE_MIN_WIDTH) {
+    // Cut here, once, against the frame: the border and the label take their share first.
+    const room = Math.max(8, panel.renderWidth - 2 - LABEL_WIDTH - 2);
+    const text = visibleWidth(value) > room ? truncateToWidth(value, room, "…", false) : value;
+    return [`${panel.theme.fg("muted", pad(`${label}:`, LABEL_WIDTH))}${text}`];
+  }
+  // A narrow pane gives the value a line of its own: a label column would leave a
+  // status word or a path nothing but an ellipsis.
+  return [panel.theme.fg("muted", `${label}:`), ...wrapValue(panel, value, 2)];
+}
+
+/** A long value — a command, a path, a prompt — wrapped under its label on a
+ *  narrow pane and inline with it when the frame is wide, never truncated: the
+ *  reason this page was opened is usually in the part that would be cut. */
+export function block(panel: PanelView, label: string, value: string): string[] {
+  const inline = panel.renderWidth >= DETAIL_WIDE_MIN_WIDTH;
+  const indent = inline ? LABEL_WIDTH : 2;
+  const room = Math.max(8, panel.renderWidth - 2 - indent - 2);
+  const lines = wrapTextWithAnsi(value, room);
+  const body = lines.length === 0 ? [""] : lines;
+  if (!inline) return [panel.theme.fg("muted", `${label}:`), ...body.map((line) => `  ${line}`)];
+  const tag = panel.theme.fg("muted", pad(`${label}:`, LABEL_WIDTH));
+  const gap = " ".repeat(LABEL_WIDTH);
+  return body.map((line, index) => (index === 0 ? `${tag}${line}` : `${gap}${line}`));
+}
+
+/** A value wrapped under an indent; the frame still cuts what is left over. */
+function wrapValue(panel: PanelView, value: string, indent: number): string[] {
+  const room = Math.max(8, panel.renderWidth - 4 - indent);
+  const lines = wrapTextWithAnsi(value, room);
+  const lead = " ".repeat(indent);
+  return (lines.length === 0 ? [""] : lines).map((line) => `${lead}${line}`);
 }
 
 export function sessionField(panel: PanelView, row: PanelTaskView): string[] {
   if (!foreign(panel, row) || row.sessionId === undefined) return [];
-  return [field(panel, "Session", panel.theme.fg("dim", row.sessionId))];
+  return field(panel, "Session", panel.theme.fg("dim", row.sessionId));
 }
 
 export function updatedText(panel: PanelView, updatedAt: number): string {

@@ -24,7 +24,7 @@ import type { Task } from "../tasks/base/task.js";
 import type { ChainTasks, ChainTaskView } from "../tasks/chain/chain-tasks.js";
 import type { LoopTasks, LoopTaskView } from "../tasks/loop/loop-tasks.js";
 import type { ProcessTasks, ProcessTaskView } from "../tasks/process/process-tasks.js";
-import { rowOf } from "./panel/model.js";
+import { PANEL_HEIGHT_SHARE, PANEL_MARGIN, rowOf } from "./panel/model.js";
 import {
   DETAIL_TAIL_LINES,
   type PanelSource,
@@ -236,8 +236,15 @@ async function openPanel(
       new TasksPanel({ tui, theme, done: () => done(undefined), source }),
     {
       overlay: true,
-      // Wide enough for the list columns, short enough to keep the transcript in view.
-      overlayOptions: () => ({ width: "90%", maxHeight: "80%", margin: 1 }),
+      // Wide enough for the list columns, short enough to keep the transcript in
+      // view. The share and the margin come from the panel, which budgets its own
+      // body against them: two literals here would drift from the pages that plan
+      // around them.
+      overlayOptions: () => ({
+        width: "90%",
+        maxHeight: `${Math.round(PANEL_HEIGHT_SHARE * 100)}%`,
+        margin: PANEL_MARGIN,
+      }),
     },
   );
 

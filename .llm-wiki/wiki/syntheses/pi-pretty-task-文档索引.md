@@ -2,7 +2,7 @@
 type: synthesis
 title: pi-pretty-task 文档索引
 created: 2026-11-13
-updated: 2026-11-14
+updated: 2026-11-21
 ---
 
 # pi-pretty-task 文档索引
@@ -14,8 +14,9 @@ updated: 2026-11-14
 | 文档 | 讲什么 | 状态 |
 |---|---|---|
 | [AGENTS.md](../../AGENTS.md) | 项目规则、产品模型、目录约定、验收标准 | 已定 |
-| [GLOSSARY.md](../../GLOSSARY.md) | 术语：Task（两种 kind：process / loop）/ Iteration / Panel / Status line | 已定 |
+| [GLOSSARY.md](../../GLOSSARY.md) | 术语：Task（四种 kind：process / prompt-loop / cmd-loop / chain）/ Iteration / Fire / Step / Panel | 已定 |
 | [scope-v1.md](../../docs/scope-v1.md) | v0.1 范围：做 / 不做 / 延后（含复杂度与风险） | 已定，随实现更新 |
+| [panel-narrow-detail.md](../../docs/panel-narrow-detail.md) | 窄 pane / 矮 pane 下的面板：高度预算、字段与窗口分账、宽度两档与长值折行、子行状态前置 | 已定，随实现更新 |
 | [configuration.md](../../docs/configuration.md) | 配置面：`PI_PRETTY_TASK_OUTPUT_CAP_BYTES`（默认 20 MiB，启动校验）与 `pretty_task_bg_run` 的 `timeoutSeconds`；两类终止原因 | 已定 |
 
 ## 决策记录（ADR）
@@ -40,6 +41,7 @@ updated: 2026-11-14
 | [0016 子任务的 id 不携带父与序号](../../docs/adr/0016-child-ids-stay-opaque.md) | 触发与步骤都用 `bg-` + 随机；父与序号是字段；别名写 `name#seq (id)` |
 | [0017 重叠跳过、失败退避，不排队](../../docs/adr/0017-overlap-skips-and-failures-back-off.md) | 重叠的触发记 `skipped` 不排队；失败翻倍封顶一小时、成功归位；两个计数落盘 |
 | [0018 订阅型 cmd loop：第三种结局与最小触发间隔](../../docs/adr/0018-signal-outcome-and-minimum-fire-gap.md) | 退出码三分为 `signalled`（不退避、不动档期）+ `failed`（照旧退避）；`signalRaised` 闩做边沿去抖；`advanceSchedule` 设 30s 最小间隔，cron 与 resume 补发都受约束；不新开 kind |
+| [0019 面板按 pane 的尺寸规划 body](../../docs/adr/0019-panel-plans-against-its-pane.md) | `panelHeightBudget` 复刻 pi overlay 的裁剪算式、每帧从 `tui.terminal.rows` 重算；`detailRows` 窗口优先、字段整块丢并提示；宽度两档、长值折行；子行状态前置；`listWindow` 让分页行也占预算 |
 
 ## 工具链与代码风格
 

@@ -20,6 +20,12 @@ export interface PanelView {
   readonly source: PanelSource;
   /** Width of the frame being drawn; field values are cut against it. */
   readonly renderWidth: number;
+  /**
+   * Rows the pane leaves the panel, as the last render measured them. A page
+   * plans its body against this, so nothing is drawn where pi's overlay would
+   * cut it away.
+   */
+  readonly renderHeight: number;
   readonly mode: PanelMode;
   readonly tab: PanelTab;
   readonly filter: PanelFilter;

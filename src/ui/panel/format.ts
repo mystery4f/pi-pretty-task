@@ -311,17 +311,29 @@ export function callsText(iteration: Iteration): string {
   return iteration.calls.length === 1 ? "1 call" : `${String(iteration.calls.length)} calls`;
 }
 
-/** Where the visible call window sits, oldest first. */
-export function callsHeading(iteration: Iteration, requested: number): string {
+/**
+ * Where the visible call window sits, oldest first. `rows` is how many lines the
+ * pane can give the calls, so a short pane reports the shorter range it shows
+ * instead of promising rows it never drew.
+ */
+export function callsHeading(
+  iteration: Iteration,
+  requested: number,
+  rows = DETAIL_OUTPUT_LINES,
+): string {
   const total = iteration.calls.length;
   if (total === 0) return "calls · none in this turn";
-  const top = callTopFor(iteration, requested);
-  const to = Math.min(total, top + DETAIL_OUTPUT_LINES);
+  const top = callTopFor(iteration, requested, rows);
+  const to = Math.min(total, top + rows);
   return `calls ${String(top + 1)}–${String(to)} of ${String(total)} · oldest first`;
 }
 
-export function callTopFor(iteration: Iteration, requested: number): number {
-  const oldest = Math.max(0, iteration.calls.length - DETAIL_OUTPUT_LINES);
+export function callTopFor(
+  iteration: Iteration,
+  requested: number,
+  rows = DETAIL_OUTPUT_LINES,
+): number {
+  const oldest = Math.max(0, iteration.calls.length - rows);
   return Math.min(Math.max(0, requested), oldest);
 }
 
