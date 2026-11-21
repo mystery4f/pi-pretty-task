@@ -147,7 +147,7 @@ export interface LoopTaskView {
 }
 
 /** A transition `pretty_task_loop_update` can apply. A retune travels in `schedule`, not here. */
-export type LoopUpdateAction = "pause" | "resume" | "complete";
+export type LoopUpdateAction = "pause" | "resume" | "complete" | "rearm" | "clear-signal";
 
 export type LoopUpdateOutcome =
   | "paused"
@@ -160,7 +160,13 @@ export type LoopUpdateOutcome =
   | "already-completed"
   | "completed-at-limit"
   | "completed-expired"
-  | "failed";
+  | "failed"
+  /** The next fire was realigned onto the schedule; the expression did not change. */
+  | "rearmed"
+  /** The outstanding signal was dropped without waiting for a healthy round. */
+  | "signal-cleared"
+  /** A clear-signal request on a loop that was not reporting anything. */
+  | "no-signal";
 
 export interface LoopUpdateResult {
   readonly view: LoopTaskView;
@@ -487,6 +493,12 @@ export class LoopTasks {
       // arm, and rewriting the record would misreport how it ended.
       if (task.status === "running" || task.status === "paused") {
         task.schedule = recurrence.expression;
+        // Nobody rewrites the rhythm of a loop they are watching: a retune
+        // announces a fresh look, so an outstanding signal goes with it.
+        if (task.kind === "cmd-loop") {
+          delete task.signalRaised;
+          delete task.signalRaisedAt;
+        }
         // The old slot is abandoned; a paused loop keeps no next fire to move.
         if (task.status === "running") task.nextFireAt = nextFireAt;
         outcome = "rescheduled";
@@ -560,6 +572,58 @@ export class LoopTasks {
           outcome = "already-completed";
         }
         break;
+
+      case "rearm": {
+        // A rearm is a retune that keeps the expression: the same `nextFire(now)`
+        // arithmetic, so a schedule that has drifted back onto a past slot lands
+        // on the next boundary (ADR-0018). A paused loop holds no due time, so
+        // there is nothing to realign until it is resumed.
+        if (task.status === "paused") {
+          outcome = "already-paused";
+          break;
+        }
+        if (task.status !== "running") {
+          outcome = "already-completed";
+          break;
+        }
+        const recurrence = parseSchedule(task.schedule);
+        if (recurrence === undefined) {
+          task.status = "failed";
+          task.error = `invalid schedule "${task.schedule}"`;
+          task.endedAt = now;
+          delete task.nextFireAt;
+          outcome = "failed";
+          changed = true;
+          break;
+        }
+        const nextFireAt = recurrence.nextFire(now);
+        if (nextFireAt === null) {
+          this.finish(task, now, "completed");
+          outcome = "completed";
+        } else {
+          task.nextFireAt = nextFireAt;
+          outcome = "rearmed";
+        }
+        if (task.kind === "cmd-loop") {
+          delete task.signalRaised;
+          delete task.signalRaisedAt;
+        }
+        changed = true;
+        break;
+      }
+
+      case "clear-signal":
+        // The one way to drop a latch without waiting for a healthy round; the
+        // next fire reports the condition again through the next raised edge.
+        if (task.kind !== "cmd-loop" || task.signalRaised !== true) {
+          outcome = "no-signal";
+          break;
+        }
+        delete task.signalRaised;
+        delete task.signalRaisedAt;
+        outcome = "signal-cleared";
+        changed = true;
+        break;
     }
 
     if (outcome === undefined) {
@@ -581,6 +645,42 @@ export class LoopTasks {
     const stopped = input.action !== undefined && changed && task.status !== "running";
     if (stopped) await this.onCancel?.(task.id);
     return { view: this.view(task), outcome };
+  }
+
+  /**
+   * Run one fire now, outside the schedule (ADR-0018). It is a probe, not a
+   * report: the fire is numbered from the negative side so it never takes a
+   * schedule number, `nextFireAt` does not move, and the outcome touches neither
+   * the failure streak nor the signal latch. The record and its output file are
+   * the whole result, which is what makes a typo cost one command instead of a
+   * slot and a backoff.
+   */
+  async fireNow(input: TaskScope & { readonly id: string }): Promise<LoopTaskView | undefined> {
+    this.ownScope(input);
+    const session = await this.sessions.session(input);
+    const found = this.findLoop(session, input.id);
+    if (found === undefined) return undefined;
+    if (found.kind !== "cmd-loop") {
+      throw new LoopInputError(
+        "Only a command loop can be fired on demand: a prompt loop's fire is a model turn, so say what you want now or wait for its slot.",
+      );
+    }
+    if (found.status !== "running" && found.status !== "paused") {
+      throw new LoopInputError(
+        `Loop "${found.id}" has ended (${found.status}), so there is no fire to start. Create a new loop instead.`,
+      );
+    }
+    const loop: CmdLoopTask = found;
+    const at = this.now();
+    const fire = -((loop.manualFires ?? 0) + 1);
+    loop.manualFires = -fire;
+    this.pushFire(loop, { fire, at, outcome: "running", startedAt: at });
+    // A fire is the loop's own transition, so the panel's sort key follows it (ADR-0010).
+    loop.updatedAt = at;
+    await this.sessions.persist(session);
+    // Persisted first, so a crash mid-start still leaves a fire whose outcome is owed.
+    await this.startCommandFire({ task: loop, at, fire, session, scope: input });
+    return this.view(loop);
   }
 
   async delete(scope: TaskScope, id: string): Promise<LoopTaskView | undefined> {
@@ -658,8 +758,13 @@ export class LoopTasks {
 
       // A signal wakes once per raised condition, so the latch turns repeat
       // reports into history rather than a wall of wakes (ADR-0018).
-      const raised = fire.outcome === "signalled" && loop.signalRaised !== true;
-      if (fire.outcome === "failed") {
+      // A manual fire is a probe: it records what happened and its output file,
+      // and leaves the schedule, the streak and the latch exactly as they were.
+      const manual = fire.fire < 0;
+      const raised = !manual && fire.outcome === "signalled" && loop.signalRaised !== true;
+      if (manual) {
+        // Nothing to do: the record above already carries the outcome.
+      } else if (fire.outcome === "failed") {
         this.noteFailure(loop, at);
       } else if (fire.outcome === "success") {
         // A healthy round clears both the failure streak and the outstanding
@@ -833,7 +938,7 @@ export class LoopTasks {
       record.endedAt = at;
       record.durationMs = 0;
       record.error = error;
-      this.noteFailure(loop, at);
+      if (fire.fire > 0) this.noteFailure(loop, at);
     } else {
       record.taskId = started.taskId;
     }
@@ -850,11 +955,6 @@ export class LoopTasks {
   }
 
   /**
-   * A failed fire doubles the wait, up to one hour, counting from the failure.
-   * The next natural fire time is never pulled earlier: a long schedule keeps
-   * its spacing and a short one gets the room the failure asked for.
-   */
-  /**
    * True when a finished fire's exit code means "the check has something to
    * report" rather than "the loop is broken" (ADR-0018). Exit 0 is success by
    * definition and a kill by the user is not the command's own word, so neither
@@ -868,6 +968,11 @@ export class LoopTasks {
     return codes.includes(result.exitCode);
   }
 
+  /**
+   * A failed fire doubles the wait, up to one hour, counting from the failure.
+   * The next natural fire time is never pulled earlier: a long schedule keeps
+   * its spacing and a short one gets the room the failure asked for.
+   */
   private noteFailure(loop: CmdLoopTask, at: number): void {
     loop.consecutiveFailures = (loop.consecutiveFailures ?? 0) + 1;
     if (loop.status !== "running" || loop.nextFireAt === undefined) return;

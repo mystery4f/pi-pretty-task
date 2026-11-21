@@ -11,6 +11,7 @@
 
 import type { ExtensionAPI, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import { publishLoopFired, publishTaskFinished } from "./tasks/base/events.js";
+import { fireLabel } from "./tasks/base/format.js";
 import { pruneSessions } from "./tasks/base/retention.js";
 import type { TaskScope } from "./tasks/base/runtime-state.js";
 import { readSettings } from "./tasks/base/settings.js";
@@ -209,7 +210,7 @@ export function createExtension(
         sessionId: fire.scope.sessionId,
         command: fire.task.command,
         // The human alias of ADR-0016 is rendered here; the fire's id stays opaque.
-        name: `${fire.task.name} #${String(fire.fire)}`,
+        name: `${fire.task.name} ${fireLabel(fire.fire)}`,
         ...(fire.task.cwd === undefined ? {} : { workingDirectory: fire.task.cwd }),
         ...(fire.task.env === undefined ? {} : { env: fire.task.env }),
         parentId: fire.task.id,

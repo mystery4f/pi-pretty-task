@@ -25,11 +25,17 @@ async function setup() {
   let now = Date.UTC(2026, 0, 1, 9, 0, 0);
   const sessions = new TaskSessions({ now: () => now });
   const fires: LoopFire[] = [];
+  const started: { fire: number; at: number; taskId: string }[] = [];
   const loops = new LoopTasks({
     sessions,
     now: () => now,
     onFire: (fire) => {
       fires.push(fire);
+    },
+    onCommandFire: async (fire) => {
+      const taskId = `bg-fire-${String(started.length + 1)}`;
+      started.push({ fire: fire.fire, at: fire.at, taskId });
+      return { taskId };
     },
   });
   const scope = { cwd: directory.path, sessionId: "session-1" };
@@ -39,6 +45,7 @@ async function setup() {
     loops,
     sessions,
     fires,
+    started,
     advance(ms: number) {
       now += ms;
     },
@@ -138,6 +145,119 @@ describe("LoopTasks", () => {
     await expect(
       task.loops.create({ ...task.scope, schedule: "10m", prompt: "go", notifyExitCodes: [1] }),
     ).rejects.toThrow(/Invalid notifyExitCodes for a prompt loop/);
+  });
+
+  it("realigns a drifted loop onto its schedule with rearm, keeping the expression", async () => {
+    const task = await setup();
+    const created = await task.loops.create({
+      ...task.scope,
+      schedule: "7m",
+      command: "check",
+    });
+    const id = created.task.id;
+    expect(created.task.nextFireAt).toBe(task.now + 7 * 60_000);
+
+    // A failed fire doubles the wait measured from the slot it had picked, so
+    // the loop lands between two slots: 09:21 instead of 09:14.
+    task.advance(7 * 60_000);
+    expect(await task.loops.pump(task.now)).toEqual([]);
+    const running = task.started.at(-1);
+    expect(running?.fire).toBe(1);
+    await task.loops.completeFire({
+      parentId: id,
+      taskId: running?.taskId ?? "",
+      fire: 1,
+      status: "failed",
+      exitCode: 2,
+      outputPath: `${task.directory.path}/m1.log`,
+      outputBytes: 0,
+      durationMs: 5,
+    });
+    const drifted = await task.loops.get(task.scope, id);
+    expect(drifted?.task.nextFireAt).toBe(task.now + 14 * 60_000);
+    expect(drifted?.task.schedule).toBe("7m");
+
+    const realigned = await task.loops.update({ ...task.scope, id, action: "rearm" });
+    expect(realigned?.outcome).toBe("rearmed");
+    expect(realigned?.view.task.nextFireAt).toBe(task.now + 7 * 60_000);
+    expect(realigned?.view.task.schedule).toBe("7m");
+    expect(realigned?.view.task.fires).toBe(1);
+  });
+
+  it("drops an outstanding signal with clear-signal, and says so when there is none", async () => {
+    const task = await setup();
+    const created = await task.loops.create({
+      ...task.scope,
+      schedule: "10m",
+      command: "check",
+      notifyExitCodes: [1],
+    });
+    const id = created.task.id;
+
+    expect((await task.loops.update({ ...task.scope, id, action: "clear-signal" }))?.outcome).toBe(
+      "no-signal",
+    );
+
+    task.advance(10 * 60_000);
+    await task.loops.pump(task.now);
+    const running = task.started.at(-1);
+    const completed = await task.loops.completeFire({
+      parentId: id,
+      taskId: running?.taskId ?? "",
+      fire: 1,
+      status: "failed",
+      exitCode: 1,
+      outputPath: `${task.directory.path}/signal.log`,
+      outputBytes: 12,
+      durationMs: 8,
+    });
+    expect(completed?.raised).toBe(true);
+
+    const cleared = await task.loops.update({ ...task.scope, id, action: "clear-signal" });
+    expect(cleared?.outcome).toBe("signal-cleared");
+    const quiet = cleared?.view.task;
+    if (quiet?.kind !== "cmd-loop") throw new Error("expected a command loop");
+    expect(quiet.signalRaised).toBeUndefined();
+  });
+
+  it("fires a command loop by hand without taking a schedule slot or moving the clock", async () => {
+    const task = await setup();
+    const created = await task.loops.create({
+      ...task.scope,
+      schedule: "1h",
+      command: "check",
+    });
+    const id = created.task.id;
+
+    const view = await task.loops.fireNow({ ...task.scope, id });
+    expect(view?.task.kind).toBe("cmd-loop");
+    expect(task.started.at(-1)?.fire).toBe(-1);
+    if (view?.task.kind !== "cmd-loop") throw new Error("expected a command loop");
+    expect(view.task.fires).toBe(0);
+    expect(view.task.nextFireAt).toBe(created.task.nextFireAt);
+    expect(view.task.fireHistory.at(-1)).toMatchObject({ fire: -1, outcome: "running" });
+
+    // A manual failure is a probe result, not a broken loop: no streak, no backoff.
+    await task.loops.completeFire({
+      parentId: id,
+      taskId: task.started.at(-1)?.taskId ?? "",
+      fire: -1,
+      status: "failed",
+      exitCode: 3,
+      outputPath: `${task.directory.path}/manual.log`,
+      outputBytes: 4,
+      durationMs: 3,
+    });
+    const after = await task.loops.get(task.scope, id);
+    if (after?.task.kind !== "cmd-loop") throw new Error("expected a command loop");
+    expect(after.task.nextFireAt).toBe(created.task.nextFireAt);
+    expect(after.task.consecutiveFailures).toBeUndefined();
+    expect(after.task.fireHistory.at(-1)).toMatchObject({ fire: -1, outcome: "failed" });
+
+    const prompted = await task.loops.create({ ...task.scope, schedule: "1h", prompt: "go" });
+    await expect(task.loops.fireNow({ ...task.scope, id: prompted.task.id })).rejects.toThrow(
+      /Only a command loop/,
+    );
   });
 
   it("fires five times in about a minute on a ten-second interval", async () => {

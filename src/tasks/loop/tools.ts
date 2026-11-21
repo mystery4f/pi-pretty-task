@@ -15,7 +15,7 @@ import type {
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { formatBytes, formatDuration } from "../base/format.js";
+import { fireLabel, formatBytes, formatDuration } from "../base/format.js";
 import type { TaskScope } from "../base/runtime-state.js";
 import type { CmdLoopTask, FireRecord, PromptLoopTask } from "../base/task.js";
 import { LoopInputError, type LoopTasks, type LoopTaskView } from "./loop-tasks.js";
@@ -90,10 +90,19 @@ const ListParameters = Type.Object({
 const UpdateParameters = Type.Object({
   id: Type.String({ description: "Loop id to update." }),
   action: Type.Optional(
-    Type.Union([Type.Literal("pause"), Type.Literal("resume"), Type.Literal("complete")], {
-      description:
-        "pause stops fires but keeps the record; resume re-arms from now; complete ends the loop. Omit it to change only the schedule.",
-    }),
+    Type.Union(
+      [
+        Type.Literal("pause"),
+        Type.Literal("resume"),
+        Type.Literal("complete"),
+        Type.Literal("rearm"),
+        Type.Literal("clear-signal"),
+      ],
+      {
+        description:
+          "pause stops fires but keeps the record; resume re-arms from now; complete ends the loop; rearm recomputes the next fire from now on the unchanged schedule (the way back onto a slot after a backoff or a resume pushed it late); clear-signal drops an outstanding signal without waiting for a healthy round, and is only meaningful on a command loop that declared notifyExitCodes. Omit it to change only the schedule.",
+      },
+    ),
   ),
   schedule: Type.Optional(
     Type.String({
@@ -105,6 +114,10 @@ const UpdateParameters = Type.Object({
 
 const DeleteParameters = Type.Object({
   id: Type.String({ description: "Loop id to delete." }),
+});
+
+const FireParameters = Type.Object({
+  id: Type.String({ description: "Command loop id to fire now." }),
 });
 
 function scopeOf(ctx: ExtensionToolContext): TaskScope {
@@ -241,7 +254,7 @@ export function describeFires(task: CmdLoopTask): string {
 
   const rows = [...task.fireHistory].reverse().map((fire) => {
     const time = fire.at === undefined ? undefined : new Date(fire.at).toISOString();
-    const head = [`#${String(fire.fire)}`, time, fire.outcome]
+    const head = [fireLabel(fire.fire), time, fire.outcome]
       .filter((part) => part !== undefined)
       .join(" · ");
     return `${head}${fireMeta(fire)}`;
@@ -375,6 +388,12 @@ function updateHeadline(id: string, result: Awaited<ReturnType<LoopTasks["update
       return `Loop ${id} reached its maximum number of fires; it is completed.`;
     case "completed-expired":
       return `Loop ${id} expired before it was resumed; it is completed.`;
+    case "rearmed":
+      return `Realigned loop ${id} (${name}); its next fire is ${nextFireText(result.view)}.`;
+    case "signal-cleared":
+      return `Cleared the signal on loop ${id} (${name}); the next fire that reports again raises it.`;
+    case "no-signal":
+      return `Loop ${id} had no signal to clear.`;
     case "failed":
       return `Loop ${id} could not be resumed: ${result.view.task.error ?? "invalid schedule"}.`;
   }
@@ -476,7 +495,7 @@ export function loopTaskTools(loops: LoopTasks): ToolDefinition[] {
     name: "pretty_task_loop_update",
     label: "Pause, resume, complete or retune a loop",
     description:
-      "Change a loop without deleting its history: pause stops fires, resume re-arms from now, complete ends it, and schedule retunes when it fires. A retune keeps the id, the fire count and every recorded iteration; a running loop's next fire is computed from this update rather than from the slot the old schedule had already picked, a paused loop keeps the new schedule and arms onto it when resumed, and an invalid expression is refused with the old schedule still in force. Pausing or completing also cancels a wake that is still waiting for the agent to be idle, so the loop will not wake the model after you stop it.",
+      "Change a loop without deleting its history: pause stops fires, resume re-arms from now, complete ends it, and schedule retunes when it fires. A retune keeps the id, the fire count and every recorded iteration; a running loop's next fire is computed from this update rather than from the slot the old schedule had already picked, a paused loop keeps the new schedule and arms onto it when resumed, and an invalid expression is refused with the old schedule still in force. action=rearm does the same arithmetic without changing the expression, which is the way back onto a slot after a failure or a resume pushed the next fire late; action=clear-signal drops an outstanding signal on a command loop that declared notifyExitCodes, so a condition you have already dealt with stops muting the next report. Both keep the id, the fire count and every iteration. Pausing or completing also cancels a wake that is still waiting for the agent to be idle, so the loop will not wake the model after you stop it.",
     parameters: UpdateParameters,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const id = params.id.trim();
@@ -515,6 +534,44 @@ export function loopTaskTools(loops: LoopTasks): ToolDefinition[] {
     },
   };
 
+  const fire: ToolDefinition<typeof FireParameters> = {
+    name: "pretty_task_loop_fire",
+    label: "Fire a command loop now",
+    description:
+      "Run one fire of a command loop right now instead of waiting for its slot: the way to test a command without paying a schedule slot and a backoff. The fire goes into the loop's history as `m1`, `m2`, … with its own output file; it takes no fire number from the schedule, does not move the next fire time, and leaves the failure streak and any outstanding signal exactly as they were. Only a command loop can be fired this way, and only while it is running or paused.",
+    parameters: FireParameters,
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const id = params.id.trim();
+      if (id.length === 0) {
+        return text(
+          "Pass the id of the loop to fire; pretty_task_loop_list lists the ids of this session.",
+        );
+      }
+
+      try {
+        const view = await loops.fireNow({ ...scopeOf(ctx), id });
+        if (view === undefined) return text(`No loop with id ${id} in this session.`);
+        const started = view.task.kind === "cmd-loop" ? view.task.fireHistory.at(-1) : undefined;
+        const label = started === undefined ? "a fire" : fireLabel(started.fire);
+        return {
+          content: [
+            {
+              type: "text",
+              text: [
+                `Fired loop ${id} (${view.task.name}) by hand as ${label}; it is not one of the schedule's fires.`,
+                `The fire keeps its own output file, and pretty_task_loop_list id=${id} shows how it ended.`,
+              ].join("\n"),
+            },
+          ],
+          details: loopDetails(view),
+        };
+      } catch (error) {
+        if (error instanceof LoopInputError) return inputError(error);
+        throw error;
+      }
+    },
+  };
+
   const remove: ToolDefinition<typeof DeleteParameters> = {
     name: "pretty_task_loop_delete",
     label: "Delete a loop",
@@ -545,5 +602,5 @@ export function loopTaskTools(loops: LoopTasks): ToolDefinition[] {
     },
   };
 
-  return [create, list, update, remove];
+  return [create, list, update, fire, remove];
 }

@@ -126,7 +126,12 @@ export type FireOutcome =
 
 /** How one fire of a cmd loop ended, as the loop's history keeps it. */
 export interface FireRecord {
-  /** One-based fire number, the same number the child process carries. */
+  /**
+   * One-based fire number of the schedule, the same number the child process
+   * carries. A fire started by hand is numbered from the negative side (`-1` is
+   * the first): it takes no number from the schedule and the strip leaves it out
+   * (ADR-0018).
+   */
   readonly fire: number;
   /** Epoch milliseconds the pump handled the fire. */
   readonly at: number;
@@ -223,6 +228,8 @@ export interface CmdLoopTask extends LoopBase {
   signalRaised?: boolean;
   /** Epoch milliseconds the outstanding signal was raised, so a listing can say since when. */
   signalRaisedAt?: number;
+  /** Fires started by hand so far; they are numbered `-1`, `-2`, … and take no schedule slot. */
+  manualFires?: number;
   /**
    * The most recent fires, oldest first, capped by FIRE_HISTORY_LIMIT. The three
    * newest feed the row's strip; the whole list feeds the expansion (ADR-0015).

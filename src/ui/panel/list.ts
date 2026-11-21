@@ -286,7 +286,9 @@ export function listRow(
 
 export function fireStrip(panel: PanelView, task: CmdLoopTask, room: number): string {
   const theme = panel.theme;
-  const newest = task.fireHistory.slice(-STRIP_CELLS);
+  // Manual fires are left out: the strip tracks the schedule, and a probe started
+  // by hand never took a slot (ADR-0018).
+  const newest = task.fireHistory.filter((fire) => fire.fire > 0).slice(-STRIP_CELLS);
   // Widths are counted on the bare glyphs, so a theme's escapes never cost a
   // cell its place in the strip.
   let cells = newest.map((fire) => {

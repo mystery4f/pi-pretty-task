@@ -719,4 +719,29 @@ describe("command loops", () => {
     expect(reloaded).toMatchObject({ kind: "cmd-loop", command: script, fires: 1 });
     expect(reloaded?.fireHistory?.[0]).toMatchObject({ fire: 1, outcome: "success" });
   });
+
+  it("fires a loop by hand as m1 without taking a slot from the schedule", async () => {
+    const task = await setup();
+    const script = await writeScript(
+      task.directory.path,
+      "probe.js",
+      'console.log("probe ran");\n',
+    );
+    const loop = await createCmd(task.harness, {
+      schedule: "1h",
+      command: script,
+      name: "probe",
+    });
+    const scheduledAt = loop.nextFireAt;
+
+    await task.harness.call("pretty_task_loop_fire", { id: loop.id });
+    const manual = await waitForFire(task.harness, loop.id, -1, "success");
+
+    expect(manual.exitCode).toBe(0);
+    const after = await loopDetails(task.harness, loop.id);
+    expect(after.fires).toBe(0);
+    expect(after.nextFireAt).toBe(scheduledAt);
+    expect(after.fireHistory?.map((entry) => entry.fire)).toEqual([-1]);
+    expect(after.fireHistory?.[0]).toMatchObject({ fire: -1, outcome: "success" });
+  });
 });

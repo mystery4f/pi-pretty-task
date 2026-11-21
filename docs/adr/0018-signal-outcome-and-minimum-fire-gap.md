@@ -69,6 +69,6 @@
 
 ## 手动动作
 
-- **run-now**：`pretty_task_loop_fire` 按需跑一发，写成普通 fire 记录并标 `manual`。不推进 `nextFireAt`、不占 `fires` 序号、不动 `consecutiveFailures`——手动跑一次常常就是为了试错，试错不该罚这条 loop；失败原因仍落在那一发的记录与输出文件里。手动发不进面板条带：条带的 `#43✓` 只画到点的发，序号来自 `fires`（ADR-0015），硬塞进去会留空洞；它只出现在详情页的历史里，标 `manual`。
-- **rearm**：`pretty_task_loop_update` 加 `action="rearm"` 与 `action="clear-signal"`，与本 ADR 同批实现。`rearm` 与「只改档期」共用一条实现（`recurrence.nextFire(now)`），差别只是不换表达式——对面是读源码才发现这件事的，说明这个动作早该有名字。
+- **run-now**：`pretty_task_loop_fire` 按需跑一发。**已落**。记录从负数编号（`-1`、`-2`…，面板与工具输出印成 `m1`、`m2`），因此它既不占 `fires` 的序号也不会和到点的那发撞号；不推进 `nextFireAt`、不动 `consecutiveFailures`、不动闩——手动跑一次常常就是为了试错，试错不该罚这条 loop，也不该替这条 loop 宣布「条件已清除」。结果落在那一发的记录与它自己的输出文件里；prompt loop 与已结束的 loop 一律拒绝，跑着的命令中再手动发一次会与到点的那发一样被记成 `skipped`。手动发不进面板条带（条带的 `#43✓` 只画到点的发，序号来自 `fires`，ADR-0015），只出现在详情页历史里。
+- **rearm 与 clear-signal**：`pretty_task_loop_update` 的 `action` 加了这两个词，**已落**。`rearm` 与「只改档期」共用一条实现（`recurrence.nextFire(now)`），差别只是不换表达式——对面是读源码才发现这件事的，说明这个动作早该有名字；`clear-signal` 只对已经立起闩的命令 loop 有意义，其余一律回 `no-signal`。
 - **重设档期与闩**：`retune`、`rearm` 都清掉 `signalRaised`。人主动改写节奏就是宣布重新观察，闩留着会让「刚对齐就再也不报」；清掉的代价只是已报过的条件可能再报一次，而那正是人自己能判断的事。

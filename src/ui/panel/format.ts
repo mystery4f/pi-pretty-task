@@ -8,7 +8,12 @@
 
 import type { ThemeColor } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import { formatBytes, formatClockTime, formatDuration } from "../../tasks/base/format.js";
+import {
+  fireLabel,
+  formatBytes,
+  formatClockTime,
+  formatDuration,
+} from "../../tasks/base/format.js";
 import type {
   CmdLoopTask,
   FireOutcome,
@@ -223,7 +228,8 @@ export function fireLine(fire: FireRecord): string {
       ? "exit —"
       : `exit ${String(fire.exitCode)}`;
   return [
-    `#${String(fire.fire)}`,
+    // A manual fire prints as `m1`: it is not one of the schedule's fires.
+    fireLabel(fire.fire),
     formatClockTime(fire.at),
     fire.outcome,
     exit,

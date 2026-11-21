@@ -50,7 +50,7 @@ updated: 2026-11-21
 
 两步都已落：ADR-0018 定稿（`cd40ee2`）、最小间隔（`9eecf53`：`advanceSchedule` 走 `nextFireBeyondGap`，`Recurrence.periodMs` 让短间隔不被改频）、信号语义整批（`ae363e2`：`FireOutcome` 的 `"signalled"`、`notifyExitCodes` 校验 `1..255` 且拒 0 与空表、`signalRaised`/`signalRaisedAt` 闩、`loop-signal` 唤醒卡带前 10 行、面板徽标与 `signal` 过滤器与状态栏计数、`loop_list` 的 `signal on:` / `latch:`），文档收口（`cb93417`：ADR 后果段改成实际形状、`GLOSSARY.md` 加 Signal 与 Latch 两个词）。`pretty_task_loop_create` 描述同时补上「失败会移动下次触发、成功归位」；`docs/scope-v1.md` 的 event/idle 延后行指向 ADR-0018。
 与 ADR 原文的一处偏离，已回改 ADR：行里的状态词不动（`running` 是记录的事实），改成旁边一个 `⚑ signal` 徽标；退避的事实仍由既有的 `Failures: N in a row` 承担，不另开 `backoff` 字段。
-**还没做**：ADR-0018「手动动作」里的 `action=rearm` / `action=clear-signal` 与 `pretty_task_loop_fire`（run-now）——`clear-signal` 是闩的唯一人工出口，现在只能靠一发 `success` 落闩。
+**手动动作三项已落**（ADR-0018 的 `## 手动动作` 全部兑现）：`pretty_task_loop_update` 的 `action` 加了 `rearm`（不改表达式，只按 `recurrence.nextFire(now)` 重新对齐；暂停中的 loop 回 `already-paused`）与 `clear-signal`（只对已立闩的命令 loop 有意义，其余回 `no-signal`）；`retune` 与 `rearm` 都清 `signalRaised`。新工具 `pretty_task_loop_fire` 手动跑一发：记录从负数编号（`-1`、`-2`…，面板与工具输出印 `m1`、`m2`，渲染逻辑在 `src/tasks/base/format.ts` 的 `fireLabel`），不占 `fires` 序号、不动 `nextFireAt`、不动 `consecutiveFailures`、也不碰闩；`CmdLoopTask.manualFires` 保证编号不重复，`fireHistory` 里的负数条目被面板条带过滤掉、只在详情页历史里出现。prompt loop 与已结束的 loop 一律拒绝。测试：`test/unit/loop-tasks.test.ts` 三条（rearm 对齐 + 保留表达式与计数、clear-signal 与 `no-signal`、手动发不占槽不移动时钟且失败不记 streak），`test/integration/cmd-loops.test.ts` 一条（真进程手动发，`fires` 仍 0、`nextFireAt` 不变、历史为 `m1`），`test/unit/tool-names.test.ts` 的清单同步加了新工具名。
 
 ### 待开的两个 issue（GitHub 不通，写了正文等能推时再贴）
 

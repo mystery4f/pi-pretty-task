@@ -33,6 +33,7 @@ const EXPECTED_TOOL_NAMES = [
   "pretty_task_loop_create",
   "pretty_task_loop_list",
   "pretty_task_loop_update",
+  "pretty_task_loop_fire",
   "pretty_task_loop_delete",
 ] as const;
 

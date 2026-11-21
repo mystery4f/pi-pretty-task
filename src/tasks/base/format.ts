@@ -65,3 +65,12 @@ export function formatClockTime(at: number): string {
   const seconds = String(when.getSeconds()).padStart(2, "0");
   return `${hours}:${minutes}:${seconds}`;
 }
+
+/**
+ * How a fire's number is written: `#3` for a scheduled fire, `m1` for the first
+ * fire started by hand. The negative numbers the store keeps are an encoding, not
+ * something a reader should have to decode (ADR-0018).
+ */
+export function fireLabel(fire: number): string {
+  return fire < 0 ? `m${String(-fire)}` : `#${String(fire)}`;
+}
