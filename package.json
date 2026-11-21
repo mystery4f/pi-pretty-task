@@ -1,6 +1,6 @@
 {
   "name": "pi-pretty-task",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "description": "Background processes, log tails and scheduled agent wake-ups for pi, behind one panel.",
   "keywords": [
     "pi-package",
