@@ -7,9 +7,11 @@ Background processes and scheduled agent wake-ups for [pi](https://github.com/ea
 [![license](https://img.shields.io/npm/l/pi-pretty-task.svg)](LICENSE)
 ![node](https://img.shields.io/node/v/pi-pretty-task.svg)
 
-A build that takes six minutes, a watcher that runs all afternoon, a loop that pings the model every ten minutes — they all end up in the same list: readable, searchable, stoppable, with the output still on disk when the turn is over.
+A build that takes six minutes. A watcher that runs all afternoon. A loop that wakes the model every ten minutes. They all land in the same list — readable, searchable, stoppable — and the output is still on disk when the turn is over.
 
-![The /tasks panel: one running cmd-loop, one running build, one paused prompt-loop](docs/preview.png)
+![The /tasks panel: every process, loop and chain in one list, with the dev server's row still growing](docs/preview.png)
+
+## Install
 
 ```bash
 pi install npm:pi-pretty-task
@@ -34,8 +36,13 @@ Requires pi and Node >= 22.19. A local checkout works too: `pi install ./path/to
 ## One panel, three records
 
 - **Task** — a long-lived shell command in the background, watched, with its whole process tree killable. Output goes to a file, so "what did it print?" survives the turn.
+
+  ![A task opened: npm run dev under way, its output tail refreshing once a second](docs/preview-tail.png)
+
 - **Chain** — a command queued behind another task or chain instead of started now. A step is recorded as `waiting` and starts only after the step ahead ends with exit 0; a failing step leaves the ones behind it `skipped`.
 - **Loop / Iteration** — wake the LLM on a schedule with a preset prompt (`30s`/`10m`/`2h`, or five-field cron such as `0 9 * * 1-5`), and record every tool call of the turn that follows, so "what did that loop actually run?" has an answer. Wakes wait for an idle agent instead of interrupting a turn.
+
+  ![A loop fire opened: the twelve tool calls that one wake-up made](docs/preview-iteration.png)
 
 A fire that comes due while the previous one still runs is skipped and counted, never queued. An id says its kind on sight: `bg-` runs a command, `lp-` wakes the assistant, `ch-` is a chain.
 
@@ -50,6 +57,10 @@ List keys: `↑/↓` select, `Enter` open, `←` back, `k` stop, `a` stop all, `
 ```text
 ↑/↓ · Enter logs · k stop · f filter · o others · 1/2/3 tabs · / search · R rerun · a stop all · alt+q close
 ```
+
+![Walking the panel: processes, loops, chains, then a search for the dev server](docs/preview.gif)
+
+Every image on this page is a screenshot of the shipped panel, not a mock-up: `npm run preview` renders them from `TasksPanel` itself, so a change in `src/ui/panel/` shows up in the next run instead of drifting away from the picture.
 
 ## Use it
 
@@ -108,9 +119,12 @@ Start at [AGENTS.md](AGENTS.md) for the product model and rules, and [GLOSSARY.m
 npm install
 npm run verify    # check + lint + test
 npm run build     # emit dist/
+npm run preview   # build, then re-render docs/preview*.{png,gif}
 ```
 
 `npm run check` typechecks without emit, `npm run lint` is Biome, `npm run test` runs vitest over both projects, `npm run test:unit` the pure half in seconds. Style is machine-enforced by `.editorconfig` + Biome; `dist/` is build output and is never committed. [AGENTS.md](AGENTS.md) has the full verification list.
+
+`npm run preview` drives the built panel with scripted keystrokes in a headless browser and writes the images on this page; it needs a Chrome or Edge on the machine (`PREVIEW_BROWSER` points at another one). [docs/previews.md](docs/previews.md) covers the frames and the colours.
 
 ## Releasing
 

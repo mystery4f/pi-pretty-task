@@ -32,6 +32,7 @@ docs/                   scope + ADRs + reviews (prose docs in Chinese)
 test/unit/              tests whose subject never leaves the process
 test/integration/       tests that spawn a real child and stop a real tree
 test/support/           harness, temp directories, `waitFor`, process helpers
+scripts/preview/        renders docs/preview* from the built panel (`npm run preview`)
 .llm-wiki/              project wiki; its synthesis page "pi-pretty-task 文档索引" is the docs index
 ```
 
