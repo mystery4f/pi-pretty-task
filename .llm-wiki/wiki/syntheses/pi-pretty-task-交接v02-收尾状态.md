@@ -62,8 +62,13 @@ updated: 2026-11-21
 
 正文要点：cmd loop 的失败语义吞掉了「状态为真」。要 `notifyExitCodes: number[]`（命中的退出码记 `signalled`：唤醒一次、不退避、不动 `nextFireAt`、不清 streak；未命中的非零码仍然退避，真实故障要降速）；不另存 `trigger`，模式由列表存在推出；`signalRaised` 闩做边沿去抖，落闩只有 `success` 与手动 `action=clear-signal` 两条路（跳过不落闩）；`wakeOnFailure` 只管失败，信号永远唤醒；信号走 loop 级卡片，带前 10 行 + 总数 + 输出路径；`FireOutcome` 加 `"signalled"`；`loop_list` 露出 `consecutiveFailures` 与离格信息；面板加状态词、条带第三格 `⚑`、`PANEL_FILTERS` 的 `"signal"`、状态栏 `· 1 signal`。顺带 `action=rearm` 与 `pretty_task_loop_fire`（手动一发不占 `fires` 序号、不推进档期，记录标 `manual`）。
 
-### 阻塞
+### 已归档
 
-`gh` 与 `curl -x http://mcr:4444 https://api.github.com` 全部连接被重置（curl 返回 000），两个 issue 与给对面回号都卡在这。
+两个 issue 已开并关闭，附了实测数据与落地提交：
+
+- #41 `fix(loop): keep the next fire at least 30s away so a cron loop cannot collapse` —— `9eecf53` 已落。
+- #42 `feat(loop): signalled outcome, notifyExitCodes and an edge latch for check loops` —— `ae363e2` + `0c60e4c` 已落。
+
+GitHub 是通过 `HTTPS_PROXY=http://mcr:4444` 恢复的（早前 `gh` 与 `curl` 都返回连接重置 / 000）；`git push` 同代理成功，`main` 与 `origin/main` 已对齐。给外部团队的回复要点：两个号都是他们报的，代码在 main、随下个版本发布。
 
 相关：[[syntheses/pi-pretty-task-文档索引]]
