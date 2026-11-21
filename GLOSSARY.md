@@ -24,6 +24,14 @@ _Avoid_: shell loop, cron job, monitor
 Cmd loop task 的一次触发，落在一个子 Process task 上。它有自己的输出文件与退出码，不是独立记录类型，只在所属 Cmd loop task 的详情里列出。
 _Avoid_: run, tick, execution
 
+**Signal**:
+一次 Fire 的结局 `signalled`：Cmd loop task 声明了 `notifyExitCodes`，而这一发退出的码在列表里——检查有话说，loop 本身没坏。它不移动下次触发时刻、不进失败连击，只在闩从落着变成立起时唤醒一轮。列表外的非零码仍是 `failed`，照旧退避。
+_Avoid_: alert, notification, event, warning
+
+**Latch**:
+Cmd loop task 的 `signalRaised`：信号已经报过、还没被清除。落闩只有两条路——一发 `success`（`exit 0` 就是「条件已清除」），或人手动清（`action="clear-signal"`）。被 skip 的那一发不落闩，所以漏一格不会压住下一次报告。
+_Avoid_: flag, state, dedupe, suppress
+
 **Chain task**:
 `kind: "chain"` 的 Task。自己不跑任何进程，只持有一条队列（`steps`，按顺序的 Process task id 数组）和游标。一次只跑一格：当前格退出码为 0 才推进；非零则链失败，余下各格标为 `skipped`；用户终止则余下各格标为 `stopped`。
 _Avoid_: pipeline, workflow, DAG, batch

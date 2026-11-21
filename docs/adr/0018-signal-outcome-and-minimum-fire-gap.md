@@ -62,10 +62,10 @@
 
 - 漂移消失：`signalled` 不移动 `nextFireAt`，档期只由 `success` 与退避两条路改写。重新对齐因此从「每次唤醒后必做的补丁」降级为便利动作。
 - 跳过不再等于丢报告：状态型检查幂等，被跳过那一格只要闩没立，下一格仍会报。代价是「条件为真但恰好跨过一格」的观察空档——这是跳过策略固有的，属于 ADR-0017 的代价，不改。
-- 面板要露出信号：行上一栏状态词（`signal: raised` / `clear`），条带第三种格子 `⚑`（ADR-0015 的 `#43✓ #44✗` 之外），`PANEL_FILTERS` 加 `"signal"`——闩立着的 loop 空闲着等下一发，落不进 `running` 也不落进 `failed`，默认视图会把它藏掉，而把 raised 算成 `running` 是撒谎；详情页只加配置与状态（`signal on: exit 1`、`latch: raised since …`、`backoff: N in a row`），历史仍归条带；状态栏那行在有闩立着时多一个 `· 1 signal`，否则看护的人不看面板就看不见。
+- 面板要露出信号：行里的状态词不动——`running` 是记录的事实，信号不是状态——在它旁边加一个 `⚑ signal` 徽标，`PANEL_FILTERS` 同时加 `"signal"`（闩立着的 loop 空闲着等下一发，落不进 `failed`，混在 `running` 里又看不出它有事）；条带加第三种格子 `⚑`（ADR-0015 的 `#43✓ #44✗` 之外）；详情页加配置与状态（`Signal on: exit 1`、`Signal: raised since …`），退避的事实仍由既有的 `Failures: N in a row` 一行承担，不另开字段；状态栏在有闩立着时多一个 `· 1 signal`，否则看护的人不看面板就看不见。
 - 最小间隔改变了 resume 后的第一发：补发照旧立刻发生，但紧随其后的整点会被推开到不少于 30 秒，短间隔表达式不受影响。
 - 语义代价：`notifyExitCodes` 一旦声明，`exit 0` 就不再只是「没失败」，而是「条件已清除」——它落闩。用列表来表达这条因果，比再开一个 `resetSignalOnSuccess` 之类的开关更诚实。
-- 落地分两步：最小间隔先落（只动 `advanceSchedule` 加测试，零 API 变化，能立刻止住丢报告），信号语义随后；面板与 `loop_list` 的字段跟第二步一起走，否则半个结局没人看得见。
+- 落地分两步，都已落：第一步只动 `advanceSchedule` 并给 `Recurrence` 补一个可选的 `periodMs`，零 API 变化，能立刻止住丢报告；第二步是 `FireOutcome` 的 `"signalled"`、`notifyExitCodes`、闩、`loop-signal` 唤醒卡与上面那四处面板。两者同批走完，因为只有结局没有面板，半个结局没人看得见。
 
 ## 手动动作
 
