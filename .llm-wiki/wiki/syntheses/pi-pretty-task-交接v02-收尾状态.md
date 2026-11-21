@@ -16,7 +16,7 @@ updated: 2026-11-21
 - 集成分支 `feat/v0.2-tasks` 已全部合并，`ticket/*` 分支与 `.tmp/wt/*` worktree 已清理，远端只有 `main`。
 - 安装方式：`~/.pi/agent/settings.json` 第 159 行 `"git:github.com/mystery4f/pi-pretty-task"`；入口 `./src/index.ts`（pi 自己转译），所以**本机改完代码不必 build**，但 `dist/` 不再是安装物。
 - 工具面：十个 `pretty_task_*`（含 `pretty_task_bg_wait`），无旧别名。
-- 闸门：`npm run check` / `npm run lint` / `npm test`（448 测试）/ `npm run build` / `npm run verify`；CI `.github/workflows/verify.yml` 跑前三项。**集成测试在这台机器上现在不绿**：2026-11-21 实测 `vitest run test/integration` 在 `HEAD` 干净树上也有 29 个失败（`process-stop` 里「waits only as long as the store tells it to」断言 4195ms < 3000ms 直接超）。原因不在代码：是残留的测试子进程 + 慢盘，先 `powershell -File .tmp/ps-kill-strays.ps1` 清掉 `%TEMP%\pi-pretty-task-*` 下的孤儿 node 再跑，仍会剩下时间敏感的假失败。判绿看单元工程与改到的集成文件（`cmd-loops` / `tasks-command` / `terminal-notification`）。
+- 闸门：`npm run check` / `npm run lint` / `npm test`（448 测试）/ `npm run build` / `npm run verify`；CI `.github/workflows/verify.yml` 跑前三项。**集成测试在这台机器上现在不绿**：2026-11-21 实测 `vitest run test/integration` 在 `HEAD` 干净树上也有 29 个失败（`process-stop` 里「waits only as long as the store tells it to」断言 4195ms < 3000ms 直接超）。原因不在代码：是残留的测试子进程 + 慢盘，先清掉 `%TEMP%\pi-pretty-task-*` 下的孤儿 node（`Get-CimInstance Win32_Process` 里命令行含 `pi-pretty-task-` 的杀掉；`tasklist /FI` 在 git bash 里会被改成路径，用 PowerShell）再跑，仍会剩下时间敏感的假失败。判绿看单元工程与改到的集成文件（`cmd-loops` / `tasks-command` / `terminal-notification`）。
 
 ## 已上线能力
 
