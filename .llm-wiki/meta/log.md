@@ -77,3 +77,9 @@
 ## [2026-11-17T16:36:42.179Z] observe
 - slug: "obs-2026-11-17-readme-key-list-is-test-guarded-against-panel-drift", title: "README key list is test-guarded against panel drift", relevance: "high"
 
+## [2026-11-17T17:25:31.213Z] observe
+- slug: "obs-2026-11-17-pi-plugin-skills-reference", title: "pi-plugin skills 增加 reference/ 深度层", relevance: "medium"
+
+## [2026-11-21T06:10:16.867Z] observe
+- slug: "obs-2026-11-21-", title: "订阅模式不做「一行一触发」，订阅也不新开页签", relevance: "high"
+

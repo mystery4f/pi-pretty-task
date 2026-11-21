@@ -3,7 +3,7 @@ type: synthesis
 title: pi-pretty-task 交接：v0.2 收尾状态
 tags: handoff, pi-pretty-task
 created: 2026-11-15
-updated: 2026-11-15
+updated: 2026-11-21
 ---
 
 # pi-pretty-task 交接：v0.2 收尾状态
@@ -39,5 +39,29 @@ updated: 2026-11-15
 ## 下次开工第一件事
 
 读本页 → `gh issue view 31` 判断是否开工 → 若要动 UI，先拆 `src/ui/tasks-panel.ts` 再改。
+
+## 2026-11-21 订阅型 cmd loop 与两个 issue 稿
+
+外部团队（另一台机器/另一项目，跑 1.0.4 `92ff4c9`）用 `cron "*/10 * * * *"` 的 cmd loop 做巡检，靠 `wakeOnFailure` + `exit 1` 当事件通道。他们报的四个问题全部对着源码核过并成立，结论已定进 ADR-0018：
+
+- 报警即降速：`noteFailure` 把 `nextFireAt` 推到 `本次触发 + 间隔 × 2^min(streak,4)`（实测 `18:10:00 → 18:30:02.914`）。
+- 离格后整点塌陷：`#57 05:40:38.492Z`（跑 1m32s）→ `#58 05:50:00.706Z`，只隔 9m22s；老例 17:29:55 与 17:30:00 隔 5 秒，前者未完 → 后者 `skipped`，那一轮报告丢失。
+- resume 补发也离格：pump 停 2h20m（`#56 03:20:00.672Z` → `#57 05:40:38.492Z`），塌陷不需要先失败一次。
+
+本轮只落文档与 ADR，代码未动：`docs/adr/0018-signal-outcome-and-minimum-fire-gap.md`；`pretty_task_loop_create` 描述补上「失败会移动下次触发、成功归位」；`docs/scope-v1.md` 的 event/idle 延后行指向 ADR-0018。
+
+### 待开的两个 issue（GitHub 不通，写了正文等能推时再贴）
+
+标题一：`fix(loop): keep the next fire at least 30s away so a cron loop cannot collapse`
+
+正文要点：`advanceSchedule` 用 `recurrence.nextFire(实际触发时刻)`，离格触发（失败退避后、resume 补发后）到下一个整点可以任意近，两发起跑只隔几秒，前者仍在跑则后者记 `skipped`，那一轮观察丢失。实测序列见上（`#57→#58` 9m22s、17:29:55→17:30:00 5s、resume 2h20m 空档后立刻补发）。修法：取第一个距本次触发不早于 `MIN_FIRE_GAP_MS = 30_000` 的边界；间隔表达式用 `min(30_000, 表达式周期)`，免得把 `10s` 这类短间隔改成 30 秒；补发路径同时生效。附 `#39 00:30:00.648Z` 跑 19.1s 的先例说明重叠风险不是理论值。
+
+标题二：`feat(loop): signalled outcome, notifyExitCodes and an edge latch for check loops`
+
+正文要点：cmd loop 的失败语义吞掉了「状态为真」。要 `notifyExitCodes: number[]`（命中的退出码记 `signalled`：唤醒一次、不退避、不动 `nextFireAt`、不清 streak；未命中的非零码仍然退避，真实故障要降速）；不另存 `trigger`，模式由列表存在推出；`signalRaised` 闩做边沿去抖，落闩只有 `success` 与手动 `action=clear-signal` 两条路（跳过不落闩）；`wakeOnFailure` 只管失败，信号永远唤醒；信号走 loop 级卡片，带前 10 行 + 总数 + 输出路径；`FireOutcome` 加 `"signalled"`；`loop_list` 露出 `consecutiveFailures` 与离格信息；面板加状态词、条带第三格 `⚑`、`PANEL_FILTERS` 的 `"signal"`、状态栏 `· 1 signal`。顺带 `action=rearm` 与 `pretty_task_loop_fire`（手动一发不占 `fires` 序号、不推进档期，记录标 `manual`）。
+
+### 阻塞
+
+`gh` 与 `curl -x http://mcr:4444 https://api.github.com` 全部连接被重置（curl 返回 000），两个 issue 与给对面回号都卡在这。
 
 相关：[[syntheses/pi-pretty-task-文档索引]]

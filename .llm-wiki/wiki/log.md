@@ -1,7 +1,12 @@
 # Wiki Update Log
 
+## 2026-11-21
+
+- **observe**: {"relevance":"high","slug":"obs-2026-11-21-","title":"订阅模式不做「一行一触发」，订阅也不新开页签"}
+
 ## 2026-11-17
 
+- **observe**: {"relevance":"medium","slug":"obs-2026-11-17-pi-plugin-skills-reference","title":"pi-plugin skills 增加 reference/ 深度层"}
 - **observe**: {"relevance":"high","slug":"obs-2026-11-17-readme-key-list-is-test-guarded-against-panel-drift","title":"README key list is test-guarded against panel drift"}
 - **observe**: {"relevance":"high","slug":"obs-2026-11-17-pi-dev-gallery-index-misses-pi-pretty-task-publish-event","title":"pi.dev gallery index misses pi-pretty-task publish event"}
 

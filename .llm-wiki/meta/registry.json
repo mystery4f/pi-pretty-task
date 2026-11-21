@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "last_updated": "2026-11-17T16:36:42.188Z",
+  "last_updated": "2026-11-21T06:10:16.915Z",
   "pages": {
     "sources/await-state-not-bytes-in-process-tests": {
       "type": "source",
@@ -174,6 +174,23 @@
       "created": "2026-11-17",
       "updated": "2026-11-17"
     },
+    "sources/obs-2026-11-17-pi-plugin-skills-reference": {
+      "type": "source",
+      "title": "Observation: pi-plugin skills 增加 reference/ 深度层",
+      "tags": [
+        "pi-plugin",
+        "skills",
+        "skill-system-creator",
+        "reference"
+      ],
+      "status": "observation",
+      "slug": "obs-2026-11-17-pi-plugin-skills-reference",
+      "relevance": "medium",
+      "observed_at": "2026-11-17T17:25:31.211Z",
+      "source_context": "扩充 pi-plugin-* 技能链的参考文档层",
+      "created": "2026-11-17",
+      "updated": "2026-11-17"
+    },
     "sources/obs-2026-11-17-readme-key-list-is-test-guarded-against-panel-drift": {
       "type": "source",
       "title": "Observation: README key list is test-guarded against panel drift",
@@ -190,6 +207,23 @@
       "source_context": "README restructure of pi-pretty-task",
       "created": "2026-11-17",
       "updated": "2026-11-17"
+    },
+    "sources/obs-2026-11-21-": {
+      "type": "source",
+      "title": "Observation: 订阅模式不做「一行一触发」，订阅也不新开页签",
+      "tags": [
+        "pi-pretty-task",
+        "loop",
+        "panel",
+        "adr-0018"
+      ],
+      "status": "observation",
+      "slug": "obs-2026-11-21-",
+      "relevance": "high",
+      "observed_at": "2026-11-21T06:10:16.847Z",
+      "source_context": "设计订阅型 cmd loop 的面板呈现",
+      "created": "2026-11-21",
+      "updated": "2026-11-21"
     },
     "sources/pi-git-install-omits-dev-deps-so-ship-ts-entry": {
       "type": "source",
@@ -280,7 +314,7 @@
       "title": "pi-pretty-task 交接：v0.2 收尾状态",
       "tags": "handoff, pi-pretty-task",
       "created": "2026-11-15",
-      "updated": "2026-11-15"
+      "updated": "2026-11-21"
     },
     "syntheses/pi-pretty-task-文档索引": {
       "type": "synthesis",
