@@ -6,6 +6,8 @@
  * `PanelSource`, and this is one.
  */
 
+import { deriveTaskName } from "../../dist/tasks/process/process-tasks.js";
+
 /** Every timestamp is an offset from this instant, so a rebuild is byte-stable. */
 export const CLOCK = Date.UTC(2026, 10, 21, 9, 12, 0);
 export const HOME = "/home/mystery/work/storefront";
@@ -335,6 +337,36 @@ const viewOf = (task) => ({
   untilNextFireMs: task.nextFireAt === undefined ? undefined : task.nextFireAt - CLOCK,
 });
 
+/** The command pi is still waiting on. Zero until a preview puts one there. */
+let inFront = 0;
+
+/** The task the takeover produces: a command that kept running, now in the list. */
+export const DETACHED_ID = "bg-n3w9k";
+
+/** Put a command back in front, so the panel draws the takeover hint. */
+export function holdInFront(count = 1) {
+  inFront = count;
+}
+
+/**
+ * Let the command in front go, the way `ctrl+shift+b` does: the front line empties
+ * and the same command arrives as a running task, most recently changed first.
+ */
+export function detachFront() {
+  inFront = 0;
+  if (PROCS.some((task) => task.id === DETACHED_ID)) return;
+  // No name was ever given: the store derives one from the command, exactly here.
+  const command = "npx vitest --watch";
+  PROCS.push(
+    proc(DETACHED_ID, deriveTaskName(command), command, {
+      createdAt: CLOCK - 8_000,
+      updatedAt: CLOCK,
+      outputBytes: 1_840,
+      origin: "foreground",
+    }),
+  );
+}
+
 /** A `PanelSource` over the fixtures: no files, no processes, nothing to stop. */
 export const source = {
   sessionId: "9b31d0c5",
@@ -346,4 +378,6 @@ export const source = {
       : { text, lines: text.split("\n").length, truncated: false };
   },
   stop: async () => undefined,
+  /** What pi is still waiting on: not a row, only the hint above the keys. */
+  foreground: () => inFront,
 };

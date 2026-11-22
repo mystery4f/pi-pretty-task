@@ -3,7 +3,7 @@ type: synthesis
 title: pi-pretty-task 交接：v0.2 收尾状态
 tags: handoff, pi-pretty-task
 created: 2026-11-15
-updated: 2026-11-21
+updated: 2026-11-22
 ---
 
 # pi-pretty-task 交接：v0.2 收尾状态
@@ -72,3 +72,17 @@ updated: 2026-11-21
 GitHub 是通过 `HTTPS_PROXY=http://mcr:4444` 恢复的（早前 `gh` 与 `curl` 都返回连接重置 / 000）；`git push` 同代理成功，`main` 与 `origin/main` 已对齐。给外部团队的回复要点：两个号都是他们报的，代码在 main、随下个版本发布。
 
 相关：[[syntheses/pi-pretty-task-文档索引]]
+
+## 2026-11-22 前台命令改道（ADR-0020）
+
+用户提了两件事：正在前台跑的 shell 能不能改道到后台；agent 别的 tool 能不能后台跑。后者当场否掉——`tool_call` 事件只能改写入参，外来工具（MCP、自定义）跑起来之后进程句柄不在扩展手里，永远杀不掉也接管不了，记进 `docs/scope-v1.md` 的延后表并写了解锁条件。
+
+改道这条已落：
+
+- 落盘位置：`src/tasks/process/foreground.ts`（`ForegroundRun` / `ForegroundRunner`）、`src/tasks/process/process-tasks.ts` 的 `reserveForeground` / `spawnForeground` / `adoptForeground`、`src/tasks/base/settings.ts` 两个新键、`src/index.ts` 的 `if (settings.adoptForeground)` 块（覆盖 `createBashTool` / `createPowerShellTool`、`user_bash` 事件、`ctrl+shift+b` 快捷键）、`src/ui/panel/list.ts` 的提示行。
+- 关键设计：打开开关后这台扩展自己 spawn 内置工具的命令，所以 pid 不换、进程不重启，改道只是「不再等它」；记录是普通 `kind: process` 加 `origin: "foreground"`，不新增 kind；回执走成功变体（带已捕获输出与任务 id，不给退出码）；调用自己的 `timeout` 仍是失败不迁移；默认关闭，因为要重注册 pi 自己的 shell 工具。
+- 面板提示：还有命令在等时底栏画一行 `↪ 1 command in front · ctrl+shift+b moves it to the background`；`LIST_OVERHEAD_ROWS` 因此从 9 改成 10，这一行无论是否出现都预留，改道不许在读者光标下改列表高度。
+- 预览图：`docs/preview.gif` 变成十一帧，头两帧就是改道（`detach:start` 有提示行，`detach:ctrl+shift+b` 提示消失、任务进列表）；`scripts/preview/dump.mjs`（`npm run preview:dump`，`--only detach`）不开浏览器就能看帧，`PREVIEW_FRAMES=1 npm run preview` 保留每帧 PNG；`docs/previews.md` 已同步。
+- 闸门实测：`npm run check` 0、`npx --no-install biome check .` 0、`npm run test` 39 文件 479 条全绿（2026-11-22 21:41）。跑前先清 `%TEMP%\pi-pretty-task-*` 的孤儿 node，否则集成测试会被拖成超时假红——这是这台机器的老毛病，不是代码。
+- 顺带修的测试债：`test/support/extension-harness.ts` 现在默认用 `process.env` 去掉所有 `PI_PRETTY_TASK_*`。这台机器有用户级 `PI_PRETTY_TASK_SHELL=bash`，会让 `process-shell` 里 `type result.txt` 这类 cmd 断言假红；组件测试不该读开发机的全局覆盖。
+- 未做：版本号仍是 `1.0.7`，没发版、没推送。

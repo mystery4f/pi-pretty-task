@@ -43,6 +43,7 @@ updated: 2026-11-21
 | [0017 重叠跳过、失败退避，不排队](../../docs/adr/0017-overlap-skips-and-failures-back-off.md) | 重叠的触发记 `skipped` 不排队；失败翻倍封顶一小时、成功归位；两个计数落盘 |
 | [0018 订阅型 cmd loop：第三种结局与最小触发间隔](../../docs/adr/0018-signal-outcome-and-minimum-fire-gap.md) | 退出码三分为 `signalled`（不退避、不动档期）+ `failed`（照旧退避）；`signalRaised` 闩做边沿去抖；`advanceSchedule` 设 30s 最小间隔，cron 与 resume 补发都受约束；不新开 kind |
 | [0019 面板按 pane 的尺寸规划 body](../../docs/adr/0019-panel-plans-against-its-pane.md) | `panelHeightBudget` 复刻 pi overlay 的裁剪算式、每帧从 `tui.terminal.rows` 重算；`detailRows` 窗口优先、字段整块丢并提示；宽度两档、长值折行；子行状态前置；`listWindow` 让分页行也占预算 |
+| [0020 前台命令改道成任务](../../docs/adr/0020-foreground-command-detaches-to-a-task.md) | 默认关闭；打开后用同名 `registerTool` 覆盖内置 `bash`/`powershell` 并接管 `!` 命令自己 spawn；快捷键 `ctrl+shift+b` 或 `PI_PRETTY_TASK_FOREGROUND_TIMEOUT` 到点即不再等待，进程不重启、落成 `origin: "foreground"` 的 Process task，计入任务上限；外来工具（MCP 等）明确不做 |
 
 ## 工具链与代码风格
 

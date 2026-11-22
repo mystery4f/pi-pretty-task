@@ -9,7 +9,7 @@
 
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { rememberPanelTab, TasksPanel } from "../../dist/ui/panel/tasks-panel.js";
-import { growWeb, now, source } from "./fixtures.mjs";
+import { detachFront, growWeb, holdInFront, now, source } from "./fixtures.mjs";
 import { assertWidths, makeTheme } from "./theme.mjs";
 
 const WIDTH = 106;
@@ -58,7 +58,10 @@ async function drive(steps, label, before) {
   if (before !== undefined) await before(panel);
   const frames = [capture(panel, `${label}:start`)];
   for (const step of steps) {
-    panel.handleInput(step.key);
+    // `key` is the panel's own input; `effect` is what happens outside it, such as
+    // a pi-level shortcut whose result the panel only sees in its next refresh.
+    if (step.key !== undefined) panel.handleInput(step.key);
+    if (step.effect !== undefined) await step.effect(panel);
     await panel.settle();
     frames.push(capture(panel, `${label}:${step.name}`));
   }
@@ -93,6 +96,29 @@ export async function renderIteration() {
     "iteration",
   );
   return frames.at(-1).lines;
+}
+
+/**
+ * The takeover, as a reader meets it: a command is still in front, `ctrl+shift+b`
+ * lets it go, and the same command arrives in the list as an ordinary task
+ * (ADR-0020). The frame before the key is the only place the hint is drawn.
+ */
+export async function renderDetach() {
+  holdInFront(1);
+  return drive(
+    [
+      {
+        name: "ctrl+shift+b",
+        // The shortcut belongs to pi, not to the panel: what the panel sees is a
+        // refresh in which the front line is empty and the task exists.
+        effect: async (panel) => {
+          detachFront();
+          await panel.refresh();
+        },
+      },
+    ],
+    "detach",
+  );
 }
 
 /** The animation: the list pages, the filter tab row and a search, nothing taller. */

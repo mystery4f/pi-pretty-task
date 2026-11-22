@@ -68,7 +68,8 @@
     "test:integration": "vitest run --project integration --passWithNoTests",
     "test:watch": "vitest",
     "verify": "npm run check && npm run lint && npm test",
-    "preview": "npm run build && node scripts/preview/preview.mjs"
+    "preview": "npm run build && node scripts/preview/preview.mjs",
+    "preview:dump": "node scripts/preview/dump.mjs"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "^1.5.0",

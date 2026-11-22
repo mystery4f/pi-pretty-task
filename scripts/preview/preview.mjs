@@ -4,6 +4,7 @@
  *
  *   npm run preview          # build, then write docs/preview*.{png,gif}
  *   PREVIEW_BROWSER=/path/to/chrome npm run preview
+ *   PREVIEW_FRAMES=1 npm run preview   # keep one PNG per animation frame
  *
  * The panel comes from `dist/`, so a change in `src/ui/panel/` lands in the
  * images the next time this runs. Scratch HTML and frames go to `.tmp/preview/`.
@@ -13,7 +14,7 @@ import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:f
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
 import { terminalPage } from "./page.mjs";
-import { renderIteration, renderList, renderTail, renderWalk } from "./render.mjs";
+import { renderDetach, renderIteration, renderList, renderTail, renderWalk } from "./render.mjs";
 import { launchBrowser, screenshot, writeGif } from "./shoot.mjs";
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
@@ -36,7 +37,10 @@ async function main() {
   const list = await renderList();
   const iteration = await renderIteration();
   const tail = await renderTail();
-  const walk = await renderWalk();
+  // The takeover goes first in the animation so the detached task is already one of
+  // the rows the rest of the walk moves through.
+  const detach = await renderDetach();
+  const walk = [...detach, ...(await renderWalk())];
   // Every animation frame is padded to the tallest one, so the window keeps its size.
   const rows = Math.max(...walk.map((frame) => frame.lines.length));
 
@@ -64,7 +68,9 @@ async function main() {
       const png = `${SCRATCH}${name}.png`;
       await screenshot(browser, { htmlPath: writePage(name, { lines: frame.lines, rows }), outPath: png, scale: 1 });
       frames.push({ label: frame.label, data: readFileSync(png) });
-      rmSync(png);
+      // `PREVIEW_FRAMES=1` keeps them: one frame is far easier to look at as a PNG
+      // than inside a looping GIF.
+      if (process.env.PREVIEW_FRAMES !== "1") rmSync(png);
     }
     const gif = `${SCRATCH}preview.gif`;
     writeFileSync(gif, writeGif({ frames }));
