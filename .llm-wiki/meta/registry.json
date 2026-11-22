@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "last_updated": "2026-11-21T23:10:39.391Z",
+  "last_updated": "2026-11-22T13:57:21.405Z",
   "pages": {
     "sources/await-state-not-bytes-in-process-tests": {
       "type": "source",
@@ -225,6 +225,24 @@
       "created": "2026-11-21",
       "updated": "2026-11-21"
     },
+    "sources/obs-2026-11-22-gif": {
+      "type": "source",
+      "title": "Observation: GIF 里\"看不见\"的新功能属于节奏问题",
+      "tags": [
+        "pi-pretty-task",
+        "preview",
+        "gif",
+        "verification",
+        "playwright"
+      ],
+      "status": "observation",
+      "slug": "obs-2026-11-22-gif",
+      "relevance": "medium",
+      "observed_at": "2026-11-22T13:57:21.324Z",
+      "source_context": "用户质疑 README 的 gif 里看不到新功能，排查后改成逐帧延时并推送",
+      "created": "2026-11-22",
+      "updated": "2026-11-22"
+    },
     "sources/pi-git-install-omits-dev-deps-so-ship-ts-entry": {
       "type": "source",
       "title": "pi 的 git 安装不带 devDeps，入口要写 .ts 而不是靠 prepare 构建",
@@ -323,7 +341,7 @@
       "title": "pi-pretty-task 交接：v0.2 收尾状态",
       "tags": "handoff, pi-pretty-task",
       "created": "2026-11-15",
-      "updated": "2026-11-21"
+      "updated": "2026-11-22"
     },
     "syntheses/pi-pretty-task-文档索引": {
       "type": "synthesis",

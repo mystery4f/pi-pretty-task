@@ -86,3 +86,6 @@
 ## [2026-11-21T23:10:39.377Z] retro
 - slug: "pi-pretty-task-preview-from-the-built-panel", title: "README 截图从 dist 里的真面板渲染，三处状态陷阱", category: "design"
 
+## [2026-11-22T13:57:21.342Z] observe
+- slug: "obs-2026-11-22-gif", title: "GIF 里\"看不见\"的新功能属于节奏问题", relevance: "medium"
+

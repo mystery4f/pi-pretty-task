@@ -1,5 +1,9 @@
 # Wiki Update Log
 
+## 2026-11-22
+
+- **observe**: {"relevance":"medium","slug":"obs-2026-11-22-gif","title":"GIF 里\"看不见\"的新功能属于节奏问题"}
+
 ## 2026-11-21
 
 - **retro**: {"category":"design","slug":"pi-pretty-task-preview-from-the-built-panel","title":"README 截图从 dist 里的真面板渲染，三处状态陷阱"}
