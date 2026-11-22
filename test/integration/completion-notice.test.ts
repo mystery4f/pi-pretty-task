@@ -51,7 +51,7 @@ async function waitForNotice(harness: Harness): Promise<SentMessage> {
 }
 
 describe("finished-task notice", () => {
-  it("sends one follow-up session message per finished task", async () => {
+  it("sends one steering session message per finished task", async () => {
     const dir = await makeTempDir();
     cleanup.push(dir.dispose);
     const command = await writeScript(dir.path, "greeting.js", "console.log('all done');\n");
@@ -61,7 +61,9 @@ describe("finished-task notice", () => {
 
     const notice = await waitForNotice(harness);
     expect(notice.customType).toBe("task-finished");
-    expect(notice.options).toEqual({ deliverAs: "followUp", triggerTurn: true });
+    // Steered, not queued as a follow-up: a notice queued at the turn boundary is
+    // lost when a user prompt wins the race for it (ADR-0021).
+    expect(notice.options).toEqual({ deliverAs: "steer", triggerTurn: true });
     expect(notice.display).toBe(true);
 
     // Exactly one: a task that ends must not report itself twice.

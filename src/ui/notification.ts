@@ -114,7 +114,11 @@ export async function notifyTaskFinished(pi: ExtensionAPI, view: ProcessTaskView
       display: true,
       details: message.details,
     },
-    { deliverAs: "followUp", triggerTurn: true },
+    // `steer`, not `followUp`: a follow-up queued while a run is in flight is
+    // delivered when the agent goes idle, and a user prompt arriving in that same
+    // instant wins the race and takes the notice with it (ADR-0021). Steering puts
+    // the ending in front of the next model call, which is the moment it matters.
+    { deliverAs: "steer", triggerTurn: true },
   );
 }
 
