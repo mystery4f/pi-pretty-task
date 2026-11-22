@@ -248,7 +248,9 @@ export async function notifyLoopSignal(
       display: true,
       details: message,
     },
-    { deliverAs: "followUp", triggerTurn: true },
+    // Same rule as the finished-task notice: a notice reports, so it steers, and
+    // only a loop wake carrying a prompt queues as a follow-up (ADR-0021).
+    { deliverAs: "steer", triggerTurn: true },
   );
 }
 

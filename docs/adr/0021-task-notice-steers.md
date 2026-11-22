@@ -26,7 +26,9 @@ ADR-0009 已经记下 `followUp` 的一个代价——排队之后 pi 没有撤�
 - 线程安全上没有新问题：通知内容本来就短（几行状态 + 尾部输出），投递时点比 `followUp` 早，语义不变。
 - `triggerTurn: true` 保留：agent 空闲时结束的任务照样立即唤醒一轮。
 
-**Loop 唤醒仍然用 `followUp`**（ADR-0001、ADR-0009、ADR-0017 不动）。区别是意图：一次唤醒可能带一段要模型立刻执行的 prompt，赶在一轮中间插进去会打断正在进行的工作；而任务结束通知只是陈述一件已经发生的事，「晚一点知道」比「打断」便宜。ADR-0009 记录的那些排队代价（记录与实际触发对不上）针对的也是唤醒，与这里无关。
+**规则按「报告还是派活」分，不按模块分**：`notify*`——`notifyTaskFinished`（任务/一次 fire 结束）与 `notifyLoopSignal`（订阅型检查有话说）——一律 `steer`；只有携带 prompt、要模型立刻干活的一侧（`src/ui/loop-wake.ts` 的 Loop 唤醒）保持 `followUp`（ADR-0001、ADR-0009、ADR-0017 不动）。
+
+把信号通知也归到 `steer` 是这条规则自己要求的：第一次只改了结束通知时，`test/integration/cmd-loops.test.ts` 立刻抓住不一致——失败唤醒复用的是 `customType: "task-finished"` 那条形状，于是它跟着变了，而 `loop-signal` 没变。两种通知都只是陈述「已经发生」，没有理由一个新、一个旧；分辨它们的维度是「要不要模型动手」，不是「属于哪个模块」。
 
 ## 代价
 
@@ -35,7 +37,8 @@ ADR-0009 已经记下 `followUp` 的一个代价——排队之后 pi 没有撤�
 
 ## 相关
 
-- `src/ui/notification.ts`：`notifyTaskFinished` 的 `deliverAs`。
-- `test/integration/completion-notice.test.ts`：断言投递方式的那条用例。
+- `src/ui/notification.ts`：`notifyTaskFinished` 与 `notifyLoopSignal` 的 `deliverAs`。
+- `src/ui/loop-wake.ts`：Loop 唤醒保持 `followUp` 的出处。
+- `test/integration/completion-notice.test.ts`、`test/integration/cmd-loops.test.ts`：断言投递方式的用例。
 - `docs/adr/0009-wakes-wait-for-idle-and-bind-their-turn.md`：`followUp` 排队的原始代价，针对 Loop 唤醒。
 - `docs/adr/0001-loop-wakes-llm-not-shell.md`：Loop 唤醒用 `followUp` 的出处。

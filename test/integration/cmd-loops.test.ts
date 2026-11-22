@@ -330,12 +330,12 @@ describe("command loops", () => {
     // the row, then the send), so polling for the row can win that race.
     await waitFor("the failure notice", () => task.harness.messages.length === 1);
 
-    // One message, in the completion notice's shape: a follow-up that starts a
+    // One message, in the completion notice's shape: a message that starts a
     // turn, displayed as a normal entry in the transcript.
     expect(task.harness.messages).toHaveLength(1);
     const notice = task.harness.messages[0];
     expect(notice?.customType).toBe("task-finished");
-    expect(notice?.options).toEqual({ deliverAs: "followUp", triggerTurn: true });
+    expect(notice?.options).toEqual({ deliverAs: "steer", triggerTurn: true });
     expect(notice?.display).toBe(true);
     expect(first.exitCode).toBe(7);
     expect(notice?.content).toContain("name: chatty #1");
@@ -423,7 +423,7 @@ describe("command loops", () => {
     const notice = task.harness.messages[0];
     expect(first.exitCode).toBe(1);
     expect(notice?.customType).toBe("loop-signal");
-    expect(notice?.options).toEqual({ deliverAs: "followUp", triggerTurn: true });
+    expect(notice?.options).toEqual({ deliverAs: "steer", triggerTurn: true });
     expect(notice?.content).toContain("name: watch");
     expect(notice?.content).toContain("fire: #1 signalled");
     expect(notice?.content).toContain("exit code: 1");
