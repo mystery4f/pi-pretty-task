@@ -100,7 +100,14 @@ export interface AdoptForegroundInput extends TaskScope {
   /** The process already running: the one thing a detach hands over. */
   readonly running: RunningProcess;
   /** Kill deadline the foreground call itself carried, in milliseconds. */
+  /** Kill deadline the foreground call itself carried, in milliseconds. */
   readonly timeoutMs?: number;
+  /**
+   * When the process itself started, before it was a task. The record's age and
+   * its `createdAt` come from here, so a caller reporting a detached command does
+   * not under-report how long it has been running.
+   */
+  readonly startedAt?: number;
   readonly name?: string;
 }
 
@@ -511,7 +518,11 @@ export class ProcessTasks {
         workingDirectory: input.reservation.cwd,
       },
       "running",
-      { ...input.reservation, origin: "foreground" },
+      {
+        ...input.reservation,
+        origin: "foreground",
+        ...(input.startedAt !== undefined ? { startedAt: input.startedAt } : {}),
+      },
     );
     session.tasks.set(task.id, task);
     // The record is on disk before the caller stops waiting, so a detach that
@@ -532,13 +543,21 @@ export class ProcessTasks {
     session: SessionTasks,
     input: StartProcessTaskInput,
     status: TaskStatus,
-    /** The id and file a foreground run reserved; absent for a fresh start. */
-    reservation?: ForegroundReservation & { readonly origin?: ProcessTask["origin"] },
+    /**
+     * The id and file a foreground run reserved, and when its process started;
+     * absent for a fresh start. A detached command has been running for a while
+     * before it becomes a task, and the record's age is the process's age: a clock
+     * that restarted at the detach would report a 23-second process as 7 seconds.
+     */
+    reservation?: ForegroundReservation & {
+      readonly origin?: ProcessTask["origin"];
+      readonly startedAt?: number;
+    },
   ): Promise<ProcessTask> {
     const cwd = await this.resolveWorkingDirectory(input.cwd, input.workingDirectory);
     const id = reservation?.id ?? this.createId(session);
     const name = input.name?.trim();
-    const createdAt = this.now();
+    const createdAt = reservation?.startedAt ?? this.now();
     return {
       id,
       kind: "process",

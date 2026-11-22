@@ -349,6 +349,9 @@ export class ForegroundRunner {
           outputPath: run.outputPath,
         },
         running: process,
+        // The process began before it was a task: the record's age starts there, so
+        // a 91-second command is not reported as a 74-second one (ADR-0020).
+        startedAt: run.startedAt,
       });
       run.finish({ kind: "detached", taskId: task.id });
       this.runs.delete(run.id);

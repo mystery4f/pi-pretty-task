@@ -110,6 +110,37 @@ describe("foreground takeover", () => {
     expect(resultText(result)).not.toContain("↪ moved to");
   });
 
+  it("announces the ending of a command it let go", async () => {
+    const { harness, dir } = await setup();
+    const command = await writeScript(
+      dir.path,
+      "brief.mjs",
+      ["console.log('compiling');", "setTimeout(() => console.log('all done'), 600);", ""].join(
+        "\n",
+      ),
+    );
+    const pending = harness.call("bash", { command });
+    await waitFor(
+      "the command to reach the foreground",
+      () => harness.controller.foreground.live().length === 1,
+    );
+    await harness.runShortcut("ctrl+shift+b");
+    const id = /↪ moved to (\S+)/.exec(resultText(await pending))?.[1];
+    expect(id).toBeDefined();
+
+    // The wait ended; the command did not. Its ending is a task ending like any
+    // other, and a session that never hears about it has a model that believes a
+    // detached command is still running.
+    await waitFor("the detached task to end", async () => {
+      const task = (await records(dir)).find((record) => record.id === id);
+      return task?.status === "completed";
+    });
+    await waitFor("the completion notice", () => harness.messages.length > 0);
+    const [notice] = harness.messages;
+    expect((notice?.details as { id?: string } | undefined)?.id).toBe(id);
+    expect(notice?.content).toContain("all done");
+  });
+
   it("still kills a command whose own timeout runs out", async () => {
     const { harness, dir } = await setup();
     const command = await longCommand(dir);
