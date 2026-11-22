@@ -60,8 +60,14 @@ export async function screenshot(browser, { htmlPath, outPath, scale }) {
   }
 }
 
-/** Assemble PNG screenshots into one looping GIF. */
-export function writeGif({ frames, delay = 1_100, lastDelay = 2_600 }) {
+/**
+ * Assemble PNG screenshots into one looping GIF.
+ *
+ * `delays[index]` overrides the pacing for one frame: a frame that carries the
+ * whole point of the clip has to stay up long enough to be read, or a reader
+ * entering mid-loop never sees it.
+ */
+export function writeGif({ frames, delay = 1_100, lastDelay = 2_600, delays }) {
   const { GIFEncoder, applyPalette, quantize } = gifenc;
   const gif = GIFEncoder();
   frames.forEach((frame, index) => {
@@ -69,7 +75,7 @@ export function writeGif({ frames, delay = 1_100, lastDelay = 2_600 }) {
     const palette = quantize(png.data, 192);
     gif.writeFrame(applyPalette(png.data, palette), png.width, png.height, {
       palette,
-      delay: index === frames.length - 1 ? lastDelay : delay,
+      delay: delays?.[index] ?? (index === frames.length - 1 ? lastDelay : delay),
       repeat: index === 0 ? 0 : undefined,
     });
   });

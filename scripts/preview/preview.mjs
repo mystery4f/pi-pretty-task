@@ -73,7 +73,11 @@ async function main() {
       if (process.env.PREVIEW_FRAMES !== "1") rmSync(png);
     }
     const gif = `${SCRATCH}preview.gif`;
-    writeFileSync(gif, writeGif({ frames }));
+    // The takeover is the newest thing in the clip and the easiest to miss: two
+    // frames, then eleven more of walking. Each of its frames holds twice as long
+    // as a walk frame, so a reader entering mid-loop still catches the keypress.
+    const delays = walk.map((frame) => (frame.label.startsWith("detach:") ? 2_400 : undefined));
+    writeFileSync(gif, writeGif({ frames, delays }));
     // Windows keeps a file open in a viewer, a lock a plain overwrite cannot beat.
     try {
       writeFileSync(`${DOCS}preview.gif`, readFileSync(gif));
