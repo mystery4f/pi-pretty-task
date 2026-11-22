@@ -64,6 +64,45 @@ export interface StartProcessTaskInput extends TaskScope {
   /** One-based fire number of the owning loop; always given with `parentId`. */
   fire?: number;
 }
+/** An id and an output file held for a command that runs in the foreground (ADR-0020). */
+export interface ForegroundReservation {
+  readonly id: string;
+  /** Directory the command runs in, resolved before the spawn. */
+  readonly cwd: string;
+  /** File the supervisor writes the command's output to. */
+  readonly outputPath: string;
+}
+
+/** What a foreground command needs before it can be spawned. */
+export interface ReserveForegroundInput extends TaskScope {
+  /**
+   * Directory for this call, relative to the session's cwd unless it is absolute.
+   * Same rule as a background task: resolved once, before anything is spawned.
+   */
+  readonly workingDirectory?: string;
+}
+
+/** A reserved foreground command, handed to the supervisor. */
+export interface SpawnForegroundInput {
+  readonly command: string;
+  readonly cwd: string;
+  readonly outputPath: string;
+  readonly env?: Record<string, string>;
+  readonly shell?: ShellChoice;
+  /** Called once when a chunk is dropped for crossing the output cap. */
+  readonly onOutputCap?: () => void;
+}
+
+/** What a reservation becomes once a process stands behind it. */
+export interface AdoptForegroundInput extends TaskScope {
+  readonly command: string;
+  readonly reservation: ForegroundReservation;
+  /** The process already running: the one thing a detach hands over. */
+  readonly running: RunningProcess;
+  /** Kill deadline the foreground call itself carried, in milliseconds. */
+  readonly timeoutMs?: number;
+  readonly name?: string;
+}
 
 /** A task as it looks right now: the record plus the values that keep moving. */
 export interface ProcessTaskView {
@@ -410,6 +449,81 @@ export class ProcessTasks {
   }
 
   /**
+   * Reserve the id and the output file a foreground command will use, before it
+   * is spawned (ADR-0020).
+   *
+   * Both have to exist before the process does: the supervisor opens the output
+   * file at spawn, so the directory must be there first, and the id has to be
+   * settled while the command is still in the foreground — a detach then changes
+   * who is waiting, not what the task is called.
+   */
+  async reserveForeground(input: ReserveForegroundInput): Promise<ForegroundReservation> {
+    const session = await this.session(input);
+    await session.store.ensureDirectory();
+    const cwd = await this.resolveWorkingDirectory(input.cwd, input.workingDirectory);
+    const id = this.createId(session);
+    return { id, cwd, outputPath: processOutputPath(session.directory, id) };
+  }
+
+  /**
+   * Spawn a reserved command into the foreground. Same supervisor, same shell
+   * policy, same output cap as a background task; the difference is who holds the
+   * handle. The caller keeps it, and that handle is what makes a detach possible:
+   * nothing has to be signalled, respawned or renamed.
+   */
+  spawnForeground(input: SpawnForegroundInput): RunningProcess {
+    return this.supervise({
+      command: input.command,
+      cwd: input.cwd,
+      outputPath: input.outputPath,
+      maxOutputBytes: this.outputCapBytes,
+      ...(input.onOutputCap !== undefined ? { onOutputCap: input.onOutputCap } : {}),
+      platform: this.platform,
+      env: this.env,
+      ...(input.env !== undefined ? { envOverrides: input.env } : {}),
+      shellPolicy: this.shellPolicy,
+      ...(input.shell !== undefined ? { shell: input.shell } : {}),
+    });
+  }
+
+  /**
+   * Turn a running foreground command into an ordinary task (ADR-0020): the
+   * record appears under the id the run already used, the process that is already
+   * running is booked under it, and its exit ends the task like any other end.
+   * Nothing is spawned and the pid does not change, so the command never notices.
+   *
+   * The ceiling is checked before the record exists, for the reason a start checks
+   * it: a refused detach leaves nothing behind, and the caller keeps waiting — a
+   * command that cannot become a task stays a foreground command rather than
+   * disappearing.
+   */
+  async adoptForeground(input: AdoptForegroundInput): Promise<ProcessTask> {
+    const session = await this.session(input);
+    const refusal = this.capRefusal(session);
+    if (refusal !== undefined) throw new Error(refusal);
+    const task = await this.record(
+      session,
+      {
+        cwd: input.cwd,
+        sessionId: input.sessionId,
+        command: input.command,
+        ...(input.name !== undefined ? { name: input.name } : {}),
+        workingDirectory: input.reservation.cwd,
+      },
+      "running",
+      { ...input.reservation, origin: "foreground" },
+    );
+    session.tasks.set(task.id, task);
+    // The record is on disk before the caller stops waiting, so a detach that
+    // returns an id always has a task behind that id.
+    this.book(session, task, input.running);
+    task.outputBytes = input.running.bytesWritten();
+    await this.persist(session);
+    this.scheduleRuntimeCap(session, task.id, input.timeoutMs);
+    return task;
+  }
+
+  /**
    * Build a process record. The directory is settled before the record exists: a
    * cwd that cannot be used rejects the call instead of leaving a task that never
    * started.
@@ -418,9 +532,11 @@ export class ProcessTasks {
     session: SessionTasks,
     input: StartProcessTaskInput,
     status: TaskStatus,
+    /** The id and file a foreground run reserved; absent for a fresh start. */
+    reservation?: ForegroundReservation & { readonly origin?: ProcessTask["origin"] },
   ): Promise<ProcessTask> {
     const cwd = await this.resolveWorkingDirectory(input.cwd, input.workingDirectory);
-    const id = this.createId(session);
+    const id = reservation?.id ?? this.createId(session);
     const name = input.name?.trim();
     const createdAt = this.now();
     return {
@@ -432,10 +548,11 @@ export class ProcessTasks {
       updatedAt: createdAt,
       command: input.command,
       cwd,
-      outputPath: processOutputPath(session.directory, id),
+      outputPath: reservation?.outputPath ?? processOutputPath(session.directory, id),
       outputBytes: 0,
       ...(input.parentId !== undefined ? { parentId: input.parentId } : {}),
       ...(input.fire !== undefined ? { fire: input.fire } : {}),
+      ...(reservation?.origin !== undefined ? { origin: reservation.origin } : {}),
     };
   }
 

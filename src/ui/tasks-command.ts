@@ -82,6 +82,7 @@ export function panelSourceFor(
   chains: ChainTasks,
   scope: TaskScope,
   now: () => number = Date.now,
+  foreground?: () => number,
 ): PanelSource {
   // One projection builds every row; these three only say which field of their own
   // a view adds to it, so a new row field cannot reach one kind and miss another.
@@ -94,6 +95,9 @@ export function panelSourceFor(
 
   return {
     sessionId: scope.sessionId,
+    // A foreground run belongs to this session's runner, not to the store, so the
+    // panel learns about it through this one call and nothing else (ADR-0020).
+    ...(foreground === undefined ? {} : { foreground }),
     async list() {
       // Children are listed too: the header counts them even when no page shows them
       // as a row, and a chain's detail resolves its steps by id (ADR-0014).
@@ -192,11 +196,12 @@ export function registerTasksCommand(
   processes: ProcessTasks,
   loops: LoopTasks,
   chains: ChainTasks,
+  foreground?: () => number,
 ): void {
   pi.registerCommand(TASKS_COMMAND, {
     description: "Open the task panel: background processes, loops and chains",
     handler: async (_args, ctx) => {
-      await openPanel(ctx, processes, loops, chains);
+      await openPanel(ctx, processes, loops, chains, foreground);
     },
   });
   // The status line advertises this key, so it has to work: the panel is the only
@@ -204,7 +209,7 @@ export function registerTasksCommand(
   pi.registerShortcut(TASKS_SHORTCUT, {
     description: "Open the task panel",
     handler: async (ctx) => {
-      await openPanel(ctx, processes, loops, chains);
+      await openPanel(ctx, processes, loops, chains, foreground);
     },
   });
 }
@@ -220,6 +225,7 @@ async function openPanel(
   processes: ProcessTasks,
   loops: LoopTasks,
   chains: ChainTasks,
+  foreground?: () => number,
 ): Promise<void> {
   if (ctx.mode !== "tui" || !ctx.hasUI) {
     ctx.ui.notify(
@@ -229,7 +235,7 @@ async function openPanel(
     return;
   }
   const scope: TaskScope = { cwd: ctx.cwd, sessionId: ctx.sessionManager.getSessionId() };
-  const source = panelSourceFor(processes, loops, chains, scope);
+  const source = panelSourceFor(processes, loops, chains, scope, Date.now, foreground);
 
   await ctx.ui.custom<void>(
     (tui, theme, _keybindings, done) =>

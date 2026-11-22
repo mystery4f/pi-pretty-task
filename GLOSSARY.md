@@ -24,6 +24,14 @@ _Avoid_: shell loop, cron job, monitor
 Cmd loop task 的一次触发，落在一个子 Process task 上。它有自己的输出文件与退出码，不是独立记录类型，只在所属 Cmd loop task 的详情里列出。
 _Avoid_: run, tick, execution
 
+**Foreground run**:
+本扩展替内置工具 spawn、正在被某个工具调用等待的那条命令。它还不是 Task，不在面板里、没有记录；只有被改道（或跑完）时才落地。同一时刻可以有多个（并行工具调用），所以「当前前台命令」这个说法只在恰好一条时才成立。
+_Avoid_: running command, live process, session command
+
+**Detached**:
+一条前台命令被改道而成的那条 Process task：进程没重启，只是不再有人等它的结果。记录带 `origin: "foreground"`，在面板里与普通 Process task 同页同行，用 `pretty_task_bg_logs` / `bg_wait` / `bg_kill` 一视同仁。改道不是失败也不是取消：Esc 仍是「杀掉」，改道是「放它走」。
+_Avoid_: promoted task, adopted task, transferred job, bg-ified
+
 **Signal**:
 一次 Fire 的结局 `signalled`：Cmd loop task 声明了 `notifyExitCodes`，而这一发退出的码在列表里——检查有话说，loop 本身没坏。它不移动下次触发时刻、不进失败连击，只在闩从落着变成立起时唤醒一轮。列表外的非零码仍是 `failed`，照旧退避。手动发（`pretty_task_loop_fire`）可以记成 `signalled`，但永不立闩——手动跑一次是探针，不代表到点那一发观测到了什么。注意两层说法不同：那一发的**子进程**仍记 `failed`（进程只看得见非零退出码），`pretty_task_bg_status` / `bg_wait` 报的就是这个；`signalled` 是 loop 层的判决，看它要读 `loop_list`。
 _Avoid_: alert, notification, event, warning

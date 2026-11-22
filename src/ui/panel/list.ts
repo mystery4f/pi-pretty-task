@@ -173,6 +173,18 @@ export function listFooter(_panel: PanelView, room: number): string {
   return fittedFooter(LIST_KEYS, room);
 }
 
+/**
+ * The line above the keys when pi is waiting on a command this extension can let
+ * go. Absent for a source that cannot see foreground runs, and for zero: the
+ * panel never draws an empty hint.
+ */
+export function foregroundHint(panel: PanelView): string | undefined {
+  const count = panel.source.foreground?.() ?? 0;
+  if (count <= 0) return undefined;
+  const what = count === 1 ? "1 command in front" : `${String(count)} commands in front`;
+  return `↪ ${what} · ctrl+shift+b moves it to the background`;
+}
+
 export function listFrame(panel: PanelView, body: string[], width: number): string[] {
   const theme = panel.theme;
   const inner = Math.max(1, width - 2);
@@ -193,6 +205,10 @@ export function listFrame(panel: PanelView, body: string[], width: number): stri
     edge(`╭${"─".repeat(inner)}╮`),
   ];
   for (const line of body) lines.push(row(line));
+  // A command still in front is not a task, so it has no row; this line is where
+  // the panel says it exists and which key moves it (ADR-0020).
+  const inFront = foregroundHint(panel);
+  if (inFront !== undefined) lines.push(row(theme.fg("dim", ` ${inFront}`)));
   // The keys are chosen while still plain text: cutting a coloured string can slice
   // an escape in half and leave the border one column off.
   const footer = listFooter(panel, inner - 1);

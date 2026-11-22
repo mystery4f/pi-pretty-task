@@ -23,9 +23,22 @@ import type {
 import { createEventBus } from "@earendil-works/pi-coding-agent";
 import type { Component, KeybindingsManager, TUI } from "@earendil-works/pi-tui";
 
-import { createExtension } from "../../src/index.js";
+import { createExtension, type ExtensionController } from "../../src/index.js";
 import type { LoopFire } from "../../src/tasks/loop/loop-tasks.js";
 import { TEST_FOLLOW_POLL_MS, TEST_KILL_GRACE_MS } from "./processes.js";
+
+/**
+ * The process environment without this extension's own overrides. A machine-wide
+ * `PI_PRETTY_TASK_*` — a developer's shell choice, say — must not decide what the
+ * suite asserts; a test that wants one passes `env`, where it is visible.
+ */
+function inheritedEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (!key.startsWith("PI_PRETTY_TASK_")) env[key] = value;
+  }
+  return env;
+}
 
 /** One turn's view of the session: its working directory and session id. */
 export interface Turn {
@@ -49,7 +62,8 @@ export interface SentMessage {
 /** Knobs the tests need so no real timer or wall clock drives a loop. */
 export interface HarnessOptions {
   readonly now?: () => number;
-  /** Environment the extension reads its configuration from; defaults to `process.env`. */
+  /** Environment the extension reads its configuration from; defaults to
+   * `process.env` without any `PI_PRETTY_TASK_*` override. */
   readonly env?: NodeJS.ProcessEnv;
   /** Tool calls one iteration keeps; omitted means the extension's default. */
   readonly iterationCallLimit?: number;
@@ -91,6 +105,11 @@ export interface HarnessOptions {
 }
 
 export interface Harness {
+  /**
+   * The extension as wired. Most tests only need the tools above; a seam that no
+   * tool reaches — a foreground run, which waits inside a tool call — is here.
+   */
+  readonly controller: ExtensionController;
   /** Names of every tool the extension registered. */
   readonly toolNames: readonly string[];
   /** The description the model reads for one registered tool. */
@@ -186,7 +205,9 @@ function createToolContext(turn: Turn, ui?: unknown): ExtensionToolContext {
   // the extension can publish its status line before anyone opens the panel.
   const context = {
     cwd: turn.cwd,
-    sessionManager: { getSessionId: () => turn.sessionId },
+    // pi's own shell tools read the session file to expose `PI_SESSION_FILE`;
+    // this harness has none, and an absent one is what pi leaves out.
+    sessionManager: { getSessionId: () => turn.sessionId, getSessionFile: () => undefined },
     ...(ui === undefined ? {} : { ui, hasUI: true }),
   };
   return context as unknown as ExtensionToolContext;
@@ -346,7 +367,7 @@ export function createHarness(defaultTurn: Turn, options: HarnessOptions = {}): 
 
   const controller = createExtension(api as unknown as ExtensionAPI, {
     now: options.now,
-    env: options.env ?? process.env,
+    env: options.env ?? inheritedEnv(),
     pumpIntervalMs: 0,
     ...(options.iterationCallLimit === undefined
       ? {}
@@ -370,6 +391,7 @@ export function createHarness(defaultTurn: Turn, options: HarnessOptions = {}): 
   });
 
   return {
+    controller,
     events,
     toolNames: tools.map((tool) => tool.name),
     toolDescription(toolName: string): string {

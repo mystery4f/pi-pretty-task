@@ -231,6 +231,17 @@ Unknown template "tset". Known templates: "lint", "test". The task was not start
 模板文件**只在扩展加载时读一次**。会话进行中改文件，当前会话里名字、命令、`pretty_task_bg_run` 的描述都不会变，新模板要等 `/reload` 或新会话才可用——工具描述与报错都写着这句，避免模型以为写了没生效。描述本身就是提示词前缀的一部分：文件内容一变，下次加载的描述文字就变，那一段缓存要重付一次；内容没变则逐字节相同，重载不花钱。增删流程与校验步骤见插件自带的 `skills/pretty-task-templates/SKILL.md`。
 任一文件解析失败只影响该文件：错误写到 stderr，带上文件路径和具体位置（例如 `invalid JSON (...)`、`template "test".command must be a non-empty string`），扩展继续加载，另一个文件里的模板照常可用。
 
+## 前台命令改道
+
+默认关闭。打开后，本扩展用同名 `registerTool` 覆盖内置 `bash`/`powershell`、并接管 `!` 命令，命令由本扩展 spawn——只有自己 spawn 的进程才有句柄可接管（[ADR-0020](adr/0020-foreground-command-detaches-to-a-task.md)）。之后两种触发器能把一条正在前台跑的命令改道成 Process task：
+
+| 键 | 取值 | 默认 | 说明 |
+|---|---|---|---|
+| `PI_PRETTY_TASK_ADOPT_FOREGROUND` | `on`、`off` | `off` | 覆盖内置 shell 工具并接管 `!` 命令 |
+| `PI_PRETTY_TASK_FOREGROUND_TIMEOUT` | 正整数秒，或 `0` | `0` | 前台命令跑到该秒数自动改道；`0` 为关 |
+
+快捷键 `ctrl+shift+b` 只对唯一一条在跑的前台命令生效：并行工具调用时按键只给一条提示，不改道。改道的命令不重跑、不换 PID，输出继续写到 `.pi/tasks/` 下的任务文件；它计入同时运行的任务上限，撞上限时改道失败、命令留在前台继续跑。`PI_PRETTY_TASK_FOREGROUND_TIMEOUT` 与内置 `timeout` 参数是两件事：前者「放它走」，后者「到点就杀」，Esc 仍是杀。
+
 ## 为什么配置只从一个地方读
 
 所有由环境变量决定的东西——输出上限、同时运行的任务上限、shell 策略、通知开关、旧会话保留天数、agent 设置目录——都在 `src/tasks/base/settings.ts` 里读一次，合成一个 `Settings` 值交给需要它的模块；`src/tasks/process/limits.ts` 只剩与时间有关的数值校验，`src/tasks/process/shell.ts` 从传入的环境里解析，扩展只经 `Settings` 调用它。一个键一种形状——见 `docs/scope-v1.md`。这样测试可以把一份显式环境（或一个普通对象）交给扩展入口，宿主也可以用同样的方式传入，而“读哪里、什么时候校验”只有一个答案：某个模块自己再读一次 `process.env` 是缺陷，不是优化。
@@ -238,7 +249,7 @@ Unknown template "tset". Known templates: "lint", "test". The task was not start
 `PI_PRETTY_TASK_*` 里这个版本不认识的键同样是错误：
 
 ```
-PI_PRETTY_TASK_NOTIFY_TIMEOUT is not a key this version reads; known keys: PI_PRETTY_TASK_OUTPUT_CAP_BYTES, PI_PRETTY_TASK_MAX_RUNNING_TASKS, PI_PRETTY_TASK_NOTIFY, PI_PRETTY_TASK_RETENTION_DAYS, PI_PRETTY_TASK_SHELL, PI_PRETTY_TASK_SHELL_PATH, PI_PRETTY_TASK_POSIX_SHELL, PI_PRETTY_TASK_POSIX_SHELL_PATH
+PI_PRETTY_TASK_NOTIFY_TIMEOUT is not a key this version reads; known keys: PI_PRETTY_TASK_OUTPUT_CAP_BYTES, PI_PRETTY_TASK_MAX_RUNNING_TASKS, PI_PRETTY_TASK_NOTIFY, PI_PRETTY_TASK_RETENTION_DAYS, PI_PRETTY_TASK_SHELL, PI_PRETTY_TASK_SHELL_PATH, PI_PRETTY_TASK_POSIX_SHELL, PI_PRETTY_TASK_POSIX_SHELL_PATH, PI_PRETTY_TASK_ADOPT_FOREGROUND, PI_PRETTY_TASK_FOREGROUND_TIMEOUT
 ```
 
 拼错的名字不该变成一个用户以为生效、扩展却默默忽略的设置。唯一例外是命名模板：模板要跨会话复用，所以放在项目与 agent 的 `pretty-task.json`；它也按 `Settings` 给出的路径在扩展入口读一次、校验一次，坏文件只报告，不阻断加载。

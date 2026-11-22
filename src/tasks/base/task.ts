@@ -104,6 +104,13 @@ export interface ProcessTask extends TaskBase {
   parentId?: string;
   /** One-based fire number of the owning loop; present exactly with a loop's `parentId`. */
   readonly fire?: number;
+  /**
+   * Where the task came from, when it was not a background call: a foreground
+   * command that was let go instead of waited for (ADR-0020). Absent for an
+   * ordinary start, a fire and a chain step, so a reader can tell a task the
+   * user began as a background task from one that became one.
+   */
+  readonly origin?: "foreground";
 }
 
 /**

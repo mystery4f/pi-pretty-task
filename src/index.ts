@@ -9,7 +9,12 @@
  * @author mystery4f <40482524+mystery4f@users.noreply.github.com>
  */
 
-import type { ExtensionAPI, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
+import {
+  createBashTool,
+  createPowerShellTool,
+  type ExtensionAPI,
+  type ExtensionUIContext,
+} from "@earendil-works/pi-coding-agent";
 import { publishLoopFired, publishTaskFinished } from "./tasks/base/events.js";
 import { fireLabel } from "./tasks/base/format.js";
 import { pruneSessions } from "./tasks/base/retention.js";
@@ -21,6 +26,7 @@ import { Iterations } from "./tasks/loop/iterations.js";
 import { type LoopFire, LoopTasks } from "./tasks/loop/loop-tasks.js";
 import { loopTaskTools } from "./tasks/loop/tools.js";
 import { WakeDesk } from "./tasks/loop/wake-desk.js";
+import { describeDetach, ForegroundRunner } from "./tasks/process/foreground.js";
 import { ProcessTasks, type ProcessTaskView } from "./tasks/process/process-tasks.js";
 import { loadTemplates } from "./tasks/process/templates.js";
 import { processTaskTools } from "./tasks/process/tools.js";
@@ -91,6 +97,8 @@ export interface ExtensionOptions {
 export interface ExtensionController {
   readonly loops: LoopTasks;
   readonly processTasks: ProcessTasks;
+  /** The commands still being waited for, and the one seam that lets them go. */
+  readonly foreground: ForegroundRunner;
   /** The queues that run process tasks one at a time (ADR-0013). */
   readonly chainTasks: ChainTasks;
   /** The wakes a fire produced that pi has not been given yet (ADR-0009). */
@@ -289,6 +297,15 @@ export function createExtension(
     },
   });
 
+  // A foreground run is not a task yet: the handle exists so that a key press or
+  // the configured deadline can end the wait without restarting anything
+  // (ADR-0020). With the timeout off, the shortcut is the only trigger.
+  const foreground = new ForegroundRunner({
+    tasks: processTasks,
+    detachAfterMs: settings.foregroundTimeoutMs,
+    now,
+  });
+
   /**
    * The queues that run process tasks in order (ADR-0013). A step is an ordinary
    * task, so the process store reports every step end here; the chain reads the
@@ -354,7 +371,30 @@ export function createExtension(
   pi.registerMessageRenderer(TASK_FINISHED_CUSTOM_TYPE, renderTaskFinished);
   pi.registerMessageRenderer(LOOP_SIGNAL_CUSTOM_TYPE, renderLoopSignal);
   pi.registerMessageRenderer(LOOP_WAKE_CUSTOM_TYPE, renderLoopWake);
-  registerTasksCommand(pi, processTasks, loops, chainTasks);
+  registerTasksCommand(pi, processTasks, loops, chainTasks, () => foreground.live().length);
+
+  // The takeover is opt-in and covers only what this extension spawns: a tool it
+  // does not own has its own process elsewhere, and nothing here can reach it.
+  // What it does reach is the whole foreground surface pi has — the bash and
+  // powershell tools, and the `!` commands — because all of them run on
+  // `BashOperations` (ADR-0020).
+  if (settings.adoptForeground) {
+    const operations = foreground.operations();
+    // The tool's own cwd comes from the call's context; this one is only the
+    // fallback for a caller that has none.
+    pi.registerTool(createBashTool(process.cwd(), { operations }));
+    if (process.platform === "win32") {
+      pi.registerTool(createPowerShellTool(process.cwd(), { operations }));
+    }
+    pi.on("user_bash", () => ({ operations }));
+    pi.registerShortcut("ctrl+shift+b", {
+      description: "Move the foreground command to the background",
+      handler: async (ctx) => {
+        const result = await foreground.detachOnlyOne();
+        ctx.ui.notify(describeDetach(result), result.kind === "detached" ? "info" : "warning");
+      },
+    });
+  }
 
   // The status line is the panel's lasting trace (ADR-0003): it has to exist
   // before anyone opens `/tasks`, and it has to follow the tasks it counts.
@@ -382,6 +422,8 @@ export function createExtension(
     const scope = scopeOf(ctx);
     statusUi = ctx.ui;
     statusScope = scope;
+    // A run starts inside a tool call, which carries no session of its own.
+    foreground.setScope(scope);
     uiAttached = ctx.hasUI === true;
     if (fresh) await publishStatus(ctx.ui, processTasks, loops, chainTasks, scope);
   };
@@ -420,6 +462,7 @@ export function createExtension(
     await loops.attach(scope);
     statusUi = ctx.ui;
     statusScope = scope;
+    foreground.setScope(scope);
     uiAttached = ctx.hasUI;
     // The line exists before the panel is ever opened; `/tasks` only refreshes it,
     // so the first paint is awaited rather than left to race the session start.
@@ -474,6 +517,7 @@ export function createExtension(
   return {
     loops,
     processTasks,
+    foreground,
     chainTasks,
     wakes,
     // A pump that lands while the agent is idle delivers in the same call, so a

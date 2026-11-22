@@ -50,6 +50,15 @@ export const DEFAULT_MAX_RUNNING_TASKS = 20;
 /** The running-task cap in whole tasks; see `docs/configuration.md`. */
 export const MAX_RUNNING_TASKS_ENV = "PI_PRETTY_TASK_MAX_RUNNING_TASKS";
 
+/** Whether the built-in shell tools and `!` commands are taken over: `on` or `off`. */
+export const ADOPT_FOREGROUND_ENV = "PI_PRETTY_TASK_ADOPT_FOREGROUND";
+
+/** Seconds a foreground run may hold the turn before it detaches; `0` keeps waiting. */
+export const DEFAULT_FOREGROUND_TIMEOUT_SECONDS = 0;
+
+/** The foreground detach timeout in whole seconds; see `docs/configuration.md`. */
+export const FOREGROUND_TIMEOUT_ENV = "PI_PRETTY_TASK_FOREGROUND_TIMEOUT";
+
 /** pi's own settings directory; `pretty-task.json` is read from it. */
 export const AGENT_DIR_ENV = "PI_CODING_AGENT_DIR";
 
@@ -63,6 +72,8 @@ const KNOWN_KEYS: readonly string[] = [
   SHELL_PATH_ENV,
   POSIX_SHELL_ENV,
   POSIX_SHELL_PATH_ENV,
+  ADOPT_FOREGROUND_ENV,
+  FOREGROUND_TIMEOUT_ENV,
 ];
 
 const KEY_PREFIX = "PI_PRETTY_TASK_";
@@ -83,6 +94,18 @@ export interface Settings {
    * ceiling (ADR-0014).
    */
   readonly maxRunningTasks: number;
+  /**
+   * Whether the built-in `bash`/`powershell` tools and `!` commands are taken
+   * over. Only a process this extension spawned carries a handle that can be let
+   * go, so without the takeover there is nothing to detach (ADR-0020).
+   */
+  readonly adoptForeground: boolean;
+  /**
+   * Milliseconds a foreground run may hold the turn before it detaches to a
+   * task; `0` never detaches, which is the default. The tool's own `timeout`
+   * parameter is a different thing: that one kills.
+   */
+  readonly foregroundTimeoutMs: number;
   /** Where the named templates are read from: the project first, then the agent dir. */
   readonly templatePaths: TemplateConfigPaths;
 }
@@ -119,6 +142,8 @@ export function readSettings(options: SettingsOptions = {}): Settings {
     notify: parseNotify(env),
     retentionDays: parseRetentionDays(env),
     maxRunningTasks: parseMaxRunningTasks(env),
+    adoptForeground: parseAdoptForeground(env),
+    foregroundTimeoutMs: parseForegroundTimeoutMs(env),
     templatePaths: templateConfigPaths(options.projectDir ?? process.cwd(), agentDir),
   };
 }
@@ -196,6 +221,42 @@ function parseMaxRunningTasks(env: NodeJS.ProcessEnv): number {
     );
   }
   return value;
+}
+
+/**
+ * Whether the foreground takeover is on. An absent key means off: overwriting a
+ * built-in tool is a change to how every command runs, so it is opted into.
+ */
+function parseAdoptForeground(env: NodeJS.ProcessEnv): boolean {
+  const raw = env[ADOPT_FOREGROUND_ENV];
+  if (raw === undefined || raw === "off") return false;
+  if (raw === "on") return true;
+  throw new Error(
+    `${ADOPT_FOREGROUND_ENV} does not accept ${JSON.stringify(raw)}; it is one of: on, off`,
+  );
+}
+
+/**
+ * The foreground detach timeout, in milliseconds. An absent key means off.
+ *
+ * `0` is accepted because "never detach on a timer" is the documented default
+ * and the plainest way to say it again. Everything else is a whole number of
+ * seconds: a fraction or a typo would otherwise become a timer nobody asked for
+ * (`Number("1.5m")` is `NaN`, and a `NaN` deadline fires immediately or never,
+ * depending on the comparison that reads it).
+ */
+function parseForegroundTimeoutMs(env: NodeJS.ProcessEnv): number {
+  const raw = env[FOREGROUND_TIMEOUT_ENV];
+  if (raw === undefined) return DEFAULT_FOREGROUND_TIMEOUT_SECONDS * 1000;
+  // A blank value is a typo, not zero: `0` is how "never on a timer" is written,
+  // and `Number("")` reads as `0`, which would turn an empty variable into off.
+  const seconds = raw.trim().length === 0 ? Number.NaN : Number(raw);
+  if (!Number.isSafeInteger(seconds) || seconds < 0) {
+    throw new Error(
+      `${FOREGROUND_TIMEOUT_ENV} must be a whole number of seconds, or 0 to keep a command in the foreground; received ${JSON.stringify(raw)}`,
+    );
+  }
+  return seconds * 1000;
 }
 
 /**

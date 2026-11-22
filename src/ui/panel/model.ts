@@ -57,11 +57,14 @@ export const DETAIL_FIELD_RESERVE = 11;
 export const DEFAULT_RENDER_ROWS = 50;
 
 /**
+/**
  * Rows a list frame spends besides its rows: the header bands (a query line
- * included), the box, the `Showing` line and the keys. The worst case, so a long
- * query can never push the rows out of the frame.
+ * included), the box, the `Showing` line, the hint above the keys and the keys
+ * themselves. The worst case, so a long query nor a command in front can push the
+ * rows out of the frame. The hint's row is reserved whether or not it is drawn:
+ * a takeover must not resize the list under the reader's cursor.
  */
-export const LIST_OVERHEAD_ROWS = 9;
+export const LIST_OVERHEAD_ROWS = 10;
 
 /**
  * Share of the terminal height the panel's overlay may take. The command builds
@@ -187,6 +190,12 @@ export interface PanelSource {
    * anything (a read-only view), in which case `R` says so instead of failing.
    */
   rerun?(id: string): Promise<PanelTaskView | undefined>;
+  /**
+   * How many commands pi is still waiting on in this session. They are not tasks
+   * yet, so they have no row: the hint above the keys is their only trace, and it
+   * names the shortcut that moves one away (ADR-0020).
+   */
+  foreground?(): number;
 }
 
 /**

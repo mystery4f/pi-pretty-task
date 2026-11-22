@@ -436,6 +436,45 @@ describe("task list", () => {
   });
 });
 
+describe("the command in front", () => {
+  it("names the shortcut above the keys while pi waits on one", async () => {
+    const source = Object.assign(new FakeSource(), { foreground: () => 1 });
+    const { panel, drawn } = openPanel(source, () => 13_000);
+    await panel.settle();
+
+    // Not a row: a foreground run has no record yet, so the hint is all it gets.
+    expect(drawn()).toContain("1 command in front");
+    expect(drawn()).toContain("ctrl+shift+b");
+
+    panel.dispose();
+  });
+
+  it("says how many are waiting, and draws nothing when none is", async () => {
+    let inFront = 2;
+    const source = Object.assign(new FakeSource(), { foreground: () => inFront });
+    const { panel, drawn } = openPanel(source, () => 13_000);
+    await panel.settle();
+    expect(drawn()).toContain("2 commands in front");
+
+    inFront = 0;
+    await panel.settle();
+    expect(drawn()).not.toContain("in front");
+
+    panel.dispose();
+  });
+
+  it("stays out of the frame for a source that cannot see foreground runs", async () => {
+    // A read-only view — another session's store, or the panel of a build without
+    // the takeover — must not advertise a key it does not have.
+    const { panel, drawn } = openPanel(new FakeSource(), () => 13_000);
+    await panel.settle();
+
+    expect(drawn()).not.toContain("ctrl+shift+b");
+
+    panel.dispose();
+  });
+});
+
 describe("detail view", () => {
   it("opens on Enter with a process task's metadata and its last 12 output lines", async () => {
     const source = new FakeSource();

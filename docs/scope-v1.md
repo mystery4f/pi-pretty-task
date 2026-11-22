@@ -22,6 +22,7 @@
 | 输出落盘 | `.pi/tasks/<sessionId>-<pid>/<taskId>.output` + `.json` | 低 | 低 |
 | 输出上限 | 单任务默认 20MiB（`PI_PRETTY_TASK_OUTPUT_CAP_BYTES` 可配置，启动时校验），超限后截断并以 `output_cap` 终止 | 低 | 低（上游此处有 NaN 缺陷，我们在入口校验） |
 | 运行超时 | `pretty_task_bg_run` 可选 `timeoutSeconds`，到点以 `timeout` 终止；默认不设超时 | 低 | 低：避免误杀验收里的 10 分钟长任务 |
+| 前台命令改道（Detached） | 覆盖内置 `bash`/`powershell` 与 `!` 命令，由本扩展 spawn；快捷键或 `PI_PRETTY_TASK_FOREGROUND_TIMEOUT` 到点后不再等待，进程照跑并落成带 `origin: "foreground"` 的 Process task（ADR-0020，覆盖默认关闭） | 中（覆盖内置工具 + 前台登记 + 改道接缝） | 中：覆盖 bash 出错就砸在 agent 主工具上 |
 | 完成通知 | `registerMessageRenderer` 渲染完成卡片 | 低 | 低 |
 
 ### Task · `kind: "loop"`（定时唤醒）与其子记录 Iteration
@@ -70,6 +71,7 @@
 | 六段 cron（带秒） | 秒级语义只由间隔写法承担，两套调度语义会互相打架 | 无（ADR-0006 已明确拒绝） | — |
 | event / idle 触发 | 事件源语义（哪些事件、怎么去抖）需要单独设计；**时钟驱动的「订阅」已由 ADR-0018 收进 cmd loop，此处只剩不靠时钟的触发源** | 定时触发验证完成后；出现文件变化/webhook/idle 这类触发源的刚需时 | 中 |
 | 重启后进程接管/复活 | 跨会话接管进程的收益低、误杀风险高 | 明确出现“长任务跨重启”刚需 | 高 |
+| 任意外来工具转后台（MCP、自定义工具） | 改道需要子进程句柄；`tool_call` 在 execute 之前触发，外来工具起来之后无从接管（ADR-0020 明确不做） | pi 提供「工具调用脱离本轮继续跑」的原语，且该工具自身暴露句柄或阶段式结果 | 高（依赖上游） |
 | `.pi/tasks/` TTL 自动清理 | 只读恢复已能消除“面板消失”的痛点；清理涉及误删风险 | 磁盘目录体量成为实际困扰时 | 低 |
 | 重叠执行策略（`overlap: skip｜queue｜allow`） | 唤醒型 Loop 没有“上一次还在跑”的命令并发问题，只有排队 | 引入 shell 型 Loop 时一并设计 | 中 |
 | 亚秒级 / 最小 1s 边界 | 唤醒 LLM 的最小有意义周期远大于 1s | 无（属于无意义优化） | — |

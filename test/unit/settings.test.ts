@@ -10,10 +10,13 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
+  ADOPT_FOREGROUND_ENV,
   AGENT_DIR_ENV,
+  DEFAULT_FOREGROUND_TIMEOUT_SECONDS,
   DEFAULT_MAX_RUNNING_TASKS,
   DEFAULT_OUTPUT_CAP_BYTES,
   DEFAULT_RETENTION_DAYS,
+  FOREGROUND_TIMEOUT_ENV,
   MAX_RUNNING_TASKS_ENV,
   NOTIFY_ENV,
   OUTPUT_CAP_ENV,
@@ -190,5 +193,45 @@ describe("settings", () => {
     expect(() => readSettings({ env: { [RETENTION_DAYS_ENV]: "1.5" }, platform: "linux" })).toThrow(
       /received "1.5"/,
     );
+  });
+});
+
+describe("foreground takeover", () => {
+  it("stays off until the environment turns it on", () => {
+    const settings = readSettings({ env: {}, platform: "linux" });
+    expect(settings.adoptForeground).toBe(false);
+    expect(settings.foregroundTimeoutMs).toBe(DEFAULT_FOREGROUND_TIMEOUT_SECONDS * 1_000);
+    expect(DEFAULT_FOREGROUND_TIMEOUT_SECONDS).toBe(0);
+  });
+
+  it("reads both values from the environment", () => {
+    const settings = readSettings({
+      env: { [ADOPT_FOREGROUND_ENV]: "on", [FOREGROUND_TIMEOUT_ENV]: "90" },
+      platform: "linux",
+    });
+    expect(settings.adoptForeground).toBe(true);
+    expect(settings.foregroundTimeoutMs).toBe(90_000);
+  });
+
+  it("refuses a takeover value that is not one of the two words", () => {
+    // A typo such as `true` must not quietly take over pi's shell tools: the
+    // takeover changes how every command runs, so it has to be asked for.
+    for (const raw of ["true", "ON ", "1", "yes", ""]) {
+      expect(() =>
+        readSettings({ env: { [ADOPT_FOREGROUND_ENV]: raw }, platform: "linux" }),
+      ).toThrow(/PI_PRETTY_TASK_ADOPT_FOREGROUND does not accept/);
+    }
+  });
+
+  it("refuses a timeout that is not whole seconds, and keeps 0 for off", () => {
+    expect(
+      readSettings({ env: { [FOREGROUND_TIMEOUT_ENV]: "0" }, platform: "linux" })
+        .foregroundTimeoutMs,
+    ).toBe(0);
+    for (const raw of ["-5", "1.5", "minute", ""]) {
+      expect(() =>
+        readSettings({ env: { [FOREGROUND_TIMEOUT_ENV]: raw }, platform: "linux" }),
+      ).toThrow(/PI_PRETTY_TASK_FOREGROUND_TIMEOUT must be a whole number of seconds/);
+    }
   });
 });
