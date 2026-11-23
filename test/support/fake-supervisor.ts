@@ -42,6 +42,7 @@ export function fakeSupervisor(): FakeSupervisor {
     const exit = new Promise<ProcessExit>((resolve) => {
       settle = resolve;
     });
+    let ended = false;
     const fake: FakeProcess = {
       options,
       stops: 0,
@@ -51,6 +52,7 @@ export function fakeSupervisor(): FakeSupervisor {
         exit,
         bytesWritten: () => 0,
         signalled: () => fake.stops > 0,
+        hasExited: () => ended,
         stop: async () => {
           fake.stops += 1;
           if (fake.survive) {
@@ -58,12 +60,14 @@ export function fakeSupervisor(): FakeSupervisor {
           }
           // A killed command exits on its own just after the answer.
           setImmediate(() => {
+            ended = true;
             settle({ exitCode: null, signal: "SIGTERM" });
           });
           return { outcome: "stopped", tookMs: 1 };
         },
       },
       end: (exitCode = 0) => {
+        ended = true;
         settle({ exitCode, signal: null });
       },
     };

@@ -20,8 +20,15 @@ import type {
 } from "../../src/tasks/process/supervisor.js";
 
 /** A command the test ends by hand. */
-function fakeProcess(): { running: RunningProcess; end(exitCode?: number | null): void } {
+function fakeProcess(): {
+  running: RunningProcess;
+  end(exitCode?: number | null): void;
+  /** How many stops reached the command; a run that was let go must see none. */
+  stops(): number;
+} {
   let settle: (exit: ProcessExit) => void = () => {};
+  let ended = false;
+  let stops = 0;
   const exit = new Promise<ProcessExit>((resolve) => {
     settle = resolve;
   });
@@ -30,12 +37,18 @@ function fakeProcess(): { running: RunningProcess; end(exitCode?: number | null)
       pid: 4242,
       exit,
       bytesWritten: () => 0,
-      stop: () => Promise.resolve<StopResult>({ outcome: "stopped", tookMs: 0 }),
-      signalled: () => false,
+      stop: () => {
+        stops += 1;
+        return Promise.resolve<StopResult>({ outcome: "stopped", tookMs: 0 });
+      },
+      signalled: () => stops > 0,
+      hasExited: () => ended,
     },
     end: (exitCode = 0) => {
+      ended = true;
       settle({ exitCode, signal: null });
     },
+    stops: () => stops,
   };
 }
 
@@ -43,6 +56,7 @@ function makeRun(detachAfterMs = 0): ForegroundRun {
   return new ForegroundRun({
     id: "bg-7",
     sessionId: "session-1",
+    sessionCwd: "/work",
     command: "node build.js",
     workingDirectory: "/work",
     outputPath: "/work/.pi/pretty-task/output/bg-7.log",
@@ -116,9 +130,30 @@ describe("foreground run", () => {
       bytesWritten: () => 0,
       stop: () => Promise.resolve<StopResult>({ outcome: "stopped", tookMs: 0 }),
       signalled: () => false,
+      hasExited: () => false,
     });
     const outcome: ForegroundOutcome = await run.settled;
     expect(outcome).toEqual({ kind: "failed", message: "spawn EPERM" });
+  });
+
+  it("leaves the process alone when the caller withdraws after a detach", () => {
+    // The key press already told the caller to follow a task; a late abort from the
+    // same call must not stop the tree it handed over.
+    const run = makeRun();
+    const process = fakeProcess();
+    run.bind(process.running);
+    expect(run.finish({ kind: "detached", taskId: "bg-7" })).toBe(true);
+    run.abort();
+    expect(process.stops()).toBe(0);
+  });
+
+  it("ignores an expiry that arrives after the run ended", () => {
+    const run = makeRun();
+    const process = fakeProcess();
+    run.bind(process.running);
+    run.finish({ kind: "exited", exitCode: 0 });
+    run.expire(30);
+    expect(process.stops()).toBe(0);
   });
 });
 

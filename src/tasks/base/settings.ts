@@ -18,6 +18,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
+import { MAX_TIMEOUT_MS } from "../process/limits.js";
 import {
   type CommandRunner,
   type ExecutableProbe,
@@ -59,6 +60,9 @@ export const DEFAULT_FOREGROUND_TIMEOUT_SECONDS = 0;
 
 /** The foreground detach timeout in whole seconds; see `docs/configuration.md`. */
 export const FOREGROUND_TIMEOUT_ENV = "PI_PRETTY_TASK_FOREGROUND_TIMEOUT";
+
+/** Longest detach delay `setTimeout` counts, in whole seconds; a longer one fires at once. */
+export const MAX_FOREGROUND_TIMEOUT_SECONDS = Math.floor(MAX_TIMEOUT_MS / 1000);
 
 /** pi's own settings directory; `pretty-task.json` is read from it. */
 export const AGENT_DIR_ENV = "PI_CODING_AGENT_DIR";
@@ -254,9 +258,9 @@ function parseForegroundTimeoutMs(env: NodeJS.ProcessEnv): number {
   // A blank value is a typo, not zero: `0` is how "never on a timer" is written,
   // and `Number("")` reads as `0`, which would turn an empty variable into off.
   const seconds = raw.trim().length === 0 ? Number.NaN : Number(raw);
-  if (!Number.isSafeInteger(seconds) || seconds < 0) {
+  if (!Number.isSafeInteger(seconds) || seconds < 0 || seconds > MAX_FOREGROUND_TIMEOUT_SECONDS) {
     throw new Error(
-      `${FOREGROUND_TIMEOUT_ENV} must be a whole number of seconds, or 0 to keep a command in the foreground; received ${JSON.stringify(raw)}`,
+      `${FOREGROUND_TIMEOUT_ENV} must be a whole number of seconds no larger than ${String(MAX_FOREGROUND_TIMEOUT_SECONDS)}, or 0 to keep a command in the foreground; received ${JSON.stringify(raw)}`,
     );
   }
   return seconds * 1000;

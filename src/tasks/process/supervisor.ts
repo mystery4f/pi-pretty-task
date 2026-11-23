@@ -67,6 +67,12 @@ export interface RunningProcess {
   stop(options?: StopProcessOptions): Promise<StopResult>;
   /** True once a stop signal was actually delivered to the tree. */
   signalled(): boolean;
+  /**
+   * True once the process is gone, including when a stop ended it. A caller that
+   * adopted the process has to know the tree is still there before it hands it to
+   * a task; an exit that already happened belongs in front of the reader instead.
+   */
+  hasExited(): boolean;
 }
 
 export interface StartProcessOptions {
@@ -229,6 +235,7 @@ export function startProcess(options: StartProcessOptions): RunningProcess {
     bytesWritten: () => bytesWritten,
     stop,
     signalled: () => signalled,
+    hasExited: () => exited,
   };
 }
 

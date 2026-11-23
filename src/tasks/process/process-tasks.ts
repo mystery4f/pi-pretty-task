@@ -99,9 +99,6 @@ export interface AdoptForegroundInput extends TaskScope {
   readonly reservation: ForegroundReservation;
   /** The process already running: the one thing a detach hands over. */
   readonly running: RunningProcess;
-  /** Kill deadline the foreground call itself carried, in milliseconds. */
-  /** Kill deadline the foreground call itself carried, in milliseconds. */
-  readonly timeoutMs?: number;
   /**
    * When the process itself started, before it was a task. The record's age and
    * its `createdAt` come from here, so a caller reporting a detached command does
@@ -530,7 +527,6 @@ export class ProcessTasks {
     this.book(session, task, input.running);
     task.outputBytes = input.running.bytesWritten();
     await this.persist(session);
-    this.scheduleRuntimeCap(session, task.id, input.timeoutMs);
     return task;
   }
 

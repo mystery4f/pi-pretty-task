@@ -17,12 +17,14 @@ import {
   DEFAULT_OUTPUT_CAP_BYTES,
   DEFAULT_RETENTION_DAYS,
   FOREGROUND_TIMEOUT_ENV,
+  MAX_FOREGROUND_TIMEOUT_SECONDS,
   MAX_RUNNING_TASKS_ENV,
   NOTIFY_ENV,
   OUTPUT_CAP_ENV,
   RETENTION_DAYS_ENV,
   readSettings,
 } from "../../src/tasks/base/settings.js";
+import { MAX_TIMEOUT_MS } from "../../src/tasks/process/limits.js";
 import { POSIX_SHELL_ENV, SHELL_ENV, SHELL_PATH_ENV } from "../../src/tasks/process/shell.js";
 import { createHarness } from "../support/extension-harness.js";
 
@@ -263,5 +265,25 @@ describe("foreground takeover", () => {
         }),
       ).toThrow(/PI_PRETTY_TASK_FOREGROUND_TIMEOUT must be a whole number of seconds/);
     }
+  });
+
+  it("refuses a timeout longer than setTimeout can count", () => {
+    // Past the engine's ceiling the timer fires at once, which would turn "detach
+    // after N minutes" into "detach every command immediately".
+    expect(MAX_FOREGROUND_TIMEOUT_SECONDS).toBe(Math.floor(MAX_TIMEOUT_MS / 1000));
+    expect(
+      readSettings({
+        env: { [FOREGROUND_TIMEOUT_ENV]: String(MAX_FOREGROUND_TIMEOUT_SECONDS) },
+        platform: "linux",
+        probe: () => true,
+      }).foregroundTimeoutMs,
+    ).toBe(MAX_FOREGROUND_TIMEOUT_SECONDS * 1000);
+    expect(() =>
+      readSettings({
+        env: { [FOREGROUND_TIMEOUT_ENV]: String(MAX_FOREGROUND_TIMEOUT_SECONDS + 1) },
+        platform: "linux",
+        probe: () => true,
+      }),
+    ).toThrow(/no larger than/);
   });
 });

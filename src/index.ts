@@ -509,6 +509,9 @@ export function createExtension(
     await wakes.settled();
   });
   pi.on("session_shutdown", () => {
+    // Let the commands still in front go while the store is still open: a run left
+    // here unrecorded outlives the extension as a tree with no id to look up (ADR-0020).
+    void foreground.releaseAll();
     stopTimer();
     statusUi = undefined;
     statusScope = undefined;

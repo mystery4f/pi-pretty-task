@@ -240,7 +240,7 @@ Unknown template "tset". Known templates: "lint", "test". The task was not start
 | 键 | 取值 | 默认 | 说明 |
 |---|---|---|---|
 | `PI_PRETTY_TASK_ADOPT_FOREGROUND` | `on`、`off` | `off` | 覆盖内置 shell 工具并接管 `!` 命令 |
-| `PI_PRETTY_TASK_FOREGROUND_TIMEOUT` | 正整数秒，或 `0` | `0` | 前台命令跑到该秒数自动改道；`0` 为关 |
+| `PI_PRETTY_TASK_FOREGROUND_TIMEOUT` | 正整数秒（上限 2147483），或 `0` | `0` | 前台命令跑到该秒数自动改道；`0` 为关 |
 
 快捷键 `ctrl+shift+b` 只对唯一一条在跑的前台命令生效：并行工具调用时按键只给一条提示，不改道。改道的命令不重跑、不换 PID，输出继续写到 `.pi/tasks/` 下的任务文件；它计入同时运行的任务上限，撞上限时改道失败、命令留在前台继续跑。`PI_PRETTY_TASK_FOREGROUND_TIMEOUT` 与内置 `timeout` 参数是两件事：前者「放它走」，后者「到点就杀」，Esc 仍是杀。
 

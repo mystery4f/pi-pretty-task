@@ -106,6 +106,8 @@ export function describeDetach(result: DetachResult): string {
 export class ForegroundRun {
   readonly id: string;
   readonly sessionId: string;
+  /** Directory the session lives in; a detached record belongs here, not in the command's. */
+  readonly sessionCwd: string;
   readonly command: string;
   readonly workingDirectory: string;
   readonly outputPath: string;
@@ -124,6 +126,7 @@ export class ForegroundRun {
   constructor(fields: {
     readonly id: string;
     readonly sessionId: string;
+    readonly sessionCwd: string;
     readonly command: string;
     readonly workingDirectory: string;
     readonly outputPath: string;
@@ -132,6 +135,7 @@ export class ForegroundRun {
   }) {
     this.id = fields.id;
     this.sessionId = fields.sessionId;
+    this.sessionCwd = fields.sessionCwd;
     this.command = fields.command;
     this.workingDirectory = fields.workingDirectory;
     this.outputPath = fields.outputPath;
@@ -195,12 +199,18 @@ export class ForegroundRun {
 
   /** The caller withdrew: stop the tree and report the withdrawal. */
   abort(): void {
+    // A run that already ended has nothing to withdraw: after a detach the process
+    // belongs to a task the caller was told to follow, and a late abort from the
+    // same call must not stop it (ADR-0020).
+    if (this.done) return;
     this.killIntent = "aborted";
     void this.process?.stop();
   }
 
   /** The call's own timeout ran out: stop the tree and report the timeout. */
   expire(seconds: number): void {
+    // Same rule as an abort: a detached command is no longer this call's to stop.
+    if (this.done) return;
     this.killIntent = { seconds };
     void this.process?.stop();
   }
@@ -240,6 +250,11 @@ export class ForegroundRunner {
     return [...this.runs.values()].filter((run) => !run.done);
   }
 
+  /** How many runs the runner still holds; a finished one must not stay. */
+  get held(): number {
+    return this.runs.size;
+  }
+
   /**
    * Spawn a command in the foreground and hand back the handle.
    *
@@ -257,6 +272,7 @@ export class ForegroundRunner {
     const run = new ForegroundRun({
       id: reservation.id,
       sessionId: input.sessionId,
+      sessionCwd: input.cwd,
       command: input.command,
       workingDirectory: reservation.cwd,
       outputPath: reservation.outputPath,
@@ -281,6 +297,10 @@ export class ForegroundRunner {
     });
     run.bind(process);
     this.runs.set(run.id, run);
+
+    // The table holds waits, not history: a run leaves it the moment it ends, or the
+    // session's every command would keep its process handle reachable (ADR-0020).
+    void run.settled.then(() => this.runs.delete(run.id));
     this.armTimers(run, input.timeoutSeconds);
     return run;
   }
@@ -307,8 +327,12 @@ export class ForegroundRunner {
           ...(options.env !== undefined ? { env: options.env } : {}),
           ...(options.timeout !== undefined ? { timeoutSeconds: options.timeout } : {}),
         });
-        if (options.signal?.aborted === true) run.abort();
-        else options.signal?.addEventListener("abort", () => run.abort(), { once: true });
+        const withdraw = (): void => run.abort();
+        if (options.signal?.aborted === true) withdraw();
+        else options.signal?.addEventListener("abort", withdraw, { once: true });
+        // The listener goes with the wait: a signal that arrives after a detach must
+        // not reach a run that no longer has anything to withdraw.
+        void run.settled.then(() => options.signal?.removeEventListener("abort", withdraw));
         return this.awaitRun(run, options.onData);
       },
     };
@@ -337,10 +361,14 @@ export class ForegroundRunner {
     if (run.done) return { kind: "nothing" };
     const process = run.running;
     if (process === undefined) return { kind: "nothing" };
+    // The process can end between the caller's key press and this line; adopting it
+    // then would report a failure as a successful detach, with no exit code in the
+    // transcript. Leaving the wait alone keeps the real code in front of the reader.
+    if (process.hasExited()) return { kind: "nothing" };
     if (!run.beginDetach()) return { kind: "pending" };
     try {
       const task = await this.tasks.adoptForeground({
-        cwd: run.workingDirectory,
+        cwd: run.sessionCwd,
         sessionId: run.sessionId,
         command: run.command,
         reservation: {
@@ -354,12 +382,20 @@ export class ForegroundRunner {
         startedAt: run.startedAt,
       });
       run.finish({ kind: "detached", taskId: task.id });
-      this.runs.delete(run.id);
       return { kind: "detached", taskId: task.id };
     } catch (error) {
       run.abandonDetach();
       return { kind: "refused", message: errorMessage(error) };
     }
+  }
+
+  /**
+   * Let every command still in front go, for a shutdown. A detached run leaves a
+   * record and an id to follow after the reload; a run nobody adopted leaves
+   * neither, and its tree outlives the extension as an orphan (ADR-0020).
+   */
+  async releaseAll(): Promise<void> {
+    await Promise.all(this.live().map((run) => this.detach(run)));
   }
 
   /** Arm the call's own timeout and the configured detach deadline, in that order. */
