@@ -41,6 +41,12 @@ export interface StopResult {
   readonly outcome: StopOutcome;
   /** Milliseconds from the stop request to this answer. */
   readonly tookMs: number;
+  /**
+   * How long the polite signal was allowed to wait, and `0` when nothing was
+   * signalled. Worth carrying: the same command stops in a second or in ten
+   * depending on this number, so a result that names it needs no inference.
+   */
+  readonly graceMs: number;
   /** What the system said, when the tree could not be confirmed gone. */
   readonly detail?: string;
 }
@@ -197,7 +203,7 @@ export function startProcess(options: StartProcessOptions): RunningProcess {
     const pid = child.pid;
     if (pid === undefined || exited || !isTreeAlive(platform, pid)) {
       // Nothing to signal. A command that already ended is answered, not an error.
-      return { outcome: "already-exited", tookMs: Date.now() - startedAt };
+      return { outcome: "already-exited", tookMs: Date.now() - startedAt, graceMs: 0 };
     }
 
     const graceMs = Math.max(0, stopOptions.graceMs ?? KILL_GRACE_MS);
@@ -206,17 +212,18 @@ export function startProcess(options: StartProcessOptions): RunningProcess {
     signalled = true;
     const refusal = await signalTree(platform, "polite", pid, child, env);
     if (await waitForTreeGone(platform, pid, graceMs)) {
-      return { outcome: "stopped", tookMs: Date.now() - startedAt };
+      return { outcome: "stopped", tookMs: Date.now() - startedAt, graceMs };
     }
 
     const forcedRefusal = await signalTree(platform, "force", pid, child, env);
     if (await waitForTreeGone(platform, pid, confirmMs)) {
-      return { outcome: "stopped", tookMs: Date.now() - startedAt };
+      return { outcome: "stopped", tookMs: Date.now() - startedAt, graceMs };
     }
 
     return {
       outcome: "tree-survived",
       tookMs: Date.now() - startedAt,
+      graceMs,
       detail:
         firstLine(forcedRefusal) ??
         firstLine(refusal) ??

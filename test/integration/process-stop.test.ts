@@ -216,13 +216,14 @@ describe("the waits a stop spends", () => {
     const task = await tasks.start({ ...scope, command, name: "narrow" });
     if (task.pid !== undefined) spawned.push(task.pid);
 
-    const started = Date.now();
     const result = await tasks.stop(scope, task.id, { reason: "user" });
 
     expect(result?.outcome).toBe("killed");
     expect(result?.view.task.status).toBe("killed");
     // The default would have spent KILL_GRACE_MS waiting before the force; the
-    // store's own setting is what reached the supervisor instead.
-    expect(Date.now() - started).toBeLessThan(KILL_GRACE_MS);
+    // store's own setting is what reached the supervisor instead. The answer
+    // names that grace, so no wall clock has to: a loaded machine can spend
+    // seconds inside `taskkill` without any of them being the grace.
+    expect(result?.graceMs).toBe(TEST_KILL_GRACE_MS);
   });
 });

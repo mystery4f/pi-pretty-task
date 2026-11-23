@@ -56,14 +56,19 @@ export function fakeSupervisor(): FakeSupervisor {
         stop: async () => {
           fake.stops += 1;
           if (fake.survive) {
-            return { outcome: "tree-survived", tookMs: 1, detail: "the tree did not answer" };
+            return {
+              outcome: "tree-survived",
+              tookMs: 1,
+              graceMs: 1,
+              detail: "the tree did not answer",
+            };
           }
           // A killed command exits on its own just after the answer.
           setImmediate(() => {
             ended = true;
             settle({ exitCode: null, signal: "SIGTERM" });
           });
-          return { outcome: "stopped", tookMs: 1 };
+          return { outcome: "stopped", tookMs: 1, graceMs: 1 };
         },
       },
       end: (exitCode = 0) => {

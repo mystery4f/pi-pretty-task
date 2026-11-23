@@ -39,7 +39,7 @@ function fakeProcess(): {
       bytesWritten: () => 0,
       stop: () => {
         stops += 1;
-        return Promise.resolve<StopResult>({ outcome: "stopped", tookMs: 0 });
+        return Promise.resolve<StopResult>({ outcome: "stopped", tookMs: 0, graceMs: 0 });
       },
       signalled: () => stops > 0,
       hasExited: () => ended,
@@ -128,7 +128,7 @@ describe("foreground run", () => {
       pid: undefined,
       exit: Promise.reject(new Error("spawn EPERM")),
       bytesWritten: () => 0,
-      stop: () => Promise.resolve<StopResult>({ outcome: "stopped", tookMs: 0 }),
+      stop: () => Promise.resolve<StopResult>({ outcome: "stopped", tookMs: 0, graceMs: 0 }),
       signalled: () => false,
       hasExited: () => false,
     });

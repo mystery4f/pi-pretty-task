@@ -135,6 +135,11 @@ export interface StopTaskResult {
   outcome: StopTaskOutcome;
   /** Milliseconds the stop took. */
   tookMs: number;
+  /**
+   * How long the polite signal was allowed to wait. Absent when nothing was
+   * signalled, because a command that had already ended never reached a grace.
+   */
+  graceMs?: number;
   /** What the system said, when the tree could not be confirmed gone. */
   detail?: string;
 }
@@ -908,6 +913,7 @@ export class ProcessTasks {
         view: this.view(session, task),
         outcome: STOP_OUTCOMES[stopped.outcome],
         tookMs: stopped.tookMs,
+        graceMs: stopped.graceMs,
         detail: stopped.detail,
       };
     }
@@ -925,6 +931,7 @@ export class ProcessTasks {
       view: this.view(session, task),
       outcome: STOP_OUTCOMES[stopped.outcome],
       tookMs: stopped.tookMs,
+      graceMs: stopped.graceMs,
       detail: stopped.detail,
     };
   }
