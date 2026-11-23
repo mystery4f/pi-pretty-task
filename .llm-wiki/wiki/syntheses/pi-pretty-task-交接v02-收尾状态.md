@@ -85,4 +85,18 @@ GitHub 是通过 `HTTPS_PROXY=http://mcr:4444` 恢复的（早前 `gh` 与 `curl
 - 预览图：`docs/preview.gif` 变成十一帧，头两帧就是改道（`detach:start` 有提示行，`detach:ctrl+shift+b` 提示消失、任务进列表）；`scripts/preview/dump.mjs`（`npm run preview:dump`，`--only detach`）不开浏览器就能看帧，`PREVIEW_FRAMES=1 npm run preview` 保留每帧 PNG；`docs/previews.md` 已同步。
 - 闸门实测：`npm run check` 0、`npx --no-install biome check .` 0、`npm run test` 39 文件 479 条全绿（2026-11-22 21:41）。跑前先清 `%TEMP%\pi-pretty-task-*` 的孤儿 node，否则集成测试会被拖成超时假红——这是这台机器的老毛病，不是代码。
 - 顺带修的测试债：`test/support/extension-harness.ts` 现在默认用 `process.env` 去掉所有 `PI_PRETTY_TASK_*`。这台机器有用户级 `PI_PRETTY_TASK_SHELL=bash`，会让 `process-shell` 里 `type result.txt` 这类 cmd 断言假红；组件测试不该读开发机的全局覆盖。
-- 未做：版本号仍是 `1.0.7`，没发版、没推送。
+- 未做：版本号仍是 `1.0.7`，没发版。
+
+## 2026-11-24 改道的审查修复（`6dbd0da`）
+
+审 `v1.0.7..HEAD` 找到六条，全部修掉：
+
+- 超时键原来没有上界：`seconds * 1000` 超过 `MAX_TIMEOUT_MS` 时 Node 把延时钳到 1ms，「跑满 N 分钟才改道」变成「每条命令瞬间改道」。现在 `settings.ts` 用 `MAX_FOREGROUND_TIMEOUT_SECONDS = Math.floor(MAX_TIMEOUT_MS / 1000)` 拒绝更大的值。
+- `ForegroundRun.abort()` / `expire()` 不检查 `done`：改道成功后同一个 `AbortSignal` 再 abort 会把已放走的任务杀掉。两处都加了 `if (this.done) return;`，`operations()` 的监听器随 `settled` 摘掉。
+- 运行表只在改道成功时 delete：接管模式下每条命令都留一个 `ForegroundRun` 与进程句柄。现在 `start()` 里挂 `void run.settled.then(() => this.runs.delete(run.id))`，并加了只读的 `held` 供测试断言。
+- `detach()` 传的是命令目录（`run.workingDirectory`）当会话目录，而 `ProcessTasks.session()` 用 `scope.cwd` 拼会话目录：命令在子目录跑时记录写进另一处。`ForegroundRun` 现在带 `sessionCwd`（来自 `StartForegroundInput.cwd`），adopt 用会话目录。
+- 退出竞态：`RunningProcess` 新增 `hasExited()`，`detach()` 在 adopt 前先问它，已退出的进程不再被「改道」成 exit 0。
+- 关停遗留孤儿：`ForegroundRunner.releaseAll()` + `session_shutdown` 里 `void foreground.releaseAll()`，重载后仍能按 id 追。
+- 顺带删掉 `AdoptForegroundInput.timeoutMs`（没人传，`scheduleRuntimeCap` 永远 no-op）和那行写了两遍的注释。
+
+新测试：`test/unit/foreground-runner.test.ts`（运行表回收、会话目录 vs 命令目录、拒绝二次 adopt、releaseAll、已退出不改道），`foreground-run.test.ts` 加「改道后 abort 不杀进程」「结束后 expire 无效」，`settings.test.ts` 加超时上界。闸门：`npm run check` 0、biome 0、全量 495 条里 494 过（`task-persistence` 的 history 与 `process-stop` 的等待窗口各命中一次这台机器的老 flake，单文件复跑均绿）。
