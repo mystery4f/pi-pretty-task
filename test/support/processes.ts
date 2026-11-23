@@ -95,7 +95,10 @@ const WAIT_POLL_MS = 5;
 export async function waitFor(
   what: string,
   predicate: () => Promise<boolean> | boolean,
-  timeoutMs = 30_000,
+  // Shorter than vitest's own 30s ceiling on purpose: this wait's error names
+  // what it was waiting for, and vitest's does not — losing the race to it
+  // turns a diagnostic into "Test timed out in 30000ms".
+  timeoutMs = 20_000,
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {

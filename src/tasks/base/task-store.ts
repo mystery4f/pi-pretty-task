@@ -383,6 +383,21 @@ async function writeAtomic(path: string, data: string): Promise<void> {
 const RENAME_ATTEMPTS = 10;
 /** Long enough for a scan or a polling reader to let go, short enough to be invisible. */
 const RENAME_DELAY_MS = 10;
+/**
+ * How many times a whole generation is written before the store lets it go. A
+ * finished task writes once, so a write that gives up leaves the file behind
+ * for good — three attempts cover a scan, a lock and a slow directory entry.
+ */
+const WRITE_ATTEMPTS = 3;
+/** Base pause between two writes of the same generation; it grows by attempt. */
+const WRITE_RETRY_MS = 50;
+
+/** Wait without a timer handle of its own in the caller's hands. */
+function pause(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
 
 export interface RenameRetryOptions {
   readonly attempts?: number;
@@ -658,17 +673,28 @@ export class TaskStore {
   }
 
   private async writeGeneration(generation: string): Promise<void> {
-    try {
-      // Both generation files land here, so the directory exists before the
-      // first one is written — this is the only place that creates it.
-      await this.ensureDirectory();
-      if (this.lastGeneration !== undefined && this.lastGeneration !== generation) {
-        await writeAtomic(previousTaskRecordPath(this.directory), this.lastGeneration);
+    // A rename over a record that another process has open fails on Windows, and
+    // a task that just finished may never write again: retry the same generation
+    // a few times before letting it go, or a transient lock would leave the file
+    // a generation behind for the rest of the session.
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        // Both generation files land here, so the directory exists before the
+        // first one is written — this is the only place that creates it.
+        await this.ensureDirectory();
+        if (this.lastGeneration !== undefined && this.lastGeneration !== generation) {
+          await writeAtomic(previousTaskRecordPath(this.directory), this.lastGeneration);
+        }
+        await writeAtomic(taskRecordPath(this.directory), generation);
+        this.lastGeneration = generation;
+        return;
+      } catch {
+        if (attempt >= WRITE_ATTEMPTS) {
+          // The records stay correct in memory; a later save starts over.
+          return;
+        }
+        await pause(WRITE_RETRY_MS * attempt);
       }
-      await writeAtomic(taskRecordPath(this.directory), generation);
-      this.lastGeneration = generation;
-    } catch {
-      // The records stay correct in memory; the next write tries again.
     }
   }
 
