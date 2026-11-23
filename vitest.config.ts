@@ -34,7 +34,7 @@ const shared = {
   // Eight is the cap; `--maxWorkers` on the command line still wins for a run
   // that wants another number.
   maxWorkers: Math.min(8, availableParallelism()),
-} as const;
+};
 export default defineConfig({
   test: {
     projects: [
