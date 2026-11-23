@@ -100,3 +100,11 @@ GitHub 是通过 `HTTPS_PROXY=http://mcr:4444` 恢复的（早前 `gh` 与 `curl
 - 顺带删掉 `AdoptForegroundInput.timeoutMs`（没人传，`scheduleRuntimeCap` 永远 no-op）和那行写了两遍的注释。
 
 新测试：`test/unit/foreground-runner.test.ts`（运行表回收、会话目录 vs 命令目录、拒绝二次 adopt、releaseAll、已退出不改道），`foreground-run.test.ts` 加「改道后 abort 不杀进程」「结束后 expire 无效」，`settings.test.ts` 加超时上界。闸门：`npm run check` 0、biome 0、全量 495 条里 494 过（`task-persistence` 的 history 与 `process-stop` 的等待窗口各命中一次这台机器的老 flake，单文件复跑均绿）。
+
+## 2026-11-24 风格清理（`dfd32c3`，未做完）
+
+起因：`lens_diagnostics` 全仓扫出 41 条风格告警（`nested-ternary` 10、`ts-delete-property` 17、`switch-without-default` 7、`no-array-reverse-mutation` 6、`no-single-promise-in-promise-methods` 2、`no-flag-argument` 1）。这一批做完了一半：
+
+- 已改：6 处 `[...x].reverse()` → `toReversed()`；`search.ts` 的三层阈值三元抽成 `continuationBytes(leadByte)`；`input.ts` 的 `showOutputPath` 里嵌套三元抽成 `outputNotice(task)`（顺带补上之前只写了调用没写函数的那次改动）；17 处 `delete record.field` → `field = undefined`（`serialize()` 就是 `JSON.stringify`，键一样被丢掉）。
+- 未改：`loop-tasks.ts:417/739-745`、`tasks-panel.ts:243/260/406` 五处嵌套三元；以及 10 条该抑制而不是改写的告警——7 条 `switch-without-default` 全是对封闭联合的穷尽 switch（加 `default` 会关掉编译器的新成员检查），2 条 `Promise.all([...map.values()])` 是规则误报（展开是多个 promise），1 条 `rightText(..., foreign)` 的 flag 参数拆开反而重复代码。抑制写法：`// pi-lens-ignore: <rule-id> -- <理由>`。
+- 闸门：`npm run check` 0、`npx --no-install biome check .` 93 文件 0、`npm run test` 42 文件 499 条全绿（2026-11-24 02:05）；CI run 45234841076 双平台 success。
