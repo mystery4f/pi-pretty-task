@@ -23,7 +23,16 @@ export async function makeTempDir(): Promise<{ path: string; dispose(): Promise<
     async dispose() {
       // A process that just exited may still hold its output file for a moment;
       // Node retries those transient Windows errors instead of failing the test.
-      await rm(path, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+      try {
+        await rm(path, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+      } catch (error) {
+        // A child that is still alive keeps its working directory open, and Windows
+        // refuses to remove that however long the retries run — which is what turned
+        // two passing cases red on a CI runner without an assertion to explain it.
+        // Tidying up gives way here: the directory sits under the OS temp root.
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== "EBUSY" && code !== "EPERM" && code !== "ENOTEMPTY") throw error;
+      }
     },
   };
 }
