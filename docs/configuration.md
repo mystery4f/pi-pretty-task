@@ -1,47 +1,48 @@
 # 配置与上限
 
-本文档说明当前的配置面：命令在哪个 shell 里跑、输出字节上限、`pretty_task_bg_run` 每次可以自带的运行超时/工作目录/环境变量，以及按名字复用的命令模板。上限与超时都以“终止原因”收尾，见 `GLOSSARY.md` 的 Process task 条目；shell 与解码的决定见 `docs/adr/0008-shell-choice-and-output-decoding.md`。
+本文档说明当前的配置面：命令在哪个 shell 里跑、输出字节上限、`pretty_task_bg_run` 每次可以自带的运行超时/工作目录/环境变量，以及按名字复用的命令模板。上限与超时都以“终止原因”收尾，见 `GLOSSARY.md` 的 Process task 条目；shell 与解码的决定见 `docs/adr/0008-shell-choice-and-output-decoding.md`，默认 shell 与 `bash.exe` 的查找顺序见 `docs/adr/0022-bash-by-default-and-where-git-lives.md`。
 
 ## 命令在哪个 shell 里跑
 
-`pretty_task_bg_run` 的 `command` 不是一条跨平台的“shell 脚本”，它交给当前平台选定的 shell。默认是各平台的老样子，可以整体换掉，也可以只换一次调用：
+`pretty_task_bg_run` 的 `command` 不是一条跨平台的“shell 脚本”，它交给当前平台选定的 shell。默认都是 bash——Windows 用 Git for Windows 的 `bash.exe`，POSIX 用 `/bin/bash`——可以整体换掉，也可以只换一次调用：
 
 | 平台 | 默认 | 可选 |
 |---|---|---|
-| Windows | `cmd.exe /d /s /c "<command>"`（`ComSpec` 指向别的 shell 时用它） | `cmd`、`bash` |
-| POSIX | `"$SHELL" -c "<command>"`，`$SHELL` 为空时用 `/bin/sh`（`-c`，非登录 shell） | `inherit`、`bash`、`sh` |
+| Windows | Git for Windows 的 `bash.exe -c "<command>"`，`bash.exe` 按下面的顺序找 | `cmd`、`bash` |
+| POSIX | `/bin/bash -c "<command>"`（非登录 shell） | `inherit`、`bash`、`sh` |
 
-语法要跟着 shell 走。cmd 写 `for /L %i in (1,1,5) do @echo tick %i`，bash 写 `for i in 1 2 3 4 5; do echo "tick $i"; sleep 2; done`。拿 POSIX 语法喂 Windows 的默认 shell 会得到 `此时不应有 i` 这类 cmd 报错，状态 `failed`、退出码 1——这不是任务失败，是命令写错了方言。
+语法要跟着 shell 走。bash 写 `for i in 1 2 3 4 5; do echo "tick $i"; sleep 2; done`，cmd 写 `for /L %i in (1,1,5) do @echo tick %i`。把 cmd 语法喂给默认的 bash 会得到 `syntax error near unexpected token '%i'`，把 bash 语法喂给设了 `PI_PRETTY_TASK_SHELL=cmd` 的 Windows 会得到 `此时不应有 i`——状态 `failed`、退出码不是 0，这不是任务失败，是命令写错了方言。
 
-连接符尤其容易骗人：cmd 里 `&` 是顺序执行，bash 里 `&` 是丢到后台，同一条 `echo A & ping -n 11 127.0.0.1 >nul & echo B` 在 cmd 下约 10 秒后才打印 B，在 bash 下 A、B 立刻都打印、ping 还在后台跑。换 shell 时把 `&` 改成 `;` 或 `&&`，别指望它跨方言同义。
+连接符尤其容易骗人：bash 里 `&` 是丢到后台，cmd 里 `&` 是顺序执行，同一条 `echo A & ping -n 11 127.0.0.1 >nul & echo B` 在 bash 下 A、B 立刻都打印、ping 还在后台跑，在 cmd 下约 10 秒后才打印 B。写 bash 时把顺序执行写成 `;` 或 `&&`，别指望 `&` 跨方言同义。
 
 ### 四个键
 
 | 键 | 平台 | 取值 | 默认 |
 |---|---|---|---|
-| `PI_PRETTY_TASK_SHELL` | Windows | `cmd`、`bash` | `cmd` |
-| `PI_PRETTY_TASK_SHELL_PATH` | Windows | 绝对路径，给上一条点名的 shell 用 | 无（`cmd` 取 `ComSpec`，`bash` 在 PATH 上找 `bash.exe`、`bash.com`） |
-| `PI_PRETTY_TASK_POSIX_SHELL` | POSIX | `inherit`、`bash`、`sh` | `inherit` |
+| `PI_PRETTY_TASK_SHELL` | Windows | `cmd`、`bash` | `bash` |
+| `PI_PRETTY_TASK_SHELL_PATH` | Windows | 绝对路径，给上一条点名的 shell 用 | 无（`cmd` 取 `ComSpec`，`bash` 按下面的顺序找） |
+| `PI_PRETTY_TASK_POSIX_SHELL` | POSIX | `inherit`、`bash`、`sh` | `bash` |
 | `PI_PRETTY_TASK_POSIX_SHELL_PATH` | POSIX | 绝对路径，且必须是可执行文件 | 无（先找 `/bin/<name>`，再找 PATH） |
 
-Windows 上改用 PATH 上的 bash：
+Windows 上的 `bash.exe` 按这个顺序找，第一个存在的就用：pi 从 Git Bash 里启动时，用它那份 Git 的 `bin\bash.exe`（看 `EXEPATH` 和 `SHELL`）；否则看 `where git` 报告的每个 `git.exe` 旁边的 `<Git>\bin\bash.exe`；否则看注册表 `HKLM`、`HKCU` 下 `SOFTWARE\GitForWindows` 的 `InstallPath`；否则看 `%ProgramFiles%\Git`、`%ProgramFiles(x86)%\Git`、`%LOCALAPPDATA%\Programs\Git`；最后才在 PATH 上找 `bash.exe`、`bash.com`。只用 `bin\bash.exe`，不用 `usr\bin\bash.exe`：前者自己会把 `mingw64\bin` 和 `usr\bin` 放进 PATH，后者不会，`git`、`grep` 这些命令就找不到。
+
+Windows 上退回 cmd（没装 Git for Windows 的机器必须这样写，否则加载时报下面那条找不到 bash 的错）：
 
 ```
-set PI_PRETTY_TASK_SHELL=bash
+set PI_PRETTY_TASK_SHELL=cmd
 ```
 
-bash 不在 PATH 上时，用单独的键给出路径（两个键成对出现，只给路径不给 shell 是错误）：
+自动找到的 bash 不合意时（比如机器上装了好几份 Git），用单独的键点一个路径（两个键成对出现，只给路径不给 shell 是错误）：
 
 ```
 set PI_PRETTY_TASK_SHELL=bash
 set PI_PRETTY_TASK_SHELL_PATH=D:\Git\bin\bash.exe
 ```
 
-POSIX 上改用 bash，或者干脆钉死一个 sh：
+POSIX 上跟登录 shell 走（`$SHELL` 为空时用 `/bin/sh`），或者干脆钉死一个 sh：
 
 ```
-export PI_PRETTY_TASK_POSIX_SHELL=bash
-export PI_PRETTY_TASK_POSIX_SHELL_PATH=/usr/local/bin/bash
+export PI_PRETTY_TASK_POSIX_SHELL=inherit
 ```
 
 ```
@@ -54,8 +55,9 @@ export PI_PRETTY_TASK_POSIX_SHELL=sh
 PI_PRETTY_TASK_SHELL does not accept "zsh"; on win32 it is one of: cmd, bash
 PI_PRETTY_TASK_POSIX_SHELL_PATH is set without PI_PRETTY_TASK_POSIX_SHELL; it only supplies the path of the shell that key names
 ```
+PI_PRETTY_TASK_SHELL=bash (the default on Windows) needs bash.exe; searched the Git Bash pi was started from [nothing]; bash beside the git on PATH [nothing]; Git for Windows as registered [nothing]; the usual install directories [nothing]; PATH [bash.exe and bash.com in PATH "C:\Windows\system32"]; set PI_PRETTY_TASK_SHELL=cmd to keep cmd.exe, or PI_PRETTY_TASK_SHELL_PATH to the bash.exe to use
 
-**不做静默兜底**：找不到 bash 就加载失败并说明搜过哪里，而不是悄悄退回 cmd——退回会让一条 bash 命令在 cmd 里跑，报错却指向另一件事。平台之外的键同样是错误（在 Windows 上设 `PI_PRETTY_TASK_POSIX_SHELL` 没人读，就当配置错误报出来）。
+**不做静默兜底**：找不到 bash 就加载失败并说明搜过哪里，而不是悄悄退回 cmd——退回会让一条 bash 命令在 cmd 里跑，报错却指向另一件事。默认既然是 bash，一台没装 Git for Windows 的 Windows 机器要在 `.env` 里写 `PI_PRETTY_TASK_SHELL=cmd`，错误信息也会这样指路。平台之外的键同样是错误（在 Windows 上设 `PI_PRETTY_TASK_POSIX_SHELL` 没人读，就当配置错误报出来）。
 
 ### 只换一次调用
 
@@ -233,7 +235,7 @@ Unknown template "tset". Known templates: "lint", "test". The task was not start
 
 ## 前台命令改道
 
-默认关闭。打开后，本扩展用同名 `registerTool` 覆盖内置 `bash`/`powershell`、并接管 `!` 命令，命令由本扩展 spawn——只有自己 spawn 的进程才有句柄可接管（[ADR-0020](adr/0020-foreground-command-detaches-to-a-task.md)）。之后两种触发器能把一条正在前台跑的命令改道成 Process task：
+默认关闭。打开后，本扩展用同名 `registerTool` 覆盖内置 `bash`、并接管 `!` 命令，命令由本扩展 spawn——只有自己 spawn 的进程才有句柄可接管（[ADR-0020](adr/0020-foreground-command-detaches-to-a-task.md)）。`powershell` 工具也由本扩展注册，但它跑的是 pi 自带的 PowerShell 操作（有 `pwsh` 用 `pwsh`，否则用 Windows PowerShell），不经过本扩展的进程，没有下面的改道；`defaultTools` 里没开 `powershell` 的会话只有这一个来源。之后两种触发器能把一条正在前台跑的命令改道成 Process task：
 
 | 键 | 取值 | 默认 | 说明 |
 |---|---|---|---|

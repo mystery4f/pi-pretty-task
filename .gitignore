@@ -16,3 +16,6 @@ Thumbs.db
 
 # regenerable wiki search index (rebuild with wiki_reindex)
 .llm-wiki/meta/qmd/
+
+# docs/ is tracked here; some machines carry a global ignore for `docs/` (notes folders)
+!docs/

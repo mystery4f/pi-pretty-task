@@ -16,7 +16,7 @@
 
 **前台命令由本扩展 spawn，改道只是「不再等待它」。**
 
-- **覆盖范围**：`bash`、`powershell`（Windows 上存在时）与 `user_bash`。覆盖默认关闭，`PI_PRETTY_TASK_ADOPT_FOREGROUND=on` 才生效——所有 bash 调用都要经过我们的 spawn，一个 bug 就砸在 agent 最主要的工具上，不该是默认行为。
+- **覆盖范围**：`bash` 与 `user_bash`；`powershell` 在 Windows 上仍由本扩展注册，但自 ADR-0022 起跑 pi 自带的 PowerShell 操作、不改道。覆盖默认关闭，`PI_PRETTY_TASK_ADOPT_FOREGROUND=on` 才生效——所有 bash 调用都要经过我们的 spawn，一个 bug 就砸在 agent 最主要的工具上，不该是默认行为。
 - **改道语义**：进程不重启、不复制、不换 PID。改道那一刻起不再把输出当作工具结果等待，输出继续写入任务输出文件，原工具立即返回。Esc 取消仍按 pi 的老规矩杀整棵树——快捷键与超时是「放它走」，Esc 是「让它死」，两件事不混。
 - **记录形态**：改道后是一条普通的 `kind: "process"` Task，带来源字段 `origin: "foreground"`。不新增 kind，面板不加页，`pretty_task_bg_logs` / `bg_wait` / `bg_kill` 照常可用。术语见 `GLOSSARY.md` 的 `Detached`。
 - **上限**：计入 `maxRunningTasks`（20）。撞上限时改道失败、命令继续在前台跑——上限的意思是「不许再开」，不是「必须死」。

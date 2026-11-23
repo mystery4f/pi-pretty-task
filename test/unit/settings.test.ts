@@ -66,12 +66,17 @@ describe("settings", () => {
   });
 
   it("falls back to the documented defaults for an environment that says nothing", () => {
-    const settings = readSettings({ env: {}, projectDir: "/work/project", platform: "linux" });
+    const settings = readSettings({
+      env: {},
+      projectDir: "/work/project",
+      platform: "linux",
+      probe: () => true,
+    });
     expect(settings.outputCapBytes).toBe(DEFAULT_OUTPUT_CAP_BYTES);
     expect(settings.notify).toBe(true);
     expect(settings.retentionDays).toBe(DEFAULT_RETENTION_DAYS);
     expect(settings.maxRunningTasks).toBe(DEFAULT_MAX_RUNNING_TASKS);
-    expect(settings.shellPolicy).toEqual({ name: "inherit", executable: "/bin/sh" });
+    expect(settings.shellPolicy).toEqual({ name: "bash", executable: "/bin/bash" });
     expect(settings.templatePaths.agentFile).toBe(
       join(homedir(), ".pi", "agent", "pretty-task.json"),
     );
@@ -82,19 +87,24 @@ describe("settings", () => {
       env: { [AGENT_DIR_ENV]: "~/settings" },
       projectDir: "/work/project",
       platform: "linux",
+      probe: () => true,
     });
     expect(settings.templatePaths.agentFile).toBe(join(homedir(), "settings", "pretty-task.json"));
   });
 
   it("accepts on and off for the notification toggle", () => {
-    expect(readSettings({ env: { [NOTIFY_ENV]: "on" }, platform: "linux" }).notify).toBe(true);
-    expect(readSettings({ env: { [NOTIFY_ENV]: "off" }, platform: "linux" }).notify).toBe(false);
+    expect(
+      readSettings({ env: { [NOTIFY_ENV]: "on" }, platform: "linux", probe: () => true }).notify,
+    ).toBe(true);
+    expect(
+      readSettings({ env: { [NOTIFY_ENV]: "off" }, platform: "linux", probe: () => true }).notify,
+    ).toBe(false);
   });
 
   it("names the key and what it received for a notification value it cannot honour", () => {
     let message = "";
     try {
-      readSettings({ env: { [NOTIFY_ENV]: "yes" }, platform: "linux" });
+      readSettings({ env: { [NOTIFY_ENV]: "yes" }, platform: "linux", probe: () => true });
     } catch (error) {
       message = (error as Error).message;
     }
@@ -104,14 +114,14 @@ describe("settings", () => {
   });
 
   it("refuses an empty notification value instead of reading it as the default", () => {
-    expect(() => readSettings({ env: { [NOTIFY_ENV]: "" }, platform: "linux" })).toThrow(
-      /PI_PRETTY_TASK_NOTIFY does not accept ""/,
-    );
+    expect(() =>
+      readSettings({ env: { [NOTIFY_ENV]: "" }, platform: "linux", probe: () => true }),
+    ).toThrow(/PI_PRETTY_TASK_NOTIFY does not accept ""/);
   });
 
   it("refuses a PI_PRETTY_TASK_ key this version does not read", () => {
     expect(() =>
-      readSettings({ env: { PI_PRETTY_TASK_NOTIFYY: "on" }, platform: "linux" }),
+      readSettings({ env: { PI_PRETTY_TASK_NOTIFYY: "on" }, platform: "linux", probe: () => true }),
     ).toThrow(/PI_PRETTY_TASK_NOTIFYY is not a key this version reads/);
   });
 
@@ -154,9 +164,12 @@ describe("settings", () => {
     // `docs/scope-v1.md` promises at most 20 running tasks; the number lives in
     // one place and the key can move it, the way the other limits do.
     expect(DEFAULT_MAX_RUNNING_TASKS).toBe(20);
-    expect(readSettings({ env: {}, platform: "linux" }).maxRunningTasks).toBe(20);
+    expect(readSettings({ env: {}, platform: "linux", probe: () => true }).maxRunningTasks).toBe(
+      20,
+    );
     expect(
-      readSettings({ env: { [MAX_RUNNING_TASKS_ENV]: "3" }, platform: "linux" }).maxRunningTasks,
+      readSettings({ env: { [MAX_RUNNING_TASKS_ENV]: "3" }, platform: "linux", probe: () => true })
+        .maxRunningTasks,
     ).toBe(3);
   });
 
@@ -166,18 +179,26 @@ describe("settings", () => {
     // limit would never be reached and the promised 20 would silently be gone.
     for (const raw of ["0", "-2", "1.5", "lots", ""]) {
       expect(() =>
-        readSettings({ env: { [MAX_RUNNING_TASKS_ENV]: raw }, platform: "linux" }),
+        readSettings({
+          env: { [MAX_RUNNING_TASKS_ENV]: raw },
+          platform: "linux",
+          probe: () => true,
+        }),
       ).toThrow(
         /PI_PRETTY_TASK_MAX_RUNNING_TASKS must be a positive whole number of tasks; received/,
       );
     }
     expect(() =>
-      readSettings({ env: { [MAX_RUNNING_TASKS_ENV]: "lots" }, platform: "linux" }),
+      readSettings({
+        env: { [MAX_RUNNING_TASKS_ENV]: "lots" },
+        platform: "linux",
+        probe: () => true,
+      }),
     ).toThrow(/received "lots"/);
   });
 
   it("keeps the retention window at seven days for an environment that says nothing", () => {
-    const settings = readSettings({ env: {}, platform: "linux" });
+    const settings = readSettings({ env: {}, platform: "linux", probe: () => true });
     expect(settings.retentionDays).toBe(DEFAULT_RETENTION_DAYS);
     expect(DEFAULT_RETENTION_DAYS).toBe(7);
   });
@@ -186,19 +207,19 @@ describe("settings", () => {
     // `0` is not "off" and a fraction is not a window: either would turn a typo
     // into a sweep that deletes yesterday's sessions or into no cap at all.
     for (const raw of ["0", "-3", "1.5", "week", ""]) {
-      expect(() => readSettings({ env: { [RETENTION_DAYS_ENV]: raw }, platform: "linux" })).toThrow(
-        /PI_PRETTY_TASK_RETENTION_DAYS must be a positive whole number of days; received/,
-      );
+      expect(() =>
+        readSettings({ env: { [RETENTION_DAYS_ENV]: raw }, platform: "linux", probe: () => true }),
+      ).toThrow(/PI_PRETTY_TASK_RETENTION_DAYS must be a positive whole number of days; received/);
     }
-    expect(() => readSettings({ env: { [RETENTION_DAYS_ENV]: "1.5" }, platform: "linux" })).toThrow(
-      /received "1.5"/,
-    );
+    expect(() =>
+      readSettings({ env: { [RETENTION_DAYS_ENV]: "1.5" }, platform: "linux", probe: () => true }),
+    ).toThrow(/received "1.5"/);
   });
 });
 
 describe("foreground takeover", () => {
   it("stays off until the environment turns it on", () => {
-    const settings = readSettings({ env: {}, platform: "linux" });
+    const settings = readSettings({ env: {}, platform: "linux", probe: () => true });
     expect(settings.adoptForeground).toBe(false);
     expect(settings.foregroundTimeoutMs).toBe(DEFAULT_FOREGROUND_TIMEOUT_SECONDS * 1_000);
     expect(DEFAULT_FOREGROUND_TIMEOUT_SECONDS).toBe(0);
@@ -208,6 +229,7 @@ describe("foreground takeover", () => {
     const settings = readSettings({
       env: { [ADOPT_FOREGROUND_ENV]: "on", [FOREGROUND_TIMEOUT_ENV]: "90" },
       platform: "linux",
+      probe: () => true,
     });
     expect(settings.adoptForeground).toBe(true);
     expect(settings.foregroundTimeoutMs).toBe(90_000);
@@ -218,19 +240,27 @@ describe("foreground takeover", () => {
     // takeover changes how every command runs, so it has to be asked for.
     for (const raw of ["true", "ON ", "1", "yes", ""]) {
       expect(() =>
-        readSettings({ env: { [ADOPT_FOREGROUND_ENV]: raw }, platform: "linux" }),
+        readSettings({
+          env: { [ADOPT_FOREGROUND_ENV]: raw },
+          platform: "linux",
+          probe: () => true,
+        }),
       ).toThrow(/PI_PRETTY_TASK_ADOPT_FOREGROUND does not accept/);
     }
   });
 
   it("refuses a timeout that is not whole seconds, and keeps 0 for off", () => {
     expect(
-      readSettings({ env: { [FOREGROUND_TIMEOUT_ENV]: "0" }, platform: "linux" })
+      readSettings({ env: { [FOREGROUND_TIMEOUT_ENV]: "0" }, platform: "linux", probe: () => true })
         .foregroundTimeoutMs,
     ).toBe(0);
     for (const raw of ["-5", "1.5", "minute", ""]) {
       expect(() =>
-        readSettings({ env: { [FOREGROUND_TIMEOUT_ENV]: raw }, platform: "linux" }),
+        readSettings({
+          env: { [FOREGROUND_TIMEOUT_ENV]: raw },
+          platform: "linux",
+          probe: () => true,
+        }),
       ).toThrow(/PI_PRETTY_TASK_FOREGROUND_TIMEOUT must be a whole number of seconds/);
     }
   });

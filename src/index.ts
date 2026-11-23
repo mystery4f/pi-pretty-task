@@ -375,16 +375,17 @@ export function createExtension(
 
   // The takeover is opt-in and covers only what this extension spawns: a tool it
   // does not own has its own process elsewhere, and nothing here can reach it.
-  // What it does reach is the whole foreground surface pi has — the bash and
-  // powershell tools, and the `!` commands — because all of them run on
-  // `BashOperations` (ADR-0020).
+  // What it does reach is the bash tool and the `!` commands — both run on
+  // `BashOperations` (ADR-0020). The powershell tool has no such route: pi's own
+  // PowerShell operations run it, foreground only, with no task handoff; it is
+  // registered here so a Windows session has it without a `defaultTools` entry.
   if (settings.adoptForeground) {
     const operations = foreground.operations();
     // The tool's own cwd comes from the call's context; this one is only the
     // fallback for a caller that has none.
     pi.registerTool(createBashTool(process.cwd(), { operations }));
     if (process.platform === "win32") {
-      pi.registerTool(createPowerShellTool(process.cwd(), { operations }));
+      pi.registerTool(createPowerShellTool(process.cwd()));
     }
     pi.on("user_bash", () => ({ operations }));
     pi.registerShortcut("ctrl+shift+b", {

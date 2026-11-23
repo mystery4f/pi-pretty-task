@@ -82,7 +82,7 @@ Stopping means the whole tree: SIGTERM, a grace period, SIGKILL, then a poll unt
 
 ## A command in front can be let go
 
-A long build is already running in front of you — the first frames of the animation above are this exact move. With `PI_PRETTY_TASK_ADOPT_FOREGROUND=on`, the built-in `bash` and `powershell` tools — and your own `!` commands — run through this extension, so `ctrl+shift+b` moves the one command currently in front to the background instead of killing it. The call ends with the output it had captured and a `↪ moved to bg-…` line, and the command keeps running as an ordinary task: `pretty_task_bg_logs`, `pretty_task_bg_status`, `pretty_task_bg_kill` all work on it.
+A long build is already running in front of you — the first frames of the animation above are this exact move. With `PI_PRETTY_TASK_ADOPT_FOREGROUND=on`, the built-in `bash` tool — and your own `!` commands — run through this extension, so `ctrl+shift+b` moves the one command currently in front to the background instead of killing it. The call ends with the output it had captured and a `↪ moved to bg-…` line, and the command keeps running as an ordinary task: `pretty_task_bg_logs`, `pretty_task_bg_status`, `pretty_task_bg_kill` all work on it.
 
 `PI_PRETTY_TASK_FOREGROUND_TIMEOUT` does the same on a timer, for the terminal you have already walked away from; `0`, the default, never moves anything. A call's own `timeout` still stops the tree — a timeout is a failure, not a move. The takeover is off by default because it re-registers pi's own shell tools; see [ADR-0020](docs/adr/0020-foreground-command-detaches-to-a-task.md).
 
@@ -108,9 +108,9 @@ Every key is read once at load; a value it cannot use fails the extension with t
 | `PI_PRETTY_TASK_MAX_RUNNING_TASKS` | `20` | Running process records per session, children and steps included |
 | `PI_PRETTY_TASK_NOTIFY` | `on` | Write an OSC 9 notification to the terminal when a task ends |
 | `PI_PRETTY_TASK_RETENTION_DAYS` | `7` | Session directories older than this are pruned at startup |
-| `PI_PRETTY_TASK_SHELL` / `_SHELL_PATH` | `cmd` | Windows shell and its absolute path |
-| `PI_PRETTY_TASK_POSIX_SHELL` / `_POSIX_SHELL_PATH` | `inherit` | POSIX shell (`inherit`, `bash`, `sh`) and its path |
-| `PI_PRETTY_TASK_ADOPT_FOREGROUND` | `off` | Run pi's shell tools and `!` commands through this extension, so the command in front can be moved to a task |
+| `PI_PRETTY_TASK_SHELL` / `_SHELL_PATH` | `bash` | Windows shell (`cmd`, `bash`) and its absolute path; `bash.exe` comes from Git for Windows — the one pi was started from, then the `git` on PATH, the registry, the usual install dirs, then PATH |
+| `PI_PRETTY_TASK_POSIX_SHELL` / `_POSIX_SHELL_PATH` | `bash` | POSIX shell (`inherit`, `bash`, `sh`) and its path |
+| `PI_PRETTY_TASK_ADOPT_FOREGROUND` | `off` | Run pi's `bash` tool and `!` commands through this extension, so the command in front can be moved to a task; the `powershell` tool it registers has no such move |
 | `PI_PRETTY_TASK_FOREGROUND_TIMEOUT` | `0` | Seconds before the command in front is moved to the background by itself; `0` never moves |
 
 Command templates live in `<project>/.pi/pretty-task.json` and `~/.pi/agent/pretty-task.json`, project first, and are read once at load — a file edited mid-session applies after `/reload`. Adding or changing one is covered by the bundled `pretty-task-templates` skill.

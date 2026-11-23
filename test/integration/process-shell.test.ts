@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  type CommandRunner,
   type ExecutableProbe,
   POSIX_SHELL_ENV,
   POSIX_SHELL_PATH_ENV,
@@ -67,9 +68,10 @@ describe("the shell a command runs in", () => {
       "process.stdout.write('from script\\n');\n",
     );
 
-    // The pipe target differs by platform because the pipe itself must be real.
-    const pipe = process.platform === "win32" ? "findstr piped" : "grep piped";
-    const read = process.platform === "win32" ? "type result.txt" : "cat result.txt";
+    // The pipe target differs by shell because the pipe itself must be real.
+    const cmd = resolveShellPolicy({ env: inheritedEnv() }).name === "cmd";
+    const pipe = cmd ? "findstr piped" : "grep piped";
+    const read = cmd ? "type result.txt" : "cat result.txt";
     const command = `echo start && ${script} && echo done > result.txt && ${read} && echo piped | ${pipe}`;
 
     const { details, text } = await runAndWait(dir.path, command);
@@ -104,6 +106,21 @@ describe("the shell a command runs in", () => {
 /** A probe that finds nothing: the policy tests own what "installed" means. */
 const nothing: ExecutableProbe = () => false;
 
+/** No `where` or `reg` on this host: a test that must not touch either says so. */
+const nowhere: CommandRunner = () => undefined;
+
+/** A `where`/`reg` that answers with the same output, whatever it is asked. */
+function reports(stdout: string): CommandRunner {
+  return () => stdout;
+}
+
+/** `process.env` without the policy keys: the environment the harness hands the extension. */
+function inheritedEnv(): NodeJS.ProcessEnv {
+  return Object.fromEntries(
+    Object.entries(process.env).filter(([key]) => !key.startsWith("PI_PRETTY_TASK_")),
+  );
+}
+
 function finds(...candidates: readonly string[]): ExecutableProbe {
   return (candidate) => candidates.includes(candidate);
 }
@@ -119,10 +136,10 @@ function thrownMessage(run: () => unknown): string {
 }
 
 describe("the shell policy of a Windows command", () => {
-  it("hands a Windows command to one cmd.exe with verbatim arguments", () => {
+  it("hands a cmd command to one cmd.exe with verbatim arguments", () => {
     const policy = resolveShellPolicy({
       platform: "win32",
-      env: { ComSpec: "C:\\Windows\\system32\\cmd.exe" },
+      env: { [SHELL_ENV]: "cmd", ComSpec: "C:\\Windows\\system32\\cmd.exe" },
       probe: nothing,
     });
 
@@ -133,10 +150,86 @@ describe("the shell policy of a Windows command", () => {
   });
 
   it("falls back to cmd.exe when ComSpec is unset", () => {
-    expect(resolveShellPolicy({ platform: "win32", env: {}, probe: nothing })).toEqual({
-      name: "cmd",
-      executable: "cmd.exe",
+    const policy = resolveShellPolicy({
+      platform: "win32",
+      env: { [SHELL_ENV]: "cmd" },
+      probe: nothing,
     });
+    expect(policy).toEqual({ name: "cmd", executable: "cmd.exe" });
+  });
+
+  it("defaults to the bash beside the git on PATH", () => {
+    const policy = resolveShellPolicy({
+      platform: "win32",
+      env: {},
+      probe: finds("D:\\Soft\\Git\\bin\\bash.exe"),
+      run: reports("D:\\Soft\\Git\\mingw64\\bin\\git.exe\r\nD:\\Soft\\Git\\cmd\\git.exe\r\n"),
+    });
+    expect(policy).toEqual({ name: "bash", executable: "D:\\Soft\\Git\\bin\\bash.exe" });
+  });
+
+  it("prefers the Git Bash pi was started from and asks nothing else", () => {
+    const asked: string[] = [];
+    const run: CommandRunner = (file) => {
+      asked.push(file);
+      return undefined;
+    };
+    const policy = resolveShellPolicy({
+      platform: "win32",
+      env: { EXEPATH: "D:\\Soft\\Git\\bin", SHELL: "D:\\Soft\\Git\\usr\\bin\\bash.exe" },
+      probe: finds("D:\\Soft\\Git\\bin\\bash.exe"),
+      run,
+    });
+    expect(policy).toEqual({ name: "bash", executable: "D:\\Soft\\Git\\bin\\bash.exe" });
+    expect(asked).toEqual([]);
+  });
+
+  it("reads Git for Windows from the registry when neither launch nor PATH names one", () => {
+    const run: CommandRunner = (_file, args) =>
+      args[0] === "query" && args[1] === "HKLM\\SOFTWARE\\GitForWindows"
+        ? "\nHKEY_LOCAL_MACHINE\\SOFTWARE\\GitForWindows\n    InstallPath    REG_SZ    D:\\Soft\\Git\n\n"
+        : undefined;
+    const policy = resolveShellPolicy({
+      platform: "win32",
+      env: { PATH: "C:\\Windows\\system32" },
+      probe: finds("D:\\Soft\\Git\\bin\\bash.exe"),
+      run,
+    });
+    expect(policy).toEqual({ name: "bash", executable: "D:\\Soft\\Git\\bin\\bash.exe" });
+  });
+
+  it("finds bash in the usual install directories", () => {
+    const policy = resolveShellPolicy({
+      platform: "win32",
+      env: { ProgramFiles: "C:\\Program Files", LOCALAPPDATA: "C:\\Users\\me\\AppData\\Local" },
+      probe: finds("C:\\Program Files\\Git\\bin\\bash.exe"),
+      run: nowhere,
+    });
+    expect(policy.executable).toBe("C:\\Program Files\\Git\\bin\\bash.exe");
+  });
+
+  it("falls back to a bash on PATH, bash.com included", () => {
+    const policy = resolveShellPolicy({
+      platform: "win32",
+      env: { PATH: "C:\\tools" },
+      probe: finds("C:\\tools\\bash.com"),
+      run: nowhere,
+    });
+    expect(policy).toEqual({ name: "bash", executable: "C:\\tools\\bash.com" });
+  });
+
+  it("blames the default and names cmd as the way out when no bash exists", () => {
+    const message = thrownMessage(() =>
+      resolveShellPolicy({
+        platform: "win32",
+        env: { PATH: "C:\\nowhere" },
+        probe: nothing,
+        run: nowhere,
+      }),
+    );
+    expect(message).toContain("(the default on Windows)");
+    expect(message).toContain("set PI_PRETTY_TASK_SHELL=cmd");
+    expect(message).toContain('bash.exe and bash.com in PATH "C:\\nowhere"');
   });
 
   it("runs bash with -c and Node's own escaping when configured", () => {
@@ -144,6 +237,7 @@ describe("the shell policy of a Windows command", () => {
       platform: "win32",
       env: { [SHELL_ENV]: "bash", PATH: "C:\\tools;C:\\Windows\\system32" },
       probe: finds("C:\\tools\\bash.exe"),
+      run: nowhere,
     });
 
     expect(policy).toEqual({ name: "bash", executable: "C:\\tools\\bash.exe" });
@@ -158,6 +252,7 @@ describe("the shell policy of a Windows command", () => {
       platform: "win32",
       env: { [SHELL_ENV]: "bash", PATH: "C:\\tools" },
       probe: finds("C:\\tools\\bash.com"),
+      run: nowhere,
     });
     expect(policy.executable).toBe("C:\\tools\\bash.com");
   });
@@ -168,6 +263,7 @@ describe("the shell policy of a Windows command", () => {
         platform: "win32",
         env: { [SHELL_ENV]: "bash", PATH: "C:\\nowhere" },
         probe: nothing,
+        run: nowhere,
       }),
     );
 
@@ -175,6 +271,7 @@ describe("the shell policy of a Windows command", () => {
     expect(message).toContain("bash.exe");
     expect(message).toContain("bash.com");
     expect(message).toContain("C:\\nowhere");
+    expect(message).toContain(`or ${SHELL_PATH_ENV} to the bash.exe to use`);
   });
 
   it("rejects a selector value it does not know", () => {
@@ -220,10 +317,10 @@ describe("the shell policy of a Windows command", () => {
 });
 
 describe("the shell policy of a POSIX command", () => {
-  it("runs a POSIX command in the user's shell without a login shell", () => {
+  it("runs a POSIX command in the user's shell when told to inherit it, without a login shell", () => {
     const policy = resolveShellPolicy({
       platform: "linux",
-      env: { SHELL: "/bin/bash" },
+      env: { [POSIX_SHELL_ENV]: "inherit", SHELL: "/bin/bash" },
       probe: nothing,
     });
 
@@ -234,10 +331,20 @@ describe("the shell policy of a POSIX command", () => {
     expect(invocation.windowsVerbatimArguments).toBe(false);
   });
 
-  it("defaults to /bin/sh when SHELL is unset", () => {
-    expect(resolveShellPolicy({ platform: "darwin", env: {}, probe: nothing }).executable).toBe(
-      "/bin/sh",
-    );
+  it("defaults to bash from /bin", () => {
+    expect(resolveShellPolicy({ platform: "linux", env: {}, probe: finds("/bin/bash") })).toEqual({
+      name: "bash",
+      executable: "/bin/bash",
+    });
+  });
+
+  it("inherit falls back to /bin/sh when SHELL is unset", () => {
+    const policy = resolveShellPolicy({
+      platform: "darwin",
+      env: { [POSIX_SHELL_ENV]: "inherit" },
+      probe: nothing,
+    });
+    expect(policy).toEqual({ name: "inherit", executable: "/bin/sh" });
   });
 
   it("resolves bash and sh from /bin first", () => {
@@ -273,6 +380,11 @@ describe("the shell policy of a POSIX command", () => {
         probe: nothing,
       }),
     ).toThrow(/PI_PRETTY_TASK_POSIX_SHELL.*bash.*\/bin\/bash.*\/nowhere/s);
+    const message = thrownMessage(() =>
+      resolveShellPolicy({ platform: "linux", env: {}, probe: nothing }),
+    );
+    expect(message).toContain("(the default)");
+    expect(message).toContain("sh or inherit");
   });
 
   it("rejects a selector value it does not know", () => {
@@ -322,7 +434,12 @@ describe("the shell policy of a POSIX command", () => {
 });
 
 describe("one call's shell override", () => {
-  const windows = { platform: "win32" as const, env: { PATH: "C:\\tools" }, probe: nothing };
+  const windows = {
+    platform: "win32" as const,
+    env: { [SHELL_ENV]: "cmd", PATH: "C:\\tools" },
+    probe: nothing,
+    run: nowhere,
+  };
 
   it("leaves the configured policy alone for default", () => {
     const policy = resolveShellPolicy(windows);
@@ -337,7 +454,11 @@ describe("one call's shell override", () => {
   });
 
   it("refuses cmd on POSIX the same way", () => {
-    const posix = { platform: "linux" as const, env: {}, probe: nothing };
+    const posix = {
+      platform: "linux" as const,
+      env: { [POSIX_SHELL_ENV]: "inherit" },
+      probe: nothing,
+    };
     expect(() => selectShell(resolveShellPolicy(posix), "cmd", posix)).toThrow(
       /"cmd".*linux.*default, bash, sh/,
     );
@@ -385,7 +506,7 @@ describe("pretty_task_bg_run's shell override", () => {
     cleanup.push(dir.dispose);
     const harness = createHarness(
       { cwd: dir.path, sessionId: `session-reject-${String(Date.now())}` },
-      { env: {} },
+      { env: onWindows ? { [SHELL_ENV]: "cmd" } : { [POSIX_SHELL_ENV]: "inherit" } },
     );
     const refused = onWindows ? "sh" : "cmd";
 

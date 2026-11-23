@@ -19,6 +19,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 import {
+  type CommandRunner,
   type ExecutableProbe,
   POSIX_SHELL_ENV,
   POSIX_SHELL_PATH_ENV,
@@ -118,9 +119,10 @@ export interface SettingsOptions {
   readonly projectDir?: string;
   /** Agent settings directory; defaults to `AGENT_DIR_ENV` or pi's own default. */
   readonly agentDir?: string;
-  /** Test seams forwarded to the shell policy: which platform, and what is executable. */
+  /** Test seams forwarded to the shell policy: which platform, what is executable, and what `where`/`reg` report. */
   readonly platform?: NodeJS.Platform;
   readonly probe?: ExecutableProbe;
+  readonly run?: CommandRunner;
 }
 
 /**
@@ -138,6 +140,7 @@ export function readSettings(options: SettingsOptions = {}): Settings {
       platform: options.platform,
       env,
       probe: options.probe,
+      run: options.run,
     }),
     notify: parseNotify(env),
     retentionDays: parseRetentionDays(env),
