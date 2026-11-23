@@ -247,7 +247,7 @@ export function renderLoopDetail(panel: PanelView, row: PanelTaskView, width: nu
   // What is scrolled out is said on two lines, so the list gives them up rather
   // than drawing past the pane.
   const rows = Math.max(1, listRows - 2);
-  const newestFirst = [...task.iterations].reverse();
+  const newestFirst = [...task.iterations].toReversed();
   if (newestFirst.length === 0) {
     body.push(theme.fg("dim", "  no iteration recorded yet"));
   } else {
@@ -350,7 +350,7 @@ export function renderCommandLoopDetail(
   body.push("", theme.fg("muted", firesHeading(task)));
 
   const rows = Math.max(1, listRows - 2);
-  const newestFirst = [...task.fireHistory].reverse();
+  const newestFirst = [...task.fireHistory].toReversed();
   if (newestFirst.length === 0) {
     body.push(theme.fg("dim", "  no fire recorded yet"));
   } else {

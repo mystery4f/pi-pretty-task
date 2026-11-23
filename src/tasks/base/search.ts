@@ -109,9 +109,17 @@ function withoutPartialTail(bytes: Buffer): Buffer {
   const lead = bytes.length - 1 - continuations;
   const leadByte = bytes[lead];
   if (leadByte === undefined) return bytes;
-  const needed = leadByte >= 0xf0 ? 3 : leadByte >= 0xe0 ? 2 : leadByte >= 0xc0 ? 1 : 0;
+  const needed = continuationBytes(leadByte);
   if (needed === 0 || bytes.length - lead - 1 >= needed) return bytes;
   return bytes.subarray(0, lead);
+}
+
+/** How many continuation bytes the lead byte of a UTF-8 sequence announces. */
+function continuationBytes(leadByte: number): number {
+  if (leadByte >= 0xf0) return 3;
+  if (leadByte >= 0xe0) return 2;
+  if (leadByte >= 0xc0) return 1;
+  return 0;
 }
 
 /** Search one output file. A file that does not exist yet has no matches. */

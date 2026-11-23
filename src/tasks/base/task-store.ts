@@ -480,7 +480,7 @@ function interrupt(record: Task, at: number): Task {
   // A restart that ends a record is a state change like any other, so the
   // recency moves with the ending (ADR-0010).
   const interrupted: ProcessTask = { ...record, status: "interrupted", endedAt: at, updatedAt: at };
-  delete interrupted.pid;
+  interrupted.pid = undefined;
   return interrupted;
 }
 

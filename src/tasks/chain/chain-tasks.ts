@@ -364,8 +364,8 @@ export class ChainTasks {
       // The queue ran out earlier; the step being appended becomes the next one.
       chain.status = "running";
       chain.updatedAt = this.now();
-      delete chain.endedAt;
-      delete chain.error;
+      chain.endedAt = undefined;
+      chain.error = undefined;
     }
   }
 

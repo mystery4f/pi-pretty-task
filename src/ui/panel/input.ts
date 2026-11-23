@@ -11,7 +11,7 @@
  * @author mystery4f <40482524+mystery4f@users.noreply.github.com>
  */
 import { matchesKey } from "@earendil-works/pi-tui";
-import type { CmdLoopTask, PromptLoopTask } from "../../tasks/base/task.js";
+import type { CmdLoopTask, PromptLoopTask, Task } from "../../tasks/base/task.js";
 import { detailRows, windowRowsFor } from "./detail.js";
 import { messageOf } from "./format.js";
 import { pageKey } from "./keys.js";
@@ -219,7 +219,7 @@ function handleCmdLoopDetailInput(panel: TasksPanel, data: string, task: CmdLoop
 
 /** Walk the newest-first fire list, keeping the selected row on screen. */
 function moveFire(panel: TasksPanel, delta: number, task: CmdLoopTask): void {
-  const newestFirst = [...task.fireHistory].reverse();
+  const newestFirst = [...task.fireHistory].toReversed();
   if (newestFirst.length === 0) return;
   const selected = panel.currentFire(task);
   const current = newestFirst.findIndex((fire) => fire.fire === selected?.fire);
@@ -277,7 +277,7 @@ function handleIterationInput(panel: TasksPanel, data: string): void {
 
 /** Walk the newest-first iteration list, keeping the selected row on screen. */
 function moveIteration(panel: TasksPanel, delta: number, task: PromptLoopTask): void {
-  const newestFirst = [...task.iterations].reverse();
+  const newestFirst = [...task.iterations].toReversed();
   if (newestFirst.length === 0) return;
   const selected = panel.currentIteration(task);
   const current = newestFirst.findIndex((iteration) => iteration.fire === selected?.fire);
@@ -442,13 +442,20 @@ function showOutputPath(panel: TasksPanel): void {
     return;
   }
   const task = row.task;
-  panel.notify(
-    task.kind === "process"
-      ? `output: ${task.outputPath}`
-      : task.kind === "cmd-loop" && task.lastOutputPath !== undefined
-        ? `output: ${task.lastOutputPath}`
-        : task.kind === "chain"
-          ? "a chain writes no output of its own; each step has its own file."
-          : "a loop writes no output file",
-  );
+  panel.notify(outputNotice(task));
+}
+
+/**
+ * Where a task's output goes, in one line. A chain and a prompt loop write no file of
+ * their own, and a loop that has not fired yet names nothing.
+ */
+function outputNotice(task: Task): string {
+  if (task.kind === "process") return `output: ${task.outputPath}`;
+  if (task.kind === "cmd-loop") {
+    return task.lastOutputPath === undefined ? "no fire yet" : `output: ${task.lastOutputPath}`;
+  }
+  if (task.kind === "chain") {
+    return "a chain writes no output of its own; each step has its own file";
+  }
+  return "a loop writes no output file";
 }

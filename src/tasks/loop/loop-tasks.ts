@@ -496,8 +496,8 @@ export class LoopTasks {
         // Nobody rewrites the rhythm of a loop they are watching: a retune
         // announces a fresh look, so an outstanding signal goes with it.
         if (task.kind === "cmd-loop") {
-          delete task.signalRaised;
-          delete task.signalRaisedAt;
+          task.signalRaised = undefined;
+          task.signalRaisedAt = undefined;
         }
         // The old slot is abandoned; a paused loop keeps no next fire to move.
         if (task.status === "running") task.nextFireAt = nextFireAt;
@@ -520,7 +520,7 @@ export class LoopTasks {
           outcome = "already-completed";
         } else {
           task.status = "paused";
-          delete task.nextFireAt;
+          task.nextFireAt = undefined;
           outcome = "paused";
           changed = true;
         }
@@ -545,7 +545,7 @@ export class LoopTasks {
             task.status = "failed";
             task.error = `invalid schedule "${task.schedule}"`;
             task.endedAt = now;
-            delete task.nextFireAt;
+            task.nextFireAt = undefined;
             outcome = "failed";
             changed = true;
           } else {
@@ -591,7 +591,7 @@ export class LoopTasks {
           task.status = "failed";
           task.error = `invalid schedule "${task.schedule}"`;
           task.endedAt = now;
-          delete task.nextFireAt;
+          task.nextFireAt = undefined;
           outcome = "failed";
           changed = true;
           break;
@@ -605,8 +605,8 @@ export class LoopTasks {
           outcome = "rearmed";
         }
         if (task.kind === "cmd-loop") {
-          delete task.signalRaised;
-          delete task.signalRaisedAt;
+          task.signalRaised = undefined;
+          task.signalRaisedAt = undefined;
         }
         changed = true;
         break;
@@ -619,8 +619,8 @@ export class LoopTasks {
           outcome = "no-signal";
           break;
         }
-        delete task.signalRaised;
-        delete task.signalRaisedAt;
+        task.signalRaised = undefined;
+        task.signalRaisedAt = undefined;
         outcome = "signal-cleared";
         changed = true;
         break;
@@ -770,8 +770,8 @@ export class LoopTasks {
         // A healthy round clears both the failure streak and the outstanding
         // signal: `exit 0` means the condition is gone (ADR-0018).
         loop.consecutiveFailures = 0;
-        delete loop.signalRaised;
-        delete loop.signalRaisedAt;
+        loop.signalRaised = undefined;
+        loop.signalRaisedAt = undefined;
       } else if (raised) {
         loop.signalRaised = true;
         loop.signalRaisedAt = at;
@@ -881,7 +881,7 @@ export class LoopTasks {
       record.status = "failed";
       record.error = `invalid schedule "${record.schedule}"`;
       record.endedAt = at;
-      delete record.nextFireAt;
+      record.nextFireAt = undefined;
       record.updatedAt = at;
       return "finished";
     }
@@ -1026,7 +1026,7 @@ export class LoopTasks {
   private finish(task: LoopBase, at: number, status: "completed" | "failed"): void {
     task.status = status;
     task.endedAt = at;
-    delete task.nextFireAt;
+    task.nextFireAt = undefined;
     // Every status change ends here, so this is the one place the loop's
     // recency moves with it (ADR-0010).
     task.updatedAt = at;

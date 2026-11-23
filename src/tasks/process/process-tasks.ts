@@ -985,7 +985,7 @@ export class ProcessTasks {
       task.killReason = killReason;
       // A note from a kill that once lost is history now that the kill landed:
       // the record ends killed, and a stale "could not be stopped" would lie.
-      delete task.error;
+      task.error = undefined;
     } else if (failure !== undefined) {
       task.status = "failed";
       task.error = failure;

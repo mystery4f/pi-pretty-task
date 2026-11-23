@@ -252,7 +252,7 @@ export function describeFires(task: CmdLoopTask): string {
       : "No fire yet: this loop has not fired.";
   }
 
-  const rows = [...task.fireHistory].reverse().map((fire) => {
+  const rows = [...task.fireHistory].toReversed().map((fire) => {
     const time = fire.at === undefined ? undefined : new Date(fire.at).toISOString();
     const head = [fireLabel(fire.fire), time, fire.outcome]
       .filter((part) => part !== undefined)
@@ -277,7 +277,7 @@ export function describeIterations(task: PromptLoopTask): string {
   }
 
   return [...task.iterations]
-    .reverse()
+    .toReversed()
     .map((iteration) => {
       const head = [
         `fire ${String(iteration.fire)}`,
