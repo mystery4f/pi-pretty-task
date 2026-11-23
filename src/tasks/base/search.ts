@@ -88,7 +88,7 @@ export function clampSearchMatches(value?: number): number {
 }
 
 function isFileNotFound(error: unknown): boolean {
-  return typeof error === "object" && error !== null && Reflect.get(error, "code") === "ENOENT";
+  return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
 }
 
 /**

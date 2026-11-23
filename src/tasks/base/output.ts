@@ -34,7 +34,7 @@ export interface OutputTailOptions {
 const DEFAULT_MAX_BYTES = 128 * 1024;
 
 function isFileNotFound(error: unknown): boolean {
-  return typeof error === "object" && error !== null && Reflect.get(error, "code") === "ENOENT";
+  return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
 }
 
 /** Read the last `lines` lines of an output file. A missing file has no output yet. */

@@ -128,6 +128,7 @@ function parseFireHistory(value: unknown): FireRecord[] | undefined {
     if (entry.outputBytes !== undefined && !isCount(entry.outputBytes)) return undefined;
     if (entry.taskId !== undefined && typeof entry.taskId !== "string") return undefined;
     if (entry.error !== undefined && typeof entry.error !== "string") return undefined;
+    // SAFETY: every field of a FireRecord was checked one by one above.
     fires.push(entry as unknown as FireRecord);
   }
   return fires;
@@ -173,6 +174,7 @@ function parseTask(value: unknown, legacyKind: boolean): Task | undefined {
       if (typeof value.parentId !== "string" || value.parentId.length === 0) return undefined;
     }
     if (value.fire !== undefined && (!isCount(value.fire) || value.fire < 1)) return undefined;
+    // SAFETY: kind, cwd, pid and every other field of a ProcessTask was checked above.
     return { ...value, updatedAt } as unknown as ProcessTask;
   }
 
@@ -190,6 +192,7 @@ function parseTask(value: unknown, legacyKind: boolean): Task | undefined {
     ) {
       return undefined;
     }
+    // SAFETY: the loop fields a prompt loop needs were checked above.
     return { ...value, kind, updatedAt, iterations } as unknown as Task;
   }
 
@@ -219,6 +222,7 @@ function parseTask(value: unknown, legacyKind: boolean): Task | undefined {
       return undefined;
     }
     if (value.lastOutputBytes !== undefined && !isCount(value.lastOutputBytes)) return undefined;
+    // SAFETY: the loop fields a command loop needs were checked above.
     return { ...value, kind, updatedAt, fireHistory } as unknown as Task;
   }
 
@@ -233,6 +237,7 @@ function parseTask(value: unknown, legacyKind: boolean): Task | undefined {
     // The cursor names a slot in the queue: steps.length means the queue ran out.
     if (!isCount(value.cursor) || value.cursor > steps.length) return undefined;
     if (value.error !== undefined && typeof value.error !== "string") return undefined;
+    // SAFETY: every step was checked to be an id, and the cursor was bounded by the count.
     return { ...value, kind, updatedAt, steps, cursor: value.cursor } as unknown as ChainTask;
   }
 
@@ -298,6 +303,7 @@ function parseIteration(value: unknown): Iteration | undefined {
     if (call === undefined) return undefined;
     calls.push(call);
   }
+  // SAFETY: the iteration's own fields and every call were parsed above.
   return { ...value, calls } as unknown as Iteration;
 }
 
@@ -311,6 +317,7 @@ function parseIterationCall(value: unknown): IterationCall | undefined {
   if (value.durationMs !== undefined && !isFiniteNumber(value.durationMs)) return undefined;
   if (value.error !== undefined && typeof value.error !== "string") return undefined;
   if (!ITERATION_CALL_STATUSES.some((status) => status === value.status)) return undefined;
+  // SAFETY: every field and the status of an IterationCall was checked above.
   return value as unknown as IterationCall;
 }
 
