@@ -23,8 +23,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-          registry-url: https://registry.npmjs.org
           cache: npm
+          # No `registry-url` on purpose: setup-node would write an .npmrc whose
+          # `_authToken` is the empty NODE_AUTH_TOKEN, and a request carrying an
+          # empty token is answered 404 instead of being authenticated by OIDC
+          # (first v1.0.8 attempt after switching died exactly there). npm's
+          # default registry is already registry.npmjs.org.
 
       - run: npm ci
       - run: npm run check
