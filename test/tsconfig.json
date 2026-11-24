@@ -1,0 +1,5 @@
+{
+  "//": "The tests' own project, so an editor reads them under the same strict flags as `npm run check` instead of inferring settings and reporting every vitest import as unresolved. Output stays off: `tsconfig.json` emits src only.",
+  "extends": "../tsconfig.dev.json",
+  "include": ["../src/**/*.ts", "../test/**/*.ts", "../vitest.config.ts"]
+}

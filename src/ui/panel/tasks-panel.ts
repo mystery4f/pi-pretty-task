@@ -75,6 +75,26 @@ function mostRecentlyChangedFirst(left: PanelTaskView, right: PanelTaskView): nu
   return right.task.updatedAt - left.task.updatedAt;
 }
 
+/**
+ * Best query match first; rows that match equally keep the recency order, so a
+ * search never scrambles the work it ranks the same.
+ */
+function bestMatchFirst(
+  scores: ReadonlyMap<PanelTaskView, RowMatch>,
+): (left: PanelTaskView, right: PanelTaskView) => number {
+  return (left, right) => {
+    const byMatch = (scores.get(right)?.score ?? 0) - (scores.get(left)?.score ?? 0);
+    return byMatch !== 0 ? byMatch : mostRecentlyChangedFirst(left, right);
+  };
+}
+
+/** The newest fire a loop has recorded; a process has none, so its detail opens on the tail. */
+function newestFire(task: Task | undefined): number | undefined {
+  if (task?.kind === "prompt-loop") return task.iterations.at(-1)?.fire;
+  if (task?.kind === "cmd-loop") return task.fireHistory.at(-1)?.fire;
+  return undefined;
+}
+
 /** Whitespace-free lines of an output tail, newest last. */
 function tailLines(text: string, count: number): string[] {
   const lines = text.split("\n").filter((line) => line.trim().length > 0);
@@ -239,14 +259,9 @@ export class TasksPanel implements Component, PanelView {
     // page, filter and query as this session's own, so a search never reaches across
     // into another session by accident (ticket #27).
     const shown = [...page(this.allRows), ...page(this.otherRows)];
-    this.rows =
-      this.query.length === 0
-        ? shown.sort(mostRecentlyChangedFirst)
-        : shown.sort((left, right) => {
-            const byMatch =
-              (this.matchScores.get(right)?.score ?? 0) - (this.matchScores.get(left)?.score ?? 0);
-            return byMatch !== 0 ? byMatch : mostRecentlyChangedFirst(left, right);
-          });
+    this.rows = shown.sort(
+      this.query.length === 0 ? mostRecentlyChangedFirst : bestMatchFirst(this.matchScores),
+    );
     this.keepSelection();
   }
 
@@ -256,13 +271,15 @@ export class TasksPanel implements Component, PanelView {
    * display — a step's command, a fire's id — can bring a row back (ticket #27).
    */
   matchField(task: Task): RowMatch | undefined {
-    const steps =
-      task.kind === "chain"
-        ? task.steps.flatMap((id, index) => {
-            const name = stepRecord(this, id)?.name ?? "";
-            return name === "" ? [] : [{ name, index }];
-          })
-        : [];
+    // A chain row displays its step names, so those are matchable words; a step
+    // with no name is not one.
+    const steps: { name: string; index: number }[] = [];
+    if (task.kind === "chain") {
+      task.steps.forEach((id, index) => {
+        const name = stepRecord(this, id)?.name ?? "";
+        if (name !== "") steps.push({ name, index });
+      });
+    }
     return bestFieldMatch(task, this.query, steps);
   }
 
@@ -402,12 +419,7 @@ export class TasksPanel implements Component, PanelView {
     this.callTop = 0;
     const row = this.detailRow();
     // A loop opens on its newest history row; a process opens on its output tail.
-    this.iterationFire =
-      row?.task.kind === "prompt-loop"
-        ? row.task.iterations.at(-1)?.fire
-        : row?.task.kind === "cmd-loop"
-          ? row.task.fireHistory.at(-1)?.fire
-          : undefined;
+    this.iterationFire = newestFire(row?.task);
     this.iterationTop = 0;
     this.enqueue(async () => {
       await this.readTail();

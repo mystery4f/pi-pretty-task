@@ -869,6 +869,7 @@ export class ProcessTasks {
    * leaves a process running that no root row points at (ADR-0014).
    */
   async stopChildren(parentId: string, options: StopTaskOptions = {}): Promise<StopTaskResult[]> {
+    // pi-lens-ignore: no-single-promise-in-promise-methods -- a Map's values spread to one promise per session, not a single promise
     const sessions = await Promise.all([...this.sessions.values()]);
     const results: StopTaskResult[] = [];
     for (const session of sessions) {

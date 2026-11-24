@@ -234,6 +234,13 @@ export type PanelFilter = "all" | "running" | "signal" | "failed" | "done";
 /** The pages in the order `1`, `2`, `3` and the `tab` key walk them. */
 export const PANEL_TABS: readonly PanelTab[] = ["processes", "loops", "chains"];
 
+/** The key that opens each page directly, next to the `tab` key that walks them. */
+export const TAB_KEY: ReadonlyMap<string, PanelTab> = new Map([
+  ["1", "processes"],
+  ["2", "loops"],
+  ["3", "chains"],
+]);
+
 /** The filters in the order `f` walks them, starting from the one the panel opens on. */
 export const PANEL_FILTERS: readonly PanelFilter[] = ["all", "running", "signal", "failed", "done"];
 

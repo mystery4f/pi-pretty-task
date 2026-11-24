@@ -365,6 +365,7 @@ function loopDetails(
 function updateHeadline(id: string, result: Awaited<ReturnType<LoopTasks["update"]>>): string {
   if (result === undefined) return `No loop with id ${id} in this session.`;
   const name = result.view.task.name;
+  // pi-lens-ignore: switch-without-default -- exhaustive over the closed outcome union; a default would hide a new outcome from the compiler
   switch (result.outcome) {
     case "paused":
       return `Paused loop ${id} (${name}); it will not fire until resumed.`;

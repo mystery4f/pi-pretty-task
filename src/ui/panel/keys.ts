@@ -6,7 +6,7 @@
  */
 
 import { matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import { PANEL_TABS, type PanelTab } from "./model.js";
+import { PANEL_TABS, type PanelTab, TAB_KEY } from "./model.js";
 
 /**
  * The list's keys, widest first (ADR-0012): one model, three lists. A narrow
@@ -51,8 +51,7 @@ export function pad(text: string, width: number): string {
  * returns `undefined` and stays a row key.
  */
 export function pageKey(data: string, current: PanelTab): PanelTab | undefined {
-  const named =
-    data === "1" ? "processes" : data === "2" ? "loops" : data === "3" ? "chains" : undefined;
+  const named = TAB_KEY.get(data);
   if (named !== undefined) return named;
   if (matchesKey(data, "tab")) {
     const index = PANEL_TABS.indexOf(current);

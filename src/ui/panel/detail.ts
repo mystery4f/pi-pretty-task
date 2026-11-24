@@ -284,6 +284,7 @@ export function renderCommandLoopDetail(
   if (task.kind !== "cmd-loop") return renderList(panel, width);
   const colour = STATUS_COLOUR[task.status];
   const envCount = Object.keys(task.env ?? {}).length;
+  const variables = `${String(envCount)} variable${envCount === 1 ? "" : "s"}`;
   const streak = failureStreak(task);
   // A streak explains why the next fire is later than the expression says, so it
   // sits with the schedule facts and never rewrites them (ADR-0017). The signal
@@ -324,11 +325,7 @@ export function renderCommandLoopDetail(
     streakFacts,
     signalFacts,
     field(panel, "Last exit", task.lastExitCode === undefined ? "—" : String(task.lastExitCode)),
-    field(
-      panel,
-      "Env",
-      envCount === 0 ? "—" : `${String(envCount)} variable${envCount === 1 ? "" : "s"}`,
-    ),
+    field(panel, "Env", envCount === 0 ? "—" : variables),
     field(panel, "Wake on failure", task.wakeOnFailure === false ? "off" : "on"),
     task.expiresAt === undefined ? [] : field(panel, "Expires", formatClockTime(task.expiresAt)),
     task.endedAt === undefined ? [] : field(panel, "Ended", formatClockTime(task.endedAt)),
@@ -460,8 +457,8 @@ export function callLine(
   const status = `  ${call.status}${duration}`;
   const room = Math.max(1, width - prefix.length - status.length);
   const subject = singleLine(call.subject, room);
-  const body =
-    subject.length === 0 ? "" : isCommandCall(call) ? theme.fg("accent", subject) : subject;
+  let body = subject;
+  if (subject.length > 0 && isCommandCall(call)) body = theme.fg("accent", subject);
   return `${prefix}${body}${theme.fg(CALL_COLOUR[call.status], status)}`;
 }
 

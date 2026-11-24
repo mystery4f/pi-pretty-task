@@ -60,6 +60,7 @@ export function exitText(task: Task): string {
  * changed; a loop its fires, schedule and the same age. Recency sits on the right so a
  * row that just moved to the top says why (ADR-0010).
  */
+// pi-lens-ignore: no-flag-argument -- the flag swaps one cell's text; a second function would repeat the whole layout
 export function rightText(
   row: PanelTaskView,
   now: number,
@@ -348,6 +349,7 @@ export function singleLine(text: string, maxLength: number): string {
  * sees `llm` can type `llm` and find that row.
  */
 export function kindWord(kind: TaskKind): "proc" | "llm" | "cmd" | "chn" {
+  // pi-lens-ignore: switch-without-default -- exhaustive over the closed kind union; a default would hide a new kind from the compiler
   switch (kind) {
     case "process":
       return "proc";

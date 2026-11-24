@@ -21,6 +21,7 @@ import type { TaskScope } from "../base/runtime-state.js";
 import { sessionTaskDirectory } from "../base/runtime-state.js";
 import type {
   CmdLoopTask,
+  FireOutcome,
   FireRecord,
   KillReason,
   LoopBase,
@@ -413,30 +414,35 @@ export class LoopTasks {
       ...(expiresAt !== undefined ? { expiresAt } : {}),
     };
 
-    const task: LoopTask =
-      prompt.length > 0
-        ? {
-            ...shared,
-            id: this.sessions.createId(session, "prompt-loop"),
-            kind: "prompt-loop",
-            prompt,
-            iterations: [],
-          }
-        : {
-            ...shared,
-            id: this.sessions.createId(session, "cmd-loop"),
-            kind: "cmd-loop",
-            command,
-            // Recorded absolute so the panel and a later fire agree on the
-            // directory even though the record outlives the turn that made it.
-            ...(input.workingDirectory !== undefined
-              ? { cwd: resolve(input.cwd, input.workingDirectory) }
-              : {}),
-            ...(input.env !== undefined ? { env: { ...input.env } } : {}),
-            ...(input.wakeOnFailure !== undefined ? { wakeOnFailure: input.wakeOnFailure } : {}),
-            ...(notifyExitCodes !== undefined ? { notifyExitCodes } : {}),
-            fireHistory: [],
-          };
+    // Recorded absolute so the panel and a later fire agree on the directory
+    // even though the record outlives the turn that made it.
+    const cwd =
+      input.workingDirectory === undefined
+        ? {}
+        : { cwd: resolve(input.cwd, input.workingDirectory) };
+
+    let task: LoopTask;
+    if (prompt.length > 0) {
+      task = {
+        ...shared,
+        id: this.sessions.createId(session, "prompt-loop"),
+        kind: "prompt-loop",
+        prompt,
+        iterations: [],
+      };
+    } else {
+      task = {
+        ...shared,
+        id: this.sessions.createId(session, "cmd-loop"),
+        kind: "cmd-loop",
+        command,
+        ...cwd,
+        ...(input.env !== undefined ? { env: { ...input.env } } : {}),
+        ...(input.wakeOnFailure !== undefined ? { wakeOnFailure: input.wakeOnFailure } : {}),
+        ...(notifyExitCodes !== undefined ? { notifyExitCodes } : {}),
+        fireHistory: [],
+      };
+    }
 
     session.tasks.set(task.id, task);
     await this.sessions.persist(session);
@@ -508,6 +514,7 @@ export class LoopTasks {
       }
     }
 
+    // pi-lens-ignore: switch-without-default -- every action has its case and `undefined` is one; a default would have nothing to do
     switch (input.action) {
       case undefined:
         // A retune alone; the schedule branch above owns the outcome.
@@ -723,6 +730,16 @@ export class LoopTasks {
   }
 
   /**
+   * How a fire ended for the reader: a completed command succeeded, a stop by the
+   * user interrupted it, a reported exit code signalled, and anything else failed.
+   */
+  private fireOutcome(loop: CmdLoopTask, result: FireResult): FireOutcome {
+    if (result.status === "completed") return "success";
+    if (result.killReason === "user") return "interrupted";
+    return this.isSignal(loop, result) ? "signalled" : "failed";
+  }
+
+  /**
    * Record the end of a fire's child process: outcome, exit code, bytes and the
    * failure backoff. Returns nothing when the loop or its fire is already gone
    * (deleted, or history trimmed), so a late child can never resurrect a record.
@@ -735,14 +752,7 @@ export class LoopTasks {
       if (fire === undefined) return undefined;
 
       const at = this.now();
-      fire.outcome =
-        result.status === "completed"
-          ? "success"
-          : result.killReason === "user"
-            ? "interrupted"
-            : this.isSignal(loop, result)
-              ? "signalled"
-              : "failed";
+      fire.outcome = this.fireOutcome(loop, result);
       if (result.exitCode !== undefined && result.exitCode !== null) {
         fire.exitCode = result.exitCode;
       }

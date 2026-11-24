@@ -81,6 +81,7 @@ export function detachedNotice(taskId: string): string {
 
 /** What the shortcut's notification says, one line per outcome. */
 export function describeDetach(result: DetachResult): string {
+  // pi-lens-ignore: switch-without-default -- exhaustive over the closed outcome union; a default would hide a new outcome from the compiler
   switch (result.kind) {
     case "detached":
       return `Moved to ${result.taskId}. Follow: pretty_task_bg_logs ${result.taskId}`;
@@ -445,6 +446,7 @@ export class ForegroundRunner {
     try {
       const outcome = await run.settled;
       await pump();
+      // pi-lens-ignore: switch-without-default -- exhaustive over the closed outcome union; a default would hide a new outcome from the compiler
       switch (outcome.kind) {
         case "detached":
           onData(Buffer.from(`\n${detachedNotice(outcome.taskId)}\n`, "utf8"));

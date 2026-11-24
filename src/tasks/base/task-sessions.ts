@@ -114,6 +114,7 @@ export class TaskSessions {
    * not, because a session that was only ever looked at must never be fired.
    */
   loaded(): Promise<OwnedTaskSession[]> {
+    // pi-lens-ignore: no-single-promise-in-promise-methods -- a Map's values spread to one promise per session, not a single promise
     return Promise.all([...this.sessions.values()]);
   }
 

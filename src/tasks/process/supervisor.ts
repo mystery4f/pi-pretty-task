@@ -137,6 +137,9 @@ export function startProcess(options: StartProcessOptions): RunningProcess {
   let exited = false;
   let signalled = false;
   let stopping: Promise<StopResult> | undefined;
+  // Spawning the caller's command is this supervisor's purpose; the tool layer owns
+  // validating the shell and the command before they arrive here.
+  // nosemgrep: javascript.lang.security.detect-child-process.detect-child-process
   const child = spawn(invocation.executable, [...invocation.args], {
     cwd: options.cwd,
     env: childEnv,

@@ -112,6 +112,34 @@ function fuzzyMatch(text: string, needle: string): FieldMatch | undefined {
 }
 
 /**
+ * The one hidden word a row's own text does not show: a prompt loop's prompt or a
+ * command's text. A chain has none, so the reader never needs to find one.
+ */
+function hiddenWord(task: Task): SearchField[] {
+  if (task.kind === "prompt-loop") {
+    return [{ field: "prompt", text: task.prompt, bonus: HIDDEN_BONUS, hidden: true }];
+  }
+  if (task.kind === "cmd-loop" || task.kind === "process") {
+    return [{ field: "command", text: task.command, bonus: HIDDEN_BONUS, hidden: true }];
+  }
+  return [];
+}
+
+/**
+ * A chain has no command of its own: its row shows the step names it queues, so
+ * those are words the reader can see and search for (ADR-0012).
+ */
+function stepWord(step: { name: string; index: number }): SearchField {
+  return {
+    field: "step",
+    text: step.name,
+    bonus: STEP_BONUS,
+    hidden: false,
+    stepIndex: step.index,
+  };
+}
+
+/**
  * The best-scoring field of the task for this query, or undefined when none
  * matches. A name heads the row, so it outranks an id, a status or a command hit
  * at the same tightness; a chain row shows its step names in place of a name, so
@@ -131,38 +159,14 @@ export function bestFieldMatch(
   // A chain with a queue spends its name column on the steps, so its own name is
   // no longer a word the row prints.
   const nameHidden = task.kind === "chain" && task.steps.length > 0;
-  const fields: SearchField[] =
-    task.kind === "prompt-loop"
-      ? [
-          { field: "name", text: task.name, bonus: NAME_BONUS, hidden: false },
-          { field: "id", text: task.id, bonus: ID_BONUS, hidden: false },
-          { field: "prompt", text: task.prompt, bonus: HIDDEN_BONUS, hidden: true },
-          { field: "status", text: task.status, bonus: STATUS_BONUS, hidden: false },
-          { field: "kind", text: kind, bonus: STATUS_BONUS, hidden: false },
-        ]
-      : task.kind === "chain"
-        ? // A chain has no command of its own: its row shows the step names it queues,
-          // so those are words the reader can see and search for (ADR-0012).
-          [
-            { field: "name", text: task.name, bonus: NAME_BONUS, hidden: nameHidden },
-            { field: "id", text: task.id, bonus: ID_BONUS, hidden: false },
-            { field: "status", text: task.status, bonus: STATUS_BONUS, hidden: false },
-            { field: "kind", text: kind, bonus: STATUS_BONUS, hidden: false },
-            ...steps.map(({ name, index }) => ({
-              field: "step" as const,
-              text: name,
-              bonus: STEP_BONUS,
-              hidden: false,
-              stepIndex: index,
-            })),
-          ]
-        : [
-            { field: "name", text: task.name, bonus: NAME_BONUS, hidden: false },
-            { field: "id", text: task.id, bonus: ID_BONUS, hidden: false },
-            { field: "command", text: task.command, bonus: HIDDEN_BONUS, hidden: true },
-            { field: "status", text: task.status, bonus: STATUS_BONUS, hidden: false },
-            { field: "kind", text: kind, bonus: STATUS_BONUS, hidden: false },
-          ];
+  const fields: SearchField[] = [
+    { field: "name", text: task.name, bonus: NAME_BONUS, hidden: nameHidden },
+    { field: "id", text: task.id, bonus: ID_BONUS, hidden: false },
+    ...hiddenWord(task),
+    { field: "status", text: task.status, bonus: STATUS_BONUS, hidden: false },
+    { field: "kind", text: kind, bonus: STATUS_BONUS, hidden: false },
+    ...(task.kind === "chain" ? steps.map(stepWord) : []),
+  ];
   let best: RowMatch | undefined;
   for (const field of fields) {
     const match = fuzzyMatch(field.text, needle);

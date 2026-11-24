@@ -24,10 +24,22 @@ import {
   searchOutputFile,
 } from "../base/search.js";
 import type { ProcessTask } from "../base/task.js";
-import type { ChainTasks, ChainTaskView, QueuedStep } from "../chain/chain-tasks.js";
+import type {
+  ChainTasks,
+  ChainTaskView,
+  QueuedStep,
+  StopChainResult,
+} from "../chain/chain-tasks.js";
 
 import { parseFollowSeconds, parseTimeoutSeconds, parseWaitSeconds } from "./limits.js";
-import type { ProcessTasks, ProcessTaskView, TaskScope } from "./process-tasks.js";
+import type {
+  FollowTaskResult,
+  ProcessTasks,
+  ProcessTaskView,
+  StopTaskResult,
+  TaskScope,
+  WaitTaskResult,
+} from "./process-tasks.js";
 import type { CommandTemplate } from "./templates.js";
 
 const RunParameters = Type.Object({
@@ -333,6 +345,7 @@ const RELOAD_NOTE =
 function runDescription(templates: ReadonlyMap<string, CommandTemplate>): string {
   const base =
     "Run a shell command in the background and return a task id at once, without waiting for the command to finish. stdout and stderr are captured together in one output file. With `after`, it queues behind a task or chain instead.";
+  // pi-lens-ignore: no-sort-without-comparator -- template names are plain words and the default string order is the intended one
   const names = [...templates.keys()].sort();
   if (names.length === 0) {
     return `${base} No command templates are configured, so \`template\` is rejected. ${RELOAD_NOTE}`;
@@ -395,6 +408,65 @@ type Address =
 function missing(id: string): string {
   return `No background task with id ${id} in this session.`;
 }
+
+/**
+ * The known template names for an unknown-template error: all of them, or the first
+ * ones and the total. The error is read in context too, so it never dumps a large file.
+ */
+function templateList(known: readonly string[]): string {
+  if (known.length === 0) return "(none)";
+  const shown = known.slice(0, 20).map((name) => JSON.stringify(name));
+  if (known.length <= 20) return shown.join(", ");
+  return `${shown.join(", ")}, … (${String(known.length)} in total)`;
+}
+
+/** How a follow describes its wait: finished, silent, or how much arrived. */
+function followNote(followed: FollowTaskResult, windowMs: number): string {
+  if (followed.finished) return "the task has finished; nothing more will arrive";
+  if (followed.timedOut) {
+    return `no new output in ${formatDuration(windowMs)}; the task is still running`;
+  }
+  return `followed ${formatBytes(followed.deltaBytes)}`;
+}
+
+/** The first line of a wait: ended, cancelled, or still running when the wait ran out. */
+function waitHeadline(id: string, result: WaitTaskResult): string {
+  const { view, waited, cancelled } = result;
+  if (waited) {
+    return `Background task ${id} (${view.task.name}) ended as ${view.task.status} after ${formatDuration(view.elapsedMs)}.`;
+  }
+  if (cancelled) {
+    return `The wait for ${id} (${view.task.name}) was cancelled; the task is still ${view.task.status} and was left running. Read it with pretty_task_bg_status id=${id}.`;
+  }
+  return `Background task ${id} (${view.task.name}) is still running after ${formatDuration(view.elapsedMs)}; it did not finish within the wait.`;
+}
+
+/** The first line of a chain stop, one wording per outcome. */
+function chainStopHeadline(id: string, stopped: StopChainResult): string {
+  const name = stopped.view.task.name;
+  if (stopped.outcome === "stopped") {
+    // The running step is named only when one was actually stopped.
+    const step =
+      stopped.step === undefined ? "" : `; its running step ${stopped.step.task.id} was stopped`;
+    return `Stopped chain ${id} (${name})${step} and the steps behind it will not run.`;
+  }
+  if (stopped.outcome === "tree-survived") {
+    return `Chain ${id} (${name}) was ended and the steps behind it will not run, but its running step ${stopped.step?.task.id ?? "at the cursor"} could not be stopped: ${stopped.detail ?? "its processes are still running"}.`;
+  }
+  return `Chain ${id} had already finished (${stopped.view.task.status}); nothing was signalled.`;
+}
+
+/** The first line of a stop: killed, already ended, or outlived the signal. */
+function stopHeadline(id: string, result: StopTaskResult): string {
+  const name = result.view.task.name;
+  if (result.outcome === "killed") {
+    return `Stopped background task ${id} (${name}) in ${formatDuration(result.tookMs)}.`;
+  }
+  if (result.outcome === "already-finished") {
+    return `Background task ${id} had already finished (${result.view.task.status}); nothing was signalled.`;
+  }
+  return `Background task ${id} could not be stopped: ${result.detail ?? "its processes are still running"}.`;
+}
 export function processTaskTools(
   tasks: ProcessTasks,
   chains: ChainTasks,
@@ -440,16 +512,9 @@ export function processTaskTools(
       // template's value. `env` is deliberately never templated.
       const template = params.template === undefined ? undefined : templates.get(params.template);
       if (params.template !== undefined && template === undefined) {
+        // pi-lens-ignore: no-sort-without-comparator -- template names are plain words and the default string order is the intended one
         const known = [...templates.keys()].sort();
-        // The error is read in context too, so it lists the first names and says
-        // how many there are instead of dumping a large file.
-        const shownNames = known.slice(0, 20).map((name) => JSON.stringify(name));
-        const list =
-          known.length === 0
-            ? "(none)"
-            : known.length <= 20
-              ? shownNames.join(", ")
-              : `${shownNames.join(", ")}, … (${String(known.length)} in total)`;
+        const list = templateList(known);
         return text(
           `Unknown template ${JSON.stringify(params.template)}. Known templates: ${list}. The task was not started. ${RELOAD_NOTE}`,
         );
@@ -635,11 +700,7 @@ export function processTaskTools(
         }
 
         const { view } = followed;
-        const note = followed.finished
-          ? "the task has finished; nothing more will arrive"
-          : followed.timedOut
-            ? `no new output in ${formatDuration(windowMs)}; the task is still running`
-            : `followed ${formatBytes(followed.deltaBytes)}`;
+        const note = followNote(followed, windowMs);
         const header = [
           `name: ${view.task.name} · ${view.task.id} · ${view.task.kind} · ${view.task.status}`,
           `elapsed ${formatDuration(view.elapsedMs)} · output ${formatBytes(view.outputBytes)} · follow`,
@@ -740,11 +801,7 @@ export function processTaskTools(
       }
 
       const { view, waited, cancelled } = result;
-      const headline = waited
-        ? `Background task ${id} (${view.task.name}) ended as ${view.task.status} after ${formatDuration(view.elapsedMs)}.`
-        : cancelled
-          ? `The wait for ${id} (${view.task.name}) was cancelled; the task is still ${view.task.status} and was left running. Read it with pretty_task_bg_status id=${id}.`
-          : `Background task ${id} (${view.task.name}) is still running after ${formatDuration(view.elapsedMs)}; it did not finish within the wait.`;
+      const headline = waitHeadline(id, result);
       return {
         content: [{ type: "text", text: [headline, "", describeTask(view)].join("\n") }],
         details: { ...taskDetails(view), waited, cancelled },
@@ -859,12 +916,7 @@ export function processTaskTools(
         const stopped = await chains.stop(scope, id);
         if (stopped === undefined) return text(missing(id));
         const steps = await stepViews(scope, stopped.view.task.steps);
-        const headline =
-          stopped.outcome === "stopped"
-            ? `Stopped chain ${id} (${stopped.view.task.name})${stopped.step === undefined ? "" : `; its running step ${stopped.step.task.id} was stopped`} and the steps behind it will not run.`
-            : stopped.outcome === "tree-survived"
-              ? `Chain ${id} (${stopped.view.task.name}) was ended and the steps behind it will not run, but its running step ${stopped.step?.task.id ?? "at the cursor"} could not be stopped: ${stopped.detail ?? "its processes are still running"}.`
-              : `Chain ${id} had already finished (${stopped.view.task.status}); nothing was signalled.`;
+        const headline = chainStopHeadline(id, stopped);
         return {
           content: [
             {
@@ -882,12 +934,7 @@ export function processTaskTools(
       const result = await tasks.stop(scope, id);
       if (result === undefined) return text(missing(id));
 
-      const headline =
-        result.outcome === "killed"
-          ? `Stopped background task ${id} (${result.view.task.name}) in ${formatDuration(result.tookMs)}.`
-          : result.outcome === "already-finished"
-            ? `Background task ${id} had already finished (${result.view.task.status}); nothing was signalled.`
-            : `Background task ${id} could not be stopped: ${result.detail ?? "its processes are still running"}.`;
+      const headline = stopHeadline(id, result);
       return {
         content: [{ type: "text", text: [headline, "", describeTask(result.view)].join("\n") }],
         details: {

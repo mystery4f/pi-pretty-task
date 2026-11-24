@@ -36,24 +36,31 @@ import type { MatchField } from "./query.js";
 import { inTab } from "./row-filter.js";
 import type { PanelView } from "./view.js";
 
+/**
+ * An empty page says which of the three reasons emptied it: nothing of that kind,
+ * a status filter that keeps nothing, or a query that matches no row. It never
+ * blames the other pages, which are only a keypress away.
+ */
+function emptyPageMessage(panel: PanelView): string {
+  if (panel.allRows.every((row) => !inTab(row.task, panel.tab)) || panel.allRows.length === 0) {
+    return TAB_EMPTY[panel.tab];
+  }
+  if (panel.query.length > 0) {
+    return "  Nothing on this page matches the search — / , then backspace, widens it.";
+  }
+  if (panel.filter === "running") {
+    return "  Nothing is running on this page — f shows every status, so finished work is one keypress away.";
+  }
+  return "  Nothing here matches this status — f moves to the next filter.";
+}
+
 export function renderList(panel: PanelView, width: number): string[] {
   const theme = panel.theme;
   const inner = Math.max(1, width - 2);
   const body: string[] = [];
 
   if (panel.rows.length === 0) {
-    // An empty page says which of the three reasons emptied it: nothing of that
-    // kind, a status filter that keeps nothing, or a query that matches no row.
-    // It never blames the other pages, which are only a keypress away.
-    const message =
-      panel.allRows.every((row) => !inTab(row.task, panel.tab)) || panel.allRows.length === 0
-        ? TAB_EMPTY[panel.tab]
-        : panel.query.length > 0
-          ? "  Nothing on this page matches the search — / , then backspace, widens it."
-          : panel.filter === "running"
-            ? "  Nothing is running on this page — f shows every status, so finished work is one keypress away."
-            : "  Nothing here matches this status — f moves to the next filter.";
-    body.push("", theme.fg("dim", message));
+    body.push("", theme.fg("dim", emptyPageMessage(panel)));
     return listFrame(panel, body, width);
   }
 
@@ -134,6 +141,7 @@ export function countsLine(panel: PanelView): string {
   const counts = { running: 0, succeeded: 0, failed: 0, timeout: 0, killed: 0 };
   for (const row of panel.allRows) {
     const task = row.task;
+    // pi-lens-ignore: switch-without-default -- every status is counted; a default would have nothing to do
     switch (task.status) {
       case "running":
       case "paused":
@@ -413,6 +421,7 @@ export function highlight(
   let themed = "";
   let at = 0;
   let index = 0;
+  // pi-lens-ignore: ts-while-index-length -- the index advances by whole runs of adjacent positions, so a for-of would need the same index
   while (index < positions.length) {
     const start = positions[index] ?? 0;
     if (start > at) themed += panel.theme.fg(colour, text.slice(at, start));

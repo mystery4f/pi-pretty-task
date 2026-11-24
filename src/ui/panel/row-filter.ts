@@ -15,6 +15,7 @@ import type { PanelFilter, PanelTab } from "./model.js";
  * kind that has children, so the other two kinds are roots by construction.
  */
 export function inTab(task: Task, tab: PanelTab): boolean {
+  // pi-lens-ignore: switch-without-default -- exhaustive over the closed tab union; a default would hide a new tab from the compiler
   switch (tab) {
     case "processes":
       return task.kind === "process" && task.parentId === undefined;
@@ -33,6 +34,7 @@ export function inTab(task: Task, tab: PanelTab): boolean {
  * (ADR-0014) — the chain is `running` for as long as it has a step left.
  */
 export function passesFilter(task: Task, filter: PanelFilter): boolean {
+  // pi-lens-ignore: switch-without-default -- exhaustive over the closed filter union; a default would hide a new filter from the compiler
   switch (filter) {
     case "all":
       return true;
