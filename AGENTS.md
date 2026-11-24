@@ -48,6 +48,16 @@ Source references from the two upstream plugins are cloned under `.tmp/` (git-ig
 - Every state file write is atomic (temp file + rename) and every read tolerates a corrupt file by falling back to `.prev`.
 - Style is machine-enforced: `.editorconfig` (2 spaces, LF, final newline) plus Biome for both formatting and linting — one tool, so there is no Prettier/ESLint pair to keep in sync. `npm run lint` must be clean before a change is done; do not reformat files you did not otherwise touch. The same run catches import cycles (`suspicious/noImportCycles`): a split that leaves two files importing each other fails `npm run lint`, so the direction of a dependency is enforced rather than remembered.
 
+### pi-lens hints
+
+`pi-lens` reports warnings and errors, which must stay at zero, and `hint`s, which are advisory. Five of its ast-grep hint rules are turned off in `.pi-lens.json` because this codebase answers them by construction, and turning them on again would only produce comments that say so:
+
+- `no-conditional-empty-object-spread` — a task record's optional fields are `readonly`, so a field can only be added where the literal is built; an explicit if/else would need one branch per combination of optional fields.
+- `no-unknown-parameters`, `no-runtime-typeof`, `no-unsafe-dictionary-unknown` — a thrown value and a parsed JSON file are `unknown` until they are narrowed, and the narrowing *is* the decoder in `src/tasks/base/task-store.ts`. A parameter that arrives as `unknown` is the rule's own advice being followed.
+- `long-parameter-list` — half of the hits are the pi tool interface's own `execute(_toolCallId, params, _signal, _onUpdate, ctx)` signature, which cannot change; the rest are cohesive internals whose parameters are each required.
+
+`large-class` and `high-complexity` stay visible on purpose: they name real debt (the four stores and two panel classes) and a split is a design change that needs an ADR, not a lint fix.
+
 
 ## Verification
 

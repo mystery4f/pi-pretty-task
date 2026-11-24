@@ -1,0 +1,22 @@
+{
+  "rules": {
+    "no-conditional-empty-object-spread": {
+      "disable": [
+        "no-conditional-empty-object-spread",
+        "ast-grep:no-conditional-empty-object-spread"
+      ]
+    },
+    "no-unknown-parameters": {
+      "disable": ["no-unknown-parameters", "ast-grep:no-unknown-parameters"]
+    },
+    "no-runtime-typeof": {
+      "disable": ["no-runtime-typeof", "ast-grep:no-runtime-typeof"]
+    },
+    "no-unsafe-dictionary-unknown": {
+      "disable": ["no-unsafe-dictionary-unknown", "ast-grep:no-unsafe-dictionary-unknown"]
+    },
+    "long-parameter-list": {
+      "disable": ["long-parameter-list", "ast-grep:long-parameter-list"]
+    }
+  }
+}
