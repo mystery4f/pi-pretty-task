@@ -3,6 +3,10 @@ name: publish
 on:
   release:
     types: [published]
+  # A publish that failed (npm outage, a trusted-publisher setting fixed after
+  # the release) is re-run from here: re-running the old workflow run reuses the
+  # YAML of its own commit, which is the one you just fixed away from.
+  workflow_dispatch:
 
 permissions:
   # OIDC: npm trusts this workflow by name instead of a long-lived token, so
@@ -44,6 +48,8 @@ jobs:
           rm pack.json
 
       - name: Release tag must match package.json
+        # Only a release event has a tag to compare against.
+        if: github.event_name == 'release'
         env:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
