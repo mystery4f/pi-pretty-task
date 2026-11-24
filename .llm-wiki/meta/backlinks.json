@@ -11,7 +11,9 @@
   "sources/obs-2026-11-16-pi-plugin-six-phase-skill-chain-created": [],
   "sources/obs-2026-11-16-release-design-for-pi-pretty-task-1-0-0": [],
   "sources/obs-2026-11-16-skills-lint-skills-mjs": [],
-  "sources/obs-2026-11-17-pi-dev-gallery-index-misses-pi-pretty-task-publish-event": [],
+  "sources/obs-2026-11-17-pi-dev-gallery-index-misses-pi-pretty-task-publish-event": [
+    "sources/pi-extension-stale-instance-unhandled-rejection"
+  ],
   "sources/obs-2026-11-17-pi-plugin-skills-reference": [],
   "sources/obs-2026-11-17-readme-key-list-is-test-guarded-against-panel-drift": [
     "sources/pi-pretty-task-preview-from-the-built-panel"
@@ -19,9 +21,11 @@
   "sources/obs-2026-11-21-": [],
   "sources/obs-2026-11-22-gif": [],
   "sources/obs-2026-11-24-pi-lens-test-tsconfig": [],
+  "sources/pi-extension-stale-instance-unhandled-rejection": [],
   "sources/pi-git-install-omits-dev-deps-so-ship-ts-entry": [
     "syntheses/release-1-0-0-publish-support"
   ],
+  "sources/pi-pretty-task-full-suite-parallel-flake": [],
   "sources/pi-pretty-task-one-projection-and-formula": [
     "sources/pi-pretty-task-side-index-to-field"
   ],

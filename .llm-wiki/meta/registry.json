@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "last_updated": "2026-11-24T02:02:18.296Z",
+  "last_updated": "2026-11-24T16:19:02.464Z",
   "pages": {
     "sources/await-state-not-bytes-in-process-tests": {
       "type": "source",
@@ -261,6 +261,15 @@
       "created": "2026-11-24",
       "updated": "2026-11-24"
     },
+    "sources/pi-extension-stale-instance-unhandled-rejection": {
+      "type": "source",
+      "title": "pi 扩展实例失效后的 sendMessage 抛出会杀死进程",
+      "category": "pi-plugin",
+      "status": "insight",
+      "slug": "pi-extension-stale-instance-unhandled-rejection",
+      "created": "2026-11-24",
+      "updated": "2026-11-24"
+    },
     "sources/pi-git-install-omits-dev-deps-so-ship-ts-entry": {
       "type": "source",
       "title": "pi 的 git 安装不带 devDeps，入口要写 .ts 而不是靠 prepare 构建",
@@ -269,6 +278,15 @@
       "slug": "pi-git-install-omits-dev-deps-so-ship-ts-entry",
       "created": "2026-11-15",
       "updated": "2026-11-15"
+    },
+    "sources/pi-pretty-task-full-suite-parallel-flake": {
+      "type": "source",
+      "title": "全量 integration 套件在 8 worker 下间歇超时，串行才是确定性证据",
+      "category": "testing",
+      "status": "insight",
+      "slug": "pi-pretty-task-full-suite-parallel-flake",
+      "created": "2026-11-24",
+      "updated": "2026-11-24"
     },
     "sources/pi-pretty-task-one-projection-and-formula": {
       "type": "source",

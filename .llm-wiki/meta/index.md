@@ -20,7 +20,9 @@
 - [[sources/obs-2026-11-21-]] — Observation: 订阅模式不做「一行一触发」，订阅也不新开页签 *(created: 2026-11-21)*
 - [[sources/obs-2026-11-22-gif]] — Observation: GIF 里"看不见"的新功能属于节奏问题 *(created: 2026-11-22)*
 - [[sources/obs-2026-11-24-pi-lens-test-tsconfig]] — Observation: pi-lens 告警清零：抑制语法与 test tsconfig 项目 *(created: 2026-11-24)*
+- [[sources/pi-extension-stale-instance-unhandled-rejection]] — pi 扩展实例失效后的 sendMessage 抛出会杀死进程 *(created: 2026-11-24)*
 - [[sources/pi-git-install-omits-dev-deps-so-ship-ts-entry]] — pi 的 git 安装不带 devDeps，入口要写 .ts 而不是靠 prepare 构建 *(created: 2026-11-15)*
+- [[sources/pi-pretty-task-full-suite-parallel-flake]] — 全量 integration 套件在 8 worker 下间歇超时，串行才是确定性证据 *(created: 2026-11-24)*
 - [[sources/pi-pretty-task-one-projection-and-formula]] — 一个形状一处投影，一个式子一处实现 *(created: 2026-11-16)*
 - [[sources/pi-pretty-task-panel-intents-and-view]] — 面板：键盘说意图，渲染方拿只读视图 *(created: 2026-11-16)*
 - [[sources/pi-pretty-task-preview-from-the-built-panel]] — README 截图从 dist 里的真面板渲染，三处状态陷阱 *(created: 2026-11-21)*
@@ -40,4 +42,4 @@
 - [[syntheses/verify-red-tests-handoff]] — verify 红测修复交接（5 个 integration 用例） *(created: 2026-11-16)*
 
 ---
-*Last updated: 2026-11-24T02:02:18.296Z* | *Total pages: 31*
+*Last updated: 2026-11-24T16:19:02.464Z* | *Total pages: 33*

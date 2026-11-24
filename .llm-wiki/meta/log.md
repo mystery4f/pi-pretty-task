@@ -92,3 +92,9 @@
 ## [2026-11-24T02:02:18.283Z] observe
 - slug: "obs-2026-11-24-pi-lens-test-tsconfig", title: "pi-lens 告警清零：抑制语法与 test tsconfig 项目", relevance: "high"
 
+## [2026-11-24T16:19:02.431Z] retro
+- slug: "pi-extension-stale-instance-unhandled-rejection", title: "pi 扩展实例失效后的 sendMessage 抛出会杀死进程", category: "pi-plugin"
+
+## [2026-11-24T16:19:02.442Z] retro
+- slug: "pi-pretty-task-full-suite-parallel-flake", title: "全量 integration 套件在 8 worker 下间歇超时，串行才是确定性证据", category: "testing"
+
