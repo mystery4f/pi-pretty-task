@@ -142,7 +142,7 @@ describe("the extension's notification", () => {
       { cwd: dir.path, sessionId: "session-notify" },
       { notificationWrite: (text) => written.push(text) },
     );
-    harness.startSession({ cwd: dir.path, sessionId: "session-notify" });
+    await harness.startSession({ cwd: dir.path, sessionId: "session-notify" });
 
     const result = await harness.call("pretty_task_bg_run", {
       command: script,
@@ -186,7 +186,7 @@ describe("the extension's notification", () => {
       { cwd: dir.path, sessionId: "session-notify-off" },
       { env: { PI_PRETTY_TASK_NOTIFY: "off" }, notificationWrite: (text) => written.push(text) },
     );
-    harness.startSession({ cwd: dir.path, sessionId: "session-notify-off" });
+    await harness.startSession({ cwd: dir.path, sessionId: "session-notify-off" });
 
     await harness.call("pretty_task_bg_run", {
       command: script,
@@ -205,7 +205,7 @@ describe("the extension's notification", () => {
       { cwd: dir.path, sessionId: "session-notify-running" },
       { notificationWrite: (text) => written.push(text) },
     );
-    harness.startSession({ cwd: dir.path, sessionId: "session-notify-running" });
+    await harness.startSession({ cwd: dir.path, sessionId: "session-notify-running" });
 
     const result = await harness.call("pretty_task_bg_run", {
       command: script,
@@ -229,7 +229,7 @@ describe("the extension's notification", () => {
       { cwd: dir.path, sessionId: "session-notify-notice" },
       { notificationWrite: () => {} },
     );
-    harness.startSession({ cwd: dir.path, sessionId: "session-notify-notice" });
+    await harness.startSession({ cwd: dir.path, sessionId: "session-notify-notice" });
 
     const result = await harness.call("pretty_task_bg_run", {
       command: script,

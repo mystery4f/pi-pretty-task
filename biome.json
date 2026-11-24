@@ -45,6 +45,9 @@
         "noExplicitAny": "error",
         "noConsole": "off",
         "noImportCycles": "error"
+      },
+      "nursery": {
+        "noFloatingPromises": "error"
       }
     }
   },
