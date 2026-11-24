@@ -69,7 +69,7 @@ export async function readOutputTail(
     // A tail that begins in the middle of a line would render as garbage.
     if (truncated) all.shift();
     // A trailing newline leaves an empty last element that was never a line.
-    if (all.length > 0 && all[all.length - 1] === "") all.pop();
+    if (all.length > 0 && all.at(-1) === "") all.pop();
     if (all.length > wanted) {
       all.splice(0, all.length - wanted);
       truncated = true;

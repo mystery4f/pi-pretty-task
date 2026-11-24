@@ -479,7 +479,7 @@ function errorMessage(error: unknown): string {
  * an unset one.
  */
 function definedEnv(env: NodeJS.ProcessEnv): Record<string, string> {
-  const defined: Record<string, string> = {};
-  for (const [key, value] of Object.entries(env)) if (value !== undefined) defined[key] = value;
-  return defined;
+  return Object.fromEntries(
+    Object.entries(env).filter((entry): entry is [string, string] => entry[1] !== undefined),
+  );
 }

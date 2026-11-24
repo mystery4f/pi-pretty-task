@@ -248,18 +248,18 @@ export const PANEL_FILTERS: readonly PanelFilter[] = ["all", "running", "signal"
 export const DEFAULT_PANEL_FILTER: PanelFilter = "running";
 
 /** The word each page is titled with; the glossary's own names (GLOSSARY.md). */
-export const TAB_TITLE: Record<PanelTab, string> = {
+export const TAB_TITLE = {
   processes: "Processes",
   loops: "Loops",
   chains: "Chains",
-};
+} satisfies Record<PanelTab, string>;
 
 /** What a page says when the session holds nothing of its kind at all. */
-export const TAB_EMPTY: Record<PanelTab, string> = {
+export const TAB_EMPTY = {
   processes: "No processes here — run a command with pretty_task_bg_run and it appears.",
   loops: "No loops here — a schedule created with pretty_task_loop_create gathers its fires here.",
   chains: "No chains here — queue a step with pretty_task_bg_run's after and the pipeline appears.",
-};
+} satisfies Record<PanelTab, string>;
 
 /**
  * What a key says when it would change, rather than read, a row another session

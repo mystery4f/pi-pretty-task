@@ -149,21 +149,21 @@ export function messageOf(error: unknown): string {
 const COMMAND_TOOLS: ReadonlySet<string> = new Set(["bash", "pretty_task_bg_run"]);
 
 /** Iteration states, read from the one task-status palette. */
-export const ITERATION_COLOUR: Record<IterationStatus, ThemeColor> = {
+export const ITERATION_COLOUR = {
   running: STATUS_COLOUR.running,
   completed: STATUS_COLOUR.completed,
   aborted: STATUS_COLOUR.killed,
   interrupted: STATUS_COLOUR.interrupted,
-};
+} satisfies Record<IterationStatus, ThemeColor>;
 
 /** Tool-call states, read from the same palette. */
-export const CALL_COLOUR: Record<IterationCallStatus, ThemeColor> = {
+export const CALL_COLOUR = {
   running: STATUS_COLOUR.running,
   completed: STATUS_COLOUR.completed,
   failed: STATUS_COLOUR.failed,
   aborted: STATUS_COLOUR.killed,
   interrupted: STATUS_COLOUR.interrupted,
-};
+} satisfies Record<IterationCallStatus, ThemeColor>;
 
 export function isCommandCall(call: IterationCall): boolean {
   return COMMAND_TOOLS.has(call.tool);
@@ -240,27 +240,27 @@ export function fireLine(fire: FireRecord): string {
 }
 
 /** The glyph a strip cell prints for its outcome; `–` never ran (ADR-0015). */
-export const FIRE_MARK: Record<FireOutcome, string> = {
+export const FIRE_MARK = {
   running: "•",
   success: "✓",
   failed: "✗",
   signalled: "⚑",
   skipped: "–",
   interrupted: "!",
-};
+} satisfies Record<FireOutcome, string>;
 
 /** Strip colour by outcome: live, done, failed, never-ran, cut short by a stop. */
-export const FIRE_COLOUR: Record<FireOutcome, ThemeColor> = {
+export const FIRE_COLOUR = {
   running: STATUS_COLOUR.running,
   success: STATUS_COLOUR.completed,
   failed: STATUS_COLOUR.failed,
   signalled: "warning",
   skipped: "muted",
   interrupted: STATUS_COLOUR.interrupted,
-};
+} satisfies Record<FireOutcome, ThemeColor>;
 
 /** The mark a chain step carries on its line, one glyph per status it can hold. */
-export const STEP_MARK: Record<TaskStatus, string> = {
+export const STEP_MARK = {
   running: "●",
   paused: "•",
   completed: "✓",
@@ -270,7 +270,7 @@ export const STEP_MARK: Record<TaskStatus, string> = {
   waiting: "·",
   skipped: "–",
   stopped: "■",
-};
+} satisfies Record<TaskStatus, string>;
 
 /** Step colour by status, so a finished step reads as done and a skipped one as absent. */
 export function stepColour(status: TaskStatus): ThemeColor {

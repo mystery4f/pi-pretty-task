@@ -10,7 +10,7 @@ import type { ThemeColor } from "@earendil-works/pi-coding-agent";
 import type { TaskStatus } from "../tasks/base/task.js";
 
 /** Theme foreground token per ending, so the palette stays the user's theme. */
-export const STATUS_COLOUR: Record<TaskStatus, ThemeColor> = {
+export const STATUS_COLOUR = {
   running: "accent",
   /** A paused loop task is neither running nor finished. */
   paused: "muted",
@@ -24,4 +24,4 @@ export const STATUS_COLOUR: Record<TaskStatus, ThemeColor> = {
   skipped: "muted",
   /** A step the user's stop settled before it could run. */
   stopped: "warning",
-};
+} satisfies Record<TaskStatus, ThemeColor>;

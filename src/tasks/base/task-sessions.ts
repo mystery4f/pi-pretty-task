@@ -62,12 +62,12 @@ const ID_SUFFIX_LENGTH = 5;
  * (`bg-1a2cf`, `lp-1a2cf`, `lc-1a2cf`, `ch-1a2cf`) is readable without the panel
  * in front of you.
  */
-const ID_PREFIX: Record<TaskKind, string> = {
+const ID_PREFIX = {
   process: "bg-",
   "prompt-loop": "lp-",
   "cmd-loop": "lc-",
   chain: "ch-",
-};
+} satisfies Record<TaskKind, string>;
 
 export class TaskSessions {
   private readonly now: () => number;

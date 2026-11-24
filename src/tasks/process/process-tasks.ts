@@ -296,11 +296,11 @@ const SURVIVED_RETRY_MS = 1000;
 const FOLLOW_POLL_MS = 50;
 
 /** Map the supervisor's answer onto the store's, which speaks of tasks. */
-const STOP_OUTCOMES: Record<StopOutcome, StopTaskOutcome> = {
+const STOP_OUTCOMES = {
   stopped: "killed",
   "already-exited": "already-finished",
   "tree-survived": "tree-survived",
-};
+} satisfies Record<StopOutcome, StopTaskOutcome>;
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -708,7 +708,8 @@ export class ProcessTasks {
   async list(scope: TaskScope): Promise<ProcessTaskView[]> {
     // A child is a record, not a row: a loop's fire and a chain's step read through
     // their own tools, and only the parent they belong to is listed (ADR-0014).
-    return (await this.listAll(scope)).filter((view) => view.task.parentId === undefined);
+    const all = await this.listAll(scope);
+    return all.filter((view) => view.task.parentId === undefined);
   }
 
   async get(scope: TaskScope, id: string): Promise<ProcessTaskView | undefined> {
@@ -1144,7 +1145,8 @@ export class ProcessTasks {
     const cwd = resolve(sessionCwd, requested ?? ".");
     let isDirectory: boolean;
     try {
-      isDirectory = (await stat(cwd)).isDirectory();
+      const directory = await stat(cwd);
+      isDirectory = directory.isDirectory();
     } catch (error) {
       const code = error instanceof Error && "code" in error ? String(error.code) : "";
       if (code === "ENOENT" || code === "ENOTDIR") {
