@@ -3,6 +3,7 @@
     "syntheses/verify-red-tests-handoff"
   ],
   "sources/delete-remote-branch-via-gh-api": [],
+  "sources/npm-trusted-publishing-oidc-not-token": [],
   "sources/obs-2026-11-14-kill-path-skipped-persist-and-notice-in-pi-pretty-task": [],
   "sources/obs-2026-11-14-loop-wake-backlog-storms-after-a-long-turn": [],
   "sources/obs-2026-11-16-7": [],

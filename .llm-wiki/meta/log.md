@@ -98,3 +98,6 @@
 ## [2026-11-24T16:19:02.442Z] retro
 - slug: "pi-pretty-task-full-suite-parallel-flake", title: "全量 integration 套件在 8 worker 下间歇超时，串行才是确定性证据", category: "testing"
 
+## [2026-11-24T16:57:20.846Z] retro
+- slug: "npm-trusted-publishing-oidc-not-token", title: "npm 发布改用 trusted publishing（OIDC），放弃绕 2FA 的长期 token", category: "ci"
+

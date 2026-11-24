@@ -6,6 +6,7 @@
 
 - [[sources/await-state-not-bytes-in-process-tests]] — 进程类测试要等状态，不要等字节 *(created: 2026-11-15)*
 - [[sources/delete-remote-branch-via-gh-api]] — 删远端分支走 gh API，git push --delete 会被拦 *(created: 2026-11-15)*
+- [[sources/npm-trusted-publishing-oidc-not-token]] — npm 发布改用 trusted publishing（OIDC），放弃绕 2FA 的长期 token *(created: 2026-11-24)*
 - [[sources/obs-2026-11-14-kill-path-skipped-persist-and-notice-in-pi-pretty-task]] — Observation: Kill path skipped persist and notice in pi-pretty-task *(created: 2026-11-14)*
 - [[sources/obs-2026-11-14-loop-wake-backlog-storms-after-a-long-turn]] — Observation: Loop wake backlog storms after a long turn *(created: 2026-11-14)*
 - [[sources/obs-2026-11-16-7]] — Observation: 面板项目 7 项架构重构完成 *(created: 2026-11-16)*
@@ -42,4 +43,4 @@
 - [[syntheses/verify-red-tests-handoff]] — verify 红测修复交接（5 个 integration 用例） *(created: 2026-11-16)*
 
 ---
-*Last updated: 2026-11-24T16:19:02.464Z* | *Total pages: 33*
+*Last updated: 2026-11-24T16:57:20.890Z* | *Total pages: 34*
