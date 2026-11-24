@@ -61,6 +61,7 @@ Source references from the two upstream plugins are cloned under `.tmp/` (git-ig
 
 ## Verification
 
+- A fresh clone has no `node_modules`: run `npm ci` first, or every script fails with an unhelpful `'tsc' 不是内部或外部命令`.
 - `npm run check` — typecheck, no emit (`tsconfig.dev.json`, covers `src/` and `test/`).
 - `npm run build` — emit to `dist/` (`tsconfig.json`). The installed package points pi at `./src/index.ts` (pi transpiles it), so this is a check-and-release step, not a deploy step; `dist/` stays out of git.
 - `npm run lint` — Biome check; `npm run lint:fix` applies safe fixes.
