@@ -1,4 +1,5 @@
 {
+  "ignore": [".llm-wiki/meta/"],
   "rules": {
     "no-conditional-empty-object-spread": {
       "disable": [
