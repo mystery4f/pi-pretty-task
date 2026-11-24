@@ -89,3 +89,6 @@
 ## [2026-11-22T13:57:21.342Z] observe
 - slug: "obs-2026-11-22-gif", title: "GIF 里\"看不见\"的新功能属于节奏问题", relevance: "medium"
 
+## [2026-11-24T02:02:18.283Z] observe
+- slug: "obs-2026-11-24-pi-lens-test-tsconfig", title: "pi-lens 告警清零：抑制语法与 test tsconfig 项目", relevance: "high"
+

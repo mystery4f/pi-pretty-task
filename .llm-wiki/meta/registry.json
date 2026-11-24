@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "last_updated": "2026-11-22T13:57:21.405Z",
+  "last_updated": "2026-11-24T02:02:18.296Z",
   "pages": {
     "sources/await-state-not-bytes-in-process-tests": {
       "type": "source",
@@ -243,6 +243,24 @@
       "created": "2026-11-22",
       "updated": "2026-11-22"
     },
+    "sources/obs-2026-11-24-pi-lens-test-tsconfig": {
+      "type": "source",
+      "title": "Observation: pi-lens 告警清零：抑制语法与 test tsconfig 项目",
+      "tags": [
+        "pi-pretty-task",
+        "pi-lens",
+        "lint",
+        "suppression",
+        "tsconfig"
+      ],
+      "status": "observation",
+      "slug": "obs-2026-11-24-pi-lens-test-tsconfig",
+      "relevance": "high",
+      "observed_at": "2026-11-24T02:02:18.280Z",
+      "source_context": "处理 pi-pretty-task 的 pi-lens（LSP）检查告警",
+      "created": "2026-11-24",
+      "updated": "2026-11-24"
+    },
     "sources/pi-git-install-omits-dev-deps-so-ship-ts-entry": {
       "type": "source",
       "title": "pi 的 git 安装不带 devDeps，入口要写 .ts 而不是靠 prepare 构建",
@@ -341,7 +359,7 @@
       "title": "pi-pretty-task 交接：v0.2 收尾状态",
       "tags": "handoff, pi-pretty-task",
       "created": "2026-11-15",
-      "updated": "2026-11-22"
+      "updated": "2026-11-24"
     },
     "syntheses/pi-pretty-task-文档索引": {
       "type": "synthesis",

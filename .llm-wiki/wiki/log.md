@@ -1,5 +1,9 @@
 # Wiki Update Log
 
+## 2026-11-24
+
+- **observe**: {"relevance":"high","slug":"obs-2026-11-24-pi-lens-test-tsconfig","title":"pi-lens 告警清零：抑制语法与 test tsconfig 项目"}
+
 ## 2026-11-22
 
 - **observe**: {"relevance":"medium","slug":"obs-2026-11-22-gif","title":"GIF 里\"看不见\"的新功能属于节奏问题"}

@@ -17,6 +17,7 @@
 - [Observation: README key list is test-guarded against panel drift](obs-2026-11-17-readme-key-list-is-test-guarded-against-panel-drift.md)
 - [Observation: 订阅模式不做「一行一触发」，订阅也不新开页签](obs-2026-11-21-.md)
 - [Observation: GIF 里"看不见"的新功能属于节奏问题](obs-2026-11-22-gif.md)
+- [Observation: pi-lens 告警清零：抑制语法与 test tsconfig 项目](obs-2026-11-24-pi-lens-test-tsconfig.md)
 - [pi 的 git 安装不带 devDeps，入口要写 .ts 而不是靠 prepare 构建](pi-git-install-omits-dev-deps-so-ship-ts-entry.md)
 - [一个形状一处投影，一个式子一处实现](pi-pretty-task-one-projection-and-formula.md)
 - [面板：键盘说意图，渲染方拿只读视图](pi-pretty-task-panel-intents-and-view.md)
