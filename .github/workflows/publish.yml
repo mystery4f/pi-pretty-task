@@ -5,6 +5,9 @@ on:
     types: [published]
 
 permissions:
+  # OIDC: npm trusts this workflow by name instead of a long-lived token, so
+  # there is no publish secret to leak or rotate (ADR-0023).
+  id-token: write
   contents: read
 
 jobs:
@@ -15,7 +18,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           registry-url: https://registry.npmjs.org
           cache: npm
 
@@ -30,8 +33,11 @@ jobs:
       - name: Verify the release tarball
         run: |
           npm pack --dry-run --json --ignore-scripts > pack.json
-          for f in src/index.ts skills/pretty-task-templates/SKILL.md dist/index.js; do
-            jq -e --arg f "$f" '.[0].files | any(.path == $f)' pack.json > /dev/null \
+          files="src/index.ts skills/pretty-task-templates/SKILL.md"
+          files="$files dist/index.js"
+          pick='any(.[0].files[].path; . == $f)'
+          for f in $files; do
+            jq -e --arg f "$f" "$pick" pack.json > /dev/null \
               || { echo "::error::$f is missing from the tarball"; exit 1; }
           done
           echo "tarball OK: $(jq '.[0].entryCount' pack.json) files"
@@ -43,23 +49,30 @@ jobs:
         run: |
           version="$(node -p "require('./package.json').version")"
           if [ "${RELEASE_TAG#v}" != "$version" ]; then
-            echo "::error::tag '$RELEASE_TAG' does not match version '$version' (expected v$version)"
+            echo "::error::tag $RELEASE_TAG != package.json version"
+            echo "::error::expected tag v$version"
             exit 1
           fi
           echo "Publishing $version from $RELEASE_TAG"
 
-      - name: Check npm credentials
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      # Trusted publishing is npm's OIDC exchange; it needs npm 11.5.1 or
+      # later, which the runner image owns, not this repository.
+      - name: Check the npm CLI can exchange an OIDC token
         run: |
-          if [ -z "$NODE_AUTH_TOKEN" ]; then
-            echo "::error::NPM_TOKEN is not configured. Add the npm granular access token as a repository secret (Settings > Secrets and variables > Actions)."
+          node --version
+          have="$(npm --version)"
+          need="11.5.1"
+          echo "npm $have"
+          lowest="$(printf '%s\n%s\n' "$need" "$have" | sort -V | head -1)"
+          if [ "$lowest" != "$need" ]; then
+            echo "::error::npm $have is older than $need"
+            echo "::error::trusted publishing needs 11.5.1 or later"
             exit 1
           fi
 
+      # No NODE_AUTH_TOKEN: the CLI finds the OIDC environment and exchanges
+      # it for a short-lived registry token, adding provenance itself.
       - name: Publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           if [ "${{ github.event.release.prerelease }}" = "true" ]; then
             npm publish --tag next
@@ -67,10 +80,10 @@ jobs:
             npm publish
           fi
 
-      # A first publish of a new name returns success while the registry holds
-      # the version behind a `0.0.0-stage` placeholder, and a bypass-2FA token
-      # cannot clear that itself. Poll so a hold surfaces as a warning instead
-      # of a package that silently never appears.
+      # A publish that npm accepts is not yet a version a consumer can install:
+      # a held version sits behind a `0.0.0-stage` placeholder, and a staged
+      # publish waits for a maintainer's approval. Poll so a wait shows up as a
+      # warning instead of a package that silently never appears.
       - name: Confirm the version reached the registry
         run: |
           name="$(node -p "require('./package.json').name")"
@@ -86,4 +99,6 @@ jobs:
             echo "attempt $i: HTTP $code, waiting 15s"
             sleep 15
           done
-          echo "::warning::$version was accepted by npm but is not visible yet (HTTP $code). A new package name is held for review behind a 0.0.0-stage placeholder; recheck https://www.npmjs.com/package/$name later."
+          echo "::warning::$version is accepted but not visible yet"
+          echo "::warning::HTTP $code - a hold sits behind 0.0.0-stage"
+          echo "::warning::recheck https://www.npmjs.com/package/$name later"

@@ -46,6 +46,7 @@ updated: 2026-11-21
 | [0020 前台命令改道成任务](../../docs/adr/0020-foreground-command-detaches-to-a-task.md) | 默认关闭；打开后用同名 `registerTool` 覆盖内置 `bash`（`powershell` 自 0022 起只注册、不改道）并接管 `!` 命令自己 spawn；快捷键 `ctrl+shift+b` 或 `PI_PRETTY_TASK_FOREGROUND_TIMEOUT` 到点即不再等待，进程不重启、落成 `origin: "foreground"` 的 Process task，计入任务上限；外来工具（MCP 等）明确不做 |
 | [0021 通知用 steer，唤醒用 followUp](../../docs/adr/0021-task-notice-steers.md) | 实测 `bg-kqtt9` 的通知在「轮末投递」与「用户输入」之间被吞（同会话另外两条正常）；规则按「报告还是派活」分：`notifyTaskFinished` 与 `notifyLoopSignal` 都改 `deliverAs: "steer"`，只有携带 prompt 的 Loop 唤醒保持 `followUp` |
 | [0022 默认用 bash，bash.exe 跟着用户的 git 找](../../docs/adr/0022-bash-by-default-and-where-git-lives.md) | 两平台默认都改为 bash；Windows 的 `bash.exe` 依次问 Git Bash 启动环境（`EXEPATH`/`$SHELL`）、`where git` 旁边的 `bin\bash.exe`、注册表 `InstallPath`、常规安装目录、PATH，只用 `bin\bash.exe`；找不到仍报错不兜底；`powershell` 工具改跑 pi 自带操作、不再借策略 shell |
+| [0023 发布走 OIDC，不留长期 token](../../docs/adr/0023-publish-through-oidc-not-a-token.md) | v1.0.8 发布先 404 再 403（`bypass 2fa` 被拒）；npm 自 2026-08 收账户变更、2027-01 收直接 `publish` 的绕 2FA token，2026-09-03 后新建的 trusted publisher 默认只给 staged；改为 `id-token: write` + Node 24（npm ≥ 11.5.1）+ 去掉 `NODE_AUTH_TOKEN`，删仓库 secret，npm 侧按 repo/workflow 名配 trusted publisher 并勾选允许直接 publish |
 
 ## 工具链与代码风格
 
