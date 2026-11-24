@@ -3,7 +3,7 @@ type: synthesis
 title: pi-pretty-task 交接：v0.2 收尾状态
 tags: handoff, pi-pretty-task
 created: 2026-11-15
-updated: 2026-11-22
+updated: 2026-11-24
 ---
 
 # pi-pretty-task 交接：v0.2 收尾状态
@@ -101,10 +101,17 @@ GitHub 是通过 `HTTPS_PROXY=http://mcr:4444` 恢复的（早前 `gh` 与 `curl
 
 新测试：`test/unit/foreground-runner.test.ts`（运行表回收、会话目录 vs 命令目录、拒绝二次 adopt、releaseAll、已退出不改道），`foreground-run.test.ts` 加「改道后 abort 不杀进程」「结束后 expire 无效」，`settings.test.ts` 加超时上界。闸门：`npm run check` 0、biome 0、全量 495 条里 494 过（`task-persistence` 的 history 与 `process-stop` 的等待窗口各命中一次这台机器的老 flake，单文件复跑均绿）。
 
-## 2026-11-24 风格清理（`dfd32c3`，未做完）
+## 2026-11-24 风格清理（`dfd32c3` + `533c842`，已完成）
 
-起因：`lens_diagnostics` 全仓扫出 41 条风格告警（`nested-ternary` 10、`ts-delete-property` 17、`switch-without-default` 7、`no-array-reverse-mutation` 6、`no-single-promise-in-promise-methods` 2、`no-flag-argument` 1）。这一批做完了一半：
+起因：`lens_diagnostics` 全仓扫出 41 条风格告警（`nested-ternary` 10、`ts-delete-property` 17、`switch-without-default` 7、`no-array-reverse-mutation` 6、`no-single-promise-in-promise-methods` 2、`no-flag-argument` 1）。
 
-- 已改：6 处 `[...x].reverse()` → `toReversed()`；`search.ts` 的三层阈值三元抽成 `continuationBytes(leadByte)`；`input.ts` 的 `showOutputPath` 里嵌套三元抽成 `outputNotice(task)`（顺带补上之前只写了调用没写函数的那次改动）；17 处 `delete record.field` → `field = undefined`（`serialize()` 就是 `JSON.stringify`，键一样被丢掉）。
-- 未改：`loop-tasks.ts:417/739-745`、`tasks-panel.ts:243/260/406` 五处嵌套三元；以及 10 条该抑制而不是改写的告警——7 条 `switch-without-default` 全是对封闭联合的穷尽 switch（加 `default` 会关掉编译器的新成员检查），2 条 `Promise.all([...map.values()])` 是规则误报（展开是多个 promise），1 条 `rightText(..., foreign)` 的 flag 参数拆开反而重复代码。抑制写法：`// pi-lens-ignore: <rule-id> -- <理由>`。
-- 闸门：`npm run check` 0、`npx --no-install biome check .` 93 文件 0、`npm run test` 42 文件 499 条全绿（2026-11-24 02:05）；CI run 45234841076 双平台 success。
+第一轮 `dfd32c3`：6 处 `[...x].reverse()` → `toReversed()`；`search.ts` 的三层阈值三元抽成 `continuationBytes(leadByte)`；`input.ts` 的 `showOutputPath` 里嵌套三元抽成 `outputNotice(task)`；17 处 `delete record.field` → `field = undefined`（`serialize()` 就是 `JSON.stringify`，键一样被丢掉）。
+
+第二轮 `533c842` 收尾（本次）：
+
+- 嵌套三元全部改写，13 处：`tasks-panel.ts` 抽 `bestMatchFirst(scores)` 与 `newestFire(task)`、`matchField` 用 forEach 收集；`keys.ts` 的 `1/2/3` 改查表 `model.ts` 的 `TAB_KEY: ReadonlyMap<string, PanelTab>`（用 Map 不用 Record，避免 `constructor` 这类原型键命中）；`list.ts` 空页文案抽 `emptyPageMessage(panel)`；`query.ts` 抽 `hiddenWord(task)` / `stepWord(step)`，字段数组统一展开；`detail.ts` 的变量数抽 `variables`、`callLine` 改 `let body` + if；`loop-tasks.ts` 的 cwd 三元提到前面成 `const cwd`、`completeFire` 抽私有 `fireOutcome(loop, result)` 并改用 if 链、`create()` 的两种 loop 记录改 if/else 赋值；`process/tools.ts` 抽 `templateList(known)`、`followNote`、`waitHeadline`、`chainStopHeadline`、`stopHeadline`。
+- 抑制 16 条，全部带理由：7 条 `switch-without-default`（穷尽封闭联合，加 `default` 会关掉编译器对新成员的检查）、2 条 `Promise.all([...map.values()])`（展开是多个 promise，规则误报）、1 条 `rightText(..., foreign)`（拆开反而重复代码）、2 条 `no-sort-without-comparator`（模板名是普通单词，默认字典序就是想要的）、1 条 `ts-while-index-length`（索引按相邻位置整段推进，改成 for-of 仍要同样的索引）、1 条 `no-flag-argument`、1 条 Semgrep `detect-child-process`（`supervisor.ts` 的 spawn 就是它的职责）。ast-grep 用 `// pi-lens-ignore: <rule> -- <理由>` 写在被标记行上一行；Semgrep 用 `// nosemgrep: <rule-id>`，**不能带 `-- 理由`**（会被当成 id 的一部分）。
+- `test/tsconfig.json`（新增，extends `../tsconfig.dev.json`，include 用 `../src`、`../test`、`../vitest.config.ts`）：在此之前 test 文件不在任何 tsconfig project 里，LSP 用推断设置检查，43 个文件报 `typescript:2307 Cannot find module 'vitest'`，`extension-harness.ts:430` 报 `keyText` 不在 `MessageRenderOptions`。加上这个 project 后全清。`npm run check` / `build` 不受影响（它们仍只读 src）。
+- 闸门：`npm run check` 0、`npm run lint` 93 文件 0、`npm run test` 42 文件 499 条全绿（2026-11-24 10:00）；`lens_diagnostics source=lsp` 88 文件 0 告警（12 条按上述抑制隐藏）。
+- 环境备注：这个 clone 曾经没有 `node_modules`（peer 依赖从 `~/.pi/agent/npm/node_modules` 解析得到），`npm ci` 装过 166 包后 vitest 才能解析。
+- 剩余非告警提示：`loop-tasks.ts` 的 `update` / `completeFire` / `pumpOnce` 三个高复杂度 hint（`high-complexity`），属提醒不属告警，没动。
