@@ -4,6 +4,7 @@
 
 - [进程类测试要等状态，不要等字节](await-state-not-bytes-in-process-tests.md)
 - [删远端分支走 gh API，git push --delete 会被拦](delete-remote-branch-via-gh-api.md)
+- [npm 发布改用 trusted publishing（OIDC），放弃绕 2FA 的长期 token](npm-trusted-publishing-oidc-not-token.md)
 - [Observation: Kill path skipped persist and notice in pi-pretty-task](obs-2026-11-14-kill-path-skipped-persist-and-notice-in-pi-pretty-task.md)
 - [Observation: Loop wake backlog storms after a long turn](obs-2026-11-14-loop-wake-backlog-storms-after-a-long-turn.md)
 - [Observation: 面板项目 7 项架构重构完成](obs-2026-11-16-7.md)

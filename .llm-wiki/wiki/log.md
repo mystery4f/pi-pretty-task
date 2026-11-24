@@ -2,6 +2,7 @@
 
 ## 2026-11-24
 
+- **retro**: {"category":"ci","slug":"npm-trusted-publishing-oidc-not-token","title":"npm 发布改用 trusted publishing（OIDC），放弃绕 2FA 的长期 token"}
 - **retro**: {"category":"testing","slug":"pi-pretty-task-full-suite-parallel-flake","title":"全量 integration 套件在 8 worker 下间歇超时，串行才是确定性证据"}
 - **retro**: {"category":"pi-plugin","slug":"pi-extension-stale-instance-unhandled-rejection","title":"pi 扩展实例失效后的 sendMessage 抛出会杀死进程"}
 - **observe**: {"relevance":"high","slug":"obs-2026-11-24-pi-lens-test-tsconfig","title":"pi-lens 告警清零：抑制语法与 test tsconfig 项目"}
