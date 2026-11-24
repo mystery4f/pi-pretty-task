@@ -7,7 +7,10 @@
  * @author mystery4f <40482524+mystery4f@users.noreply.github.com>
  */
 
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { TASK_FINISHED_EVENT } from "../../src/tasks/base/events.js";
 import {
   type FinishedTaskDetails,
   finishedTaskMessage,
@@ -161,5 +164,53 @@ describe("killed task notice", () => {
     expect(drawn).toContain("the user killed it");
     expect(drawn).toContain("listening on :3000");
     expect(drawn).toContain("<warning>");
+  });
+});
+
+describe("notice after the session is gone", () => {
+  /**
+   * A background task outlives the extension instance that started it. A reload
+   * invalidates that instance, so its `sendMessage` throws; nothing awaits a
+   * notice, so the rejection used to reach the top level and end the pi process.
+   */
+  it("drops a late notice instead of calling the invalidated session", async () => {
+    const dir = await makeTempDir();
+    cleanup.push(dir.dispose);
+    // The task ends only when the test opens the gate, so the ending lands after
+    // the shutdown handler has already run.
+    const gate = join(dir.path, "gate");
+    const command = await writeScript(
+      dir.path,
+      "late.js",
+      `const fs = require("node:fs");\n` +
+        `const timer = setInterval(() => {\n` +
+        `  if (!fs.existsSync(${JSON.stringify(gate)})) return;\n` +
+        `  clearInterval(timer);\n` +
+        `  console.log("gate opened");\n` +
+        `}, 25);\n`,
+    );
+    const turn = { cwd: dir.path, sessionId: "session-notice-gone" };
+    const harness = createHarness(turn);
+
+    // The finish event is published just before the notice, so awaiting it puts
+    // the assertion after the attempt instead of in the middle of it.
+    const announced = new Promise<void>((resolve) => {
+      harness.events.on(TASK_FINISHED_EVENT, () => resolve());
+    });
+    const started = await harness.call("pretty_task_bg_run", { name: "late ending", command });
+    const details = started.details as TaskDetails;
+    if (details.pid !== undefined) spawned.push(details.pid);
+
+    // The reload: this instance no longer owns the session, and pi refuses it.
+    await harness.shutdownSession(turn);
+    await writeFile(gate, "");
+
+    await announced;
+    // The notice is decided one microtask later; give that turn the room to throw.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    // The record is the truth; a session that is no longer ours is not told.
+    expect(harness.messages).toHaveLength(0);
+    expect(harness.problems.filter((problem) => problem.includes("session notice"))).toEqual([]);
   });
 });

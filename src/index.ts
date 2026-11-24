@@ -33,6 +33,7 @@ import { processTaskTools } from "./tasks/process/tools.js";
 import { LOOP_WAKE_CUSTOM_TYPE, renderLoopWake, sendLoopWake } from "./ui/loop-wake.js";
 import {
   LOOP_SIGNAL_CUSTOM_TYPE,
+  type NoticeSender,
   notifyLoopSignal,
   notifyTaskFinished,
   renderLoopSignal,
@@ -155,6 +156,36 @@ export function createExtension(
       process.stderr.write(`pi-pretty-task: ${message}\n`);
     });
   for (const problem of templates.problems) reportProblem(problem);
+
+  /**
+   * Whether this instance still owns a session. pi invalidates a whole extension
+   * instance when the session is replaced or reloaded — `/reload`, `newSession`,
+   * `fork`, `switchSession` — and every `pi.*` call from the old instance throws
+   * afterwards. A process task outlives the instance that started it, so its
+   * ending still reaches `onFinish` below; unguarded, that late `sendMessage` was
+   * an unhandled rejection, and pi ends the whole process on one of those.
+   */
+  let live = true;
+
+  /**
+   * The session's message slot: every notice steers, and is displayed, whatever
+   * it reports — a notice that reports an ending must not queue behind a turn the
+   * way a loop wake may (ADR-0021). Once the session is gone the notice is
+   * dropped in silence: the record on disk is the truth and the replacement
+   * instance's panel shows the ending, so a stderr line would only narrate the
+   * reload the user asked for.
+   */
+  const sendNotice: NoticeSender = (notice) => {
+    if (!live) return;
+    pi.sendMessage({ ...notice, display: true }, { deliverAs: "steer", triggerTurn: true });
+  };
+
+  /** A notice that could not be delivered is a stderr line, never an ended pi. */
+  const reportNoticeFailure = (error: unknown): void => {
+    reportProblem(
+      `session notice failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  };
   const now = options.now ?? Date.now;
   // Retention is housekeeping, not a task: a sweep that cannot judge or remove
   // one session keeps it, says why, and leaves the session start to finish.
@@ -275,7 +306,7 @@ export function createExtension(
       // #23). A fire's child task is a task too, and ends the same way.
       publishTaskFinished(pi.events, view);
       if (view.task.parentId === undefined) {
-        void notifyTaskFinished(pi, view);
+        void notifyTaskFinished(sendNotice, view).catch(reportNoticeFailure);
       } else if (view.task.fire === undefined) {
         // A chain's step ended: the queue reads the step's own record and starts the
         // next one, or fails the chain and skips what was left (ADR-0013). The step
@@ -348,7 +379,7 @@ export function createExtension(
       // raised condition, its schedule is untouched, and a repeat stays silent
       // (ADR-0018). No failure vocabulary, so it never borrows the finish notice.
       if (!completed.raised) return;
-      await notifyLoopSignal(pi, {
+      await notifyLoopSignal(sendNotice, {
         id: completed.loop.id,
         name: completed.loop.name,
         command: completed.loop.command,
@@ -357,13 +388,13 @@ export function createExtension(
         durationMs: completed.fire.durationMs ?? view.elapsedMs,
         endedAt: completed.fire.endedAt ?? now(),
         outputPath: view.task.outputPath,
-      });
+      }).catch(reportNoticeFailure);
       return;
     }
     if (!completed.failed) return;
     if (completed.loop.wakeOnFailure === false) return;
     // The child is already named `loop #N`, which is the alias the notice shows.
-    await notifyTaskFinished(pi, view);
+    await notifyTaskFinished(sendNotice, view).catch(reportNoticeFailure);
   }
   for (const tool of processTaskTools(processTasks, chainTasks, templates.templates))
     pi.registerTool(tool);
@@ -436,6 +467,10 @@ export function createExtension(
   const pumpSafely = async (): Promise<void> => {
     try {
       await loops.pump(now());
+      // A reload can land while the pump awaited the store. The wakes and the
+      // line belong to the session pi has taken away, so they are left to the
+      // instance that replaced this one instead of draining into the old one.
+      if (!live) return;
       await wakes.flush();
       // The countdown is part of the line, so every tick repaints it.
       publishStatusLine();
@@ -511,6 +546,9 @@ export function createExtension(
   pi.on("session_shutdown", () => {
     // Let the commands still in front go while the store is still open: a run left
     // here unrecorded outlives the extension as a tree with no id to look up (ADR-0020).
+    // Nothing below may reach pi again: this is cleanup of what this instance
+    // still owns, not a session call.
+    live = false;
     void foreground.releaseAll();
     stopTimer();
     statusUi = undefined;

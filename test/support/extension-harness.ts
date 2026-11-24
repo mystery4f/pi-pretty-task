@@ -172,6 +172,12 @@ export interface Harness {
   emit(event: { readonly type: string } & Record<string, unknown>, turn?: Turn): Promise<void>;
   /** Run the extension's session_start handlers for a turn. */
   startSession(turn?: Turn): Promise<void>;
+  /**
+   * End the session as pi does on a reload: the shutdown handlers run, then the
+   * instance is invalidated, so every later `pi.*` call — `sendMessage` above all
+   * — throws the way it does in production.
+   */
+  shutdownSession(turn?: Turn): Promise<void>;
 }
 
 /** One call the extension made to `ctx.ui.setWidget`. */
@@ -275,6 +281,14 @@ export function createHarness(defaultTurn: Turn, options: HarnessOptions = {}): 
   const widgets: WidgetUpdate[] = [];
   let opened: { component: Component; options: CustomOptions } | undefined;
 
+  /**
+   * pi invalidates a whole extension instance once its session is replaced or
+   * reloaded: from then on, a call the old instance makes to `pi` throws. A task
+   * outlives the instance that started it, so a seam still running after shutdown
+   * meets that refusal here instead of a quiet no-op.
+   */
+  let stale = false;
+
   // pi's own bus, so a listener that throws is isolated the way it is in
   // production and the tests observe the real emit/on contract.
   const events = createEventBus();
@@ -355,6 +369,9 @@ export function createHarness(defaultTurn: Turn, options: HarnessOptions = {}): 
       },
       options?: SentMessage["options"],
     ): void {
+      if (stale) {
+        throw new Error("This extension ctx is stale after session replacement or reload.");
+      }
       messages.push({
         customType: message.customType,
         content: messageText(message.content),
@@ -363,6 +380,21 @@ export function createHarness(defaultTurn: Turn, options: HarnessOptions = {}): 
         options: options ?? {},
       });
     },
+  };
+
+  /**
+   * Run one event's handlers, awaited in registration order. A shutdown ends the
+   * instance the way pi ends it: the event goes out, then every later `pi.*` call
+   * from it throws — the refusal a notice that outlived its session meets.
+   */
+  const emitEvent = async (
+    event: { readonly type: string } & Record<string, unknown>,
+    turn: Turn,
+  ): Promise<void> => {
+    for (const handler of handlers.get(event.type) ?? []) {
+      await handler(event, createToolContext(turn, ui));
+    }
+    if (event.type === "session_shutdown") stale = true;
   };
 
   const controller = createExtension(api as unknown as ExtensionAPI, {
@@ -467,9 +499,10 @@ export function createHarness(defaultTurn: Turn, options: HarnessOptions = {}): 
       return controller.wakes.size;
     },
     async emit(event, turn = defaultTurn) {
-      for (const handler of handlers.get(event.type) ?? []) {
-        await handler(event, createToolContext(turn, ui));
-      }
+      await emitEvent(event, turn);
+    },
+    async shutdownSession(turn = defaultTurn) {
+      await emitEvent({ type: "session_shutdown", reason: "reload" }, turn);
     },
     async startSession(turn = defaultTurn) {
       for (const handler of handlers.get("session_start") ?? []) {

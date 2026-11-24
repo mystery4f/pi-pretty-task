@@ -10,7 +10,7 @@
  * @author mystery4f <40482524+mystery4f@users.noreply.github.com>
  */
 
-import type { ExtensionAPI, MessageRenderer } from "@earendil-works/pi-coding-agent";
+import type { MessageRenderer } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { formatDuration } from "../tasks/base/format.js";
 import { readOutputFrom, readOutputTail } from "../tasks/base/output.js";
@@ -104,22 +104,30 @@ async function describeFinishedTask(view: ProcessTaskView): Promise<FinishedTask
   }
 }
 
+/**
+ * The session slot a notice goes through. The extension hands over its live
+ * session's send, because the `pi` object an instance was loaded with is
+ * invalidated when that session is replaced or reloaded: `sendMessage` from the
+ * old instance throws, and nothing awaits a notice, so the throw ended the pi
+ * process. Keeping the slot behind one seam leaves session lifetime in one place.
+ */
+export type NoticeSender = (notice: SessionNotice) => void;
+
+/** The body of one notice: what pi records, with the delivery options left out. */
+export interface SessionNotice {
+  readonly customType: string;
+  readonly content: string;
+  readonly details: unknown;
+}
+
 /** Announce one finished task in the session. */
-export async function notifyTaskFinished(pi: ExtensionAPI, view: ProcessTaskView): Promise<void> {
+export async function notifyTaskFinished(send: NoticeSender, view: ProcessTaskView): Promise<void> {
   const message = finishedTaskMessage(await describeFinishedTask(view));
-  pi.sendMessage(
-    {
-      customType: TASK_FINISHED_CUSTOM_TYPE,
-      content: message.content,
-      display: true,
-      details: message.details,
-    },
-    // `steer`, not `followUp`: a follow-up queued while a run is in flight is
-    // delivered when the agent goes idle, and a user prompt arriving in that same
-    // instant wins the race and takes the notice with it (ADR-0021). Steering puts
-    // the ending in front of the next model call, which is the moment it matters.
-    { deliverAs: "steer", triggerTurn: true },
-  );
+  send({
+    customType: TASK_FINISHED_CUSTOM_TYPE,
+    content: message.content,
+    details: message.details,
+  });
 }
 
 /**
@@ -236,22 +244,16 @@ async function readSignalReport(
  * breaking, so this message carries no failure vocabulary (ADR-0018).
  */
 export async function notifyLoopSignal(
-  pi: ExtensionAPI,
+  send: NoticeSender,
   details: LoopSignalDetails,
 ): Promise<void> {
   const report = await readSignalReport(details.outputPath);
   const message = { ...details, ...report };
-  pi.sendMessage(
-    {
-      customType: LOOP_SIGNAL_CUSTOM_TYPE,
-      content: signalText(message),
-      display: true,
-      details: message,
-    },
-    // Same rule as the finished-task notice: a notice reports, so it steers, and
-    // only a loop wake carrying a prompt queues as a follow-up (ADR-0021).
-    { deliverAs: "steer", triggerTurn: true },
-  );
+  send({
+    customType: LOOP_SIGNAL_CUSTOM_TYPE,
+    content: signalText(message),
+    details: message,
+  });
 }
 
 /** Draws one signal notice: the check's report, never a failure badge. */
