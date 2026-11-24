@@ -1,5 +1,10 @@
 {
-  "ignore": [".llm-wiki/meta/"],
+  "ignore": [
+    ".llm-wiki/meta/",
+    ".llm-wiki/wiki/log.md",
+    ".llm-wiki/wiki/index.md",
+    ".llm-wiki/wiki/sources/index.md"
+  ],
   "rules": {
     "no-conditional-empty-object-spread": {
       "disable": [
