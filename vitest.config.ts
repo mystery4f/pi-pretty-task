@@ -31,9 +31,12 @@ const shared = {
   // them on a twenty-core machine thrashes instead of overlapping. Measured on
   // this repository's own suite (425 tests): the default nineteen workers took
   // 54s and failed four tests to timeouts, six workers took 49s and failed none.
-  // Eight is the cap; `--maxWorkers` on the command line still wins for a run
-  // that wants another number.
-  maxWorkers: Math.min(8, availableParallelism()),
+  // Eight was the cap until the suite reached 500 tests: at that size eight
+  // workers failed a different one or two timing tests on every run, each of
+  // them green when re-run alone, while `--no-file-parallelism` ran all 500
+  // green in 4m03s. Six is the cap again; `--maxWorkers` on the command line
+  // still wins for a run that wants another number.
+  maxWorkers: Math.min(6, availableParallelism()),
 };
 export default defineConfig({
   test: {
