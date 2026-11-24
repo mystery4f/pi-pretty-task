@@ -80,6 +80,15 @@ jobs:
             exit 1
           fi
 
+      # npm's OIDC exchange never throws: a missing permission or a failed
+      # exchange just leaves it without credentials and the publish dies with
+      # ENEEDAUTH. Print what the runner actually saw.
+      - name: Show the OIDC environment
+        run: |
+          echo "id-token-url: ${ACTIONS_ID_TOKEN_REQUEST_URL:+present}"
+          echo "id-token-request: ${ACTIONS_ID_TOKEN_REQUEST_TOKEN:+present}"
+          echo "npm-id-token: ${NPM_ID_TOKEN:+present}"
+
       # No NODE_AUTH_TOKEN: the CLI finds the OIDC environment and exchanges
       # it for a short-lived registry token, adding provenance itself.
       - name: Publish
@@ -89,6 +98,14 @@ jobs:
           else
             npm publish
           fi
+
+      - name: Explain a publish failure
+        if: failure()
+        run: |
+          for f in "$HOME"/.npm/_logs/*-debug-0.log; do
+            echo "--- $f"
+            grep -iE "oidc|id.token|trusted|auth" "$f" | tail -25
+          done
 
       # A publish that npm accepts is not yet a version a consumer can install:
       # a held version sits behind a `0.0.0-stage` placeholder, and a staged
