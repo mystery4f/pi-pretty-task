@@ -80,14 +80,10 @@ jobs:
             exit 1
           fi
 
-      # npm's OIDC exchange never throws: a missing permission or a failed
-      # exchange just leaves it without credentials and the publish dies with
-      # ENEEDAUTH. Print what the runner actually saw.
-      - name: Show the OIDC environment
-        run: |
-          echo "id-token-url: ${ACTIONS_ID_TOKEN_REQUEST_URL:+present}"
-          echo "id-token-request: ${ACTIONS_ID_TOKEN_REQUEST_TOKEN:+present}"
-          echo "npm-id-token: ${NPM_ID_TOKEN:+present}"
+      # npm's OIDC exchange never throws: a missing permission, a failed
+      # exchange or an unconfigured trusted publisher all just leave it without
+      # credentials, and the publish dies with a bare ENEEDAUTH. The explainer
+      # after a failure prints the exchange's own answer.
 
       # No NODE_AUTH_TOKEN: the CLI finds the OIDC environment and exchanges
       # it for a short-lived registry token, adding provenance itself.
