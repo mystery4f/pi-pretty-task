@@ -12,9 +12,19 @@
 
 import { open, rename } from "node:fs/promises";
 
+/**
+ * Where the temp file of an atomic write sits: the target's own name plus `.tmp`,
+ * beside it, so the rename that lands the write never crosses a volume. One
+ * owner, because a cleanup after a failed write and a test that forces one both
+ * have to name the same file this writer uses (ADR-0024).
+ */
+export function tempPathFor(path: string): string {
+  return `${path}.tmp`;
+}
+
 /** Write one file in a way a reader never sees half of it. */
 export async function writeAtomic(path: string, data: string): Promise<void> {
-  const tempPath = `${path}.tmp`;
+  const tempPath = tempPathFor(path);
   const handle = await open(tempPath, "w");
   try {
     await handle.writeFile(data, "utf8");

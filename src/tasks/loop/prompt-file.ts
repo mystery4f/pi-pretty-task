@@ -12,7 +12,7 @@
 import { mkdir, readFile, stat, unlink } from "node:fs/promises";
 import { dirname } from "node:path";
 
-import { writeAtomic } from "../base/atomic.js";
+import { tempPathFor, writeAtomic } from "../base/atomic.js";
 import { loopPromptPath } from "../base/runtime-state.js";
 import type { PromptLoopTask } from "../base/task.js";
 
@@ -75,7 +75,7 @@ export async function removePromptText(directory: string, loopId: string): Promi
   const path = loopPromptPath(directory, loopId);
   // The temp file too: a write that failed before its rename leaves one behind.
   await removeQuietly(path);
-  await removeQuietly(`${path}.tmp`);
+  await removeQuietly(tempPathFor(path));
 }
 
 async function removeQuietly(path: string): Promise<void> {

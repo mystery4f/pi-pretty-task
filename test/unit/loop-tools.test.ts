@@ -8,6 +8,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { tempPathFor } from "../../src/tasks/base/atomic.js";
 import {
   loopPromptPath,
   sessionTaskDirectory,
@@ -532,7 +533,7 @@ describe("loop tools", () => {
       created.id,
     );
     // A directory where the atomic write's temp file belongs: the write cannot land.
-    await mkdir(`${path}.tmp`);
+    await mkdir(tempPathFor(path));
 
     const updated = await task.harness.call("pretty_task_loop_update", {
       id: created.id,
