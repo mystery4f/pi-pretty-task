@@ -28,6 +28,7 @@ import type {
   Iteration,
   IterationCall,
   IterationCallStatus,
+  IterationRetry,
   IterationStatus,
 } from "../../tasks/loop/iteration.js";
 import { STATUS_COLOUR } from "../status-colour.js";
@@ -53,6 +54,26 @@ export function exitText(task: Task): string {
   // rows in its detail (ADR-0015).
   const code = task.kind === "cmd-loop" ? task.lastExitCode : task.exitCode;
   return code === undefined ? "" : `exit ${String(code)}`;
+}
+
+/**
+ * The provider retry as one phrase: `retry 2/3`, and the status the failure named
+ * when it named one. A fire that spent three attempts on a busy provider otherwise
+ * reads as one ordinary slow turn (ticket #47).
+ */
+export function retryText(retry: IterationRetry): string {
+  const count = `retry ${String(retry.attempt)}/${String(retry.maxAttempts)}`;
+  return retry.status === undefined ? count : `${count} · ${retry.status}`;
+}
+
+/**
+ * The retry a loop is on right now: only an open turn can be retrying, so a record
+ * left behind by a turn that ended — a process that died mid-turn — is not shown as
+ * in flight. What a finished turn's retry was is read on its own iteration page.
+ */
+export function openRetry(task: PromptLoopTask): IterationRetry | undefined {
+  const newest = task.iterations[task.iterations.length - 1];
+  return newest?.status === "running" ? newest.retry : undefined;
 }
 
 /**
@@ -103,21 +124,28 @@ export function rightText(
   // a backoff so the two read together (ADR-0017).
   const streak = failureStreak(task);
   const failed = streak === 0 ? "" : ` · ${String(streak)} failed`;
-  const state = `${elapsed} · ${firesText(task)} fires${failed}`;
+  // A turn pi is retrying is the loudest thing the row can say about right now: a
+  // fire that spent three attempts on a busy provider is not an ordinary slow one
+  // (ticket #47). Only prompt loops wake a model, so only they can be retrying.
+  const retry = task.kind === "prompt-loop" ? openRetry(task) : undefined;
+  const retrying = retry === undefined ? "" : ` · ${retryText(retry)}`;
+  const state = `${elapsed} · ${firesText(task)} fires${failed}${retrying}`;
   const backingOff = streak > 0 ? " (backoff)" : "";
   const next =
     row.untilNextFireMs === undefined
       ? undefined
       : ` · next ${formatDuration(row.untilNextFireMs)}`;
-  // The state the ticket asks the row to carry is the streak and the backoff, so
-  // the age gives way first, then the word marking the wait a backoff, then the
-  // wait itself. The count is the last number to go, and a row too narrow even for
-  // it drops the numbers instead of crossing the border (ADR-0015, ticket #34).
+  // The state the ticket asks the row to carry is the streak, the retry and the
+  // backoff, so the age gives way first, then the word marking the wait a backoff,
+  // then the wait itself. The count is the last number to go, and a row too narrow
+  // even for it drops the numbers instead of crossing the border (ADR-0015, ticket
+  // #34).
   const fires = `${firesText(task)} fires`;
   const candidates = [
     `${state}${next ?? ""}${backingOff}${age}`,
     `${state}${next ?? ""}${backingOff}`,
     ...(next === undefined ? [] : [`${state}${next}`, state]),
+    `${fires}${failed}${retrying}`,
     `${fires}${failed}`,
     fires,
   ];

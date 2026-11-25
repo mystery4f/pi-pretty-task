@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { sessionTaskDirectory } from "../../src/tasks/base/runtime-state.js";
 import { TaskStore } from "../../src/tasks/base/task-store.js";
+import { DEFAULT_RETRY_BUDGET, retryBudget } from "../../src/tasks/loop/iterations.js";
 import { createHarness, type Harness, resultText } from "../support/extension-harness.js";
 import { makeTempDir } from "../support/processes.js";
 
@@ -33,6 +34,8 @@ interface IterationDetails {
   endedAt?: number;
   calls: IterationCallDetails[];
   droppedCalls: number;
+  /** The provider retry the turn was on, when it was retrying (ticket #47). */
+  retry?: { attempt: number; maxAttempts: number; status?: string };
 }
 
 interface LoopDetails {
@@ -49,7 +52,9 @@ afterEach(async () => {
   while (cleanup.length > 0) await cleanup.pop()?.();
 });
 
-async function setup(options: { callLimit?: number; historyLimit?: number } = {}) {
+async function setup(
+  options: { callLimit?: number; historyLimit?: number; maxRetries?: number } = {},
+) {
   const directory = await makeTempDir();
   cleanup.push(directory.dispose);
   let now = Date.UTC(2026, 0, 1, 9, 0, 0);
@@ -58,6 +63,7 @@ async function setup(options: { callLimit?: number; historyLimit?: number } = {}
     now: () => now,
     ...(options.callLimit === undefined ? {} : { iterationCallLimit: options.callLimit }),
     ...(options.historyLimit === undefined ? {} : { iterationHistoryLimit: options.historyLimit }),
+    ...(options.maxRetries === undefined ? {} : { maxRetries: options.maxRetries }),
   });
   return {
     directory,
@@ -312,5 +318,147 @@ describe("iteration recording", () => {
     const loop = records.find((record) => record.id === created.id);
     if (loop?.kind !== "prompt-loop") throw new Error("the loop was not persisted");
     expect(loop.iterations?.[0]).toMatchObject({ fire: 1, status: "interrupted" });
+  });
+});
+
+/**
+ * One assistant attempt ended, as pi reports it at `message_end`. The failed
+ * attempt of a retried provider error is the only trace an extension gets: pi
+ * emits no retry event (ticket #47).
+ */
+async function endAttempt(
+  harness: Harness,
+  outcome: { role?: string; stopReason?: string; errorMessage?: string } = {},
+): Promise<void> {
+  const role = outcome.role ?? "assistant";
+  const message =
+    role === "assistant"
+      ? {
+          role,
+          content: [{ type: "text", text: "…" }],
+          stopReason: outcome.stopReason ?? "stop",
+          ...(outcome.errorMessage === undefined ? {} : { errorMessage: outcome.errorMessage }),
+        }
+      : { role, content: [{ type: "text", text: "…" }] };
+  await harness.emit({ type: "message_end", message });
+}
+
+/**
+ * A fire's turn, open: the wake left for pi and the turn it produced has not
+ * settled. The settle in the middle closes the turn the test itself started and
+ * sends the queued wake, which is what binds the iteration.
+ */
+async function openTurn(options: { maxRetries?: number } = {}) {
+  const task = await setup(options);
+  const created = await createLoop(task.harness);
+  await task.harness.emit({ type: "agent_start" });
+  task.advance(10_000);
+  await task.harness.pump(task.now);
+  await task.harness.emit({ type: "agent_settled", aborted: false });
+  return { task, created };
+}
+
+describe("the provider retry of a turn", () => {
+  it("attaches the failed attempt to the open iteration, in the record on disk", async () => {
+    const { task, created } = await openTurn();
+    await endAttempt(task.harness, {
+      stopReason: "error",
+      errorMessage: "529 overloaded_error: the provider is busy",
+    });
+
+    const [iteration] = await iterationsOf(task.harness, created.id);
+    expect(iteration?.retry).toEqual({ attempt: 1, maxAttempts: 3, status: "529" });
+
+    // The record only exists on disk: a reader must see the retry there too.
+    const store = new TaskStore(sessionTaskDirectory(task.turn.cwd, task.turn.sessionId));
+    const loop = (await store.load()).find((record) => record.id === created.id);
+    if (loop?.kind !== "prompt-loop") throw new Error("the loop was not persisted");
+    expect(loop.iterations?.[0]?.retry).toEqual({ attempt: 1, maxAttempts: 3, status: "529" });
+  });
+
+  it("counts each retry of the turn up to the budget pi was configured with", async () => {
+    const { task, created } = await openTurn({ maxRetries: 5 });
+    await endAttempt(task.harness, {
+      stopReason: "error",
+      errorMessage: "529 overloaded_error",
+    });
+    await endAttempt(task.harness, {
+      stopReason: "error",
+      errorMessage: "503 service unavailable",
+    });
+
+    const [iteration] = await iterationsOf(task.harness, created.id);
+    expect(iteration?.retry).toEqual({ attempt: 2, maxAttempts: 5, status: "503" });
+  });
+
+  it("states the attempt without a status when the failure carried none", async () => {
+    const { task, created } = await openTurn();
+    await endAttempt(task.harness, { stopReason: "error", errorMessage: "fetch failed" });
+
+    const [iteration] = await iterationsOf(task.harness, created.id);
+    expect(iteration?.retry).toEqual({ attempt: 1, maxAttempts: 3 });
+  });
+
+  it("clears the retry when the attempt that follows succeeds", async () => {
+    const { task, created } = await openTurn();
+    await endAttempt(task.harness, { stopReason: "error", errorMessage: "529 overloaded_error" });
+    const [retrying] = await iterationsOf(task.harness, created.id);
+    expect(retrying?.retry).toBeDefined();
+
+    await endAttempt(task.harness);
+
+    const [recovered] = await iterationsOf(task.harness, created.id);
+    expect(recovered?.status).toBe("running");
+    expect(recovered?.retry).toBeUndefined();
+  });
+
+  it("clears the retry when the turn ends on the failure pi gave up on", async () => {
+    const { task, created } = await openTurn();
+    await endAttempt(task.harness, { stopReason: "error", errorMessage: "529 overloaded_error" });
+    await task.harness.emit({ type: "agent_settled", aborted: false });
+
+    const [iteration] = await iterationsOf(task.harness, created.id);
+    expect(iteration?.status).toBe("completed");
+    expect(iteration?.retry).toBeUndefined();
+  });
+
+  it("records nothing outside a fire's turn, or for a message that is not the assistant's", async () => {
+    // No fire has opened an iteration here: the failed attempt belongs to a turn
+    // the user started, and there is no iteration for it to land on.
+    const task = await setup();
+    await endAttempt(task.harness, { stopReason: "error", errorMessage: "529 overloaded_error" });
+    expect(await iterationsOf(task.harness, "lp-missing")).toEqual([]);
+
+    // A user message, and a tool result, are not failed attempts: only the
+    // assistant's turn ends with a stop reason.
+    const open = await openTurn();
+    await endAttempt(open.task.harness, { role: "user", stopReason: "error" });
+    const [iteration] = await iterationsOf(open.task.harness, open.created.id);
+    expect(iteration?.retry).toBeUndefined();
+  });
+
+  it("counts nothing when pi's retries are budgeted at zero", async () => {
+    // A zero budget means pi gives up at the first failure, so `retry 1/0` would
+    // promise a retry that is never coming: the failed attempt records nothing.
+    const { task, created } = await openTurn({ maxRetries: 0 });
+    await endAttempt(task.harness, { stopReason: "error", errorMessage: "529 overloaded_error" });
+
+    const [iteration] = await iterationsOf(task.harness, created.id);
+    expect(iteration?.status).toBe("running");
+    expect(iteration?.retry).toBeUndefined();
+  });
+});
+
+describe("the retry budget", () => {
+  it("reads pi's own count and falls back to pi's default when the key is absent", () => {
+    expect(retryBudget({ retry: { maxRetries: 5 } })).toBe(5);
+    expect(retryBudget({ retry: {} })).toBe(DEFAULT_RETRY_BUDGET);
+    expect(retryBudget({})).toBe(DEFAULT_RETRY_BUDGET);
+    expect(retryBudget(undefined)).toBe(DEFAULT_RETRY_BUDGET);
+  });
+
+  it("counts nothing while retries are disabled", () => {
+    expect(retryBudget({ retry: { enabled: false, maxRetries: 3 } })).toBe(0);
+    expect(retryBudget({ retry: { maxRetries: 0 } })).toBe(0);
   });
 });

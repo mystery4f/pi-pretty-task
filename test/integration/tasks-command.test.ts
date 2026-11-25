@@ -324,6 +324,61 @@ describe("/tasks command", () => {
     expect(last?.lines.join(" | ")).toContain("Shift↓");
   });
 
+  it("prints the provider retry a fire is on, and drops it once the turn settles", async () => {
+    const dir = await makeTempDir();
+    cleanup.push(dir.dispose);
+    const clock = { now: Date.UTC(2026, 0, 1, 10, 0, 0) };
+    const harness = createHarness(
+      { cwd: dir.path, sessionId: "session-retry" },
+      { now: () => clock.now, maxRetries: 3 },
+    );
+    await harness.call("pretty_task_loop_create", {
+      name: "review loop",
+      schedule: "10s",
+      prompt: "review the diff",
+    });
+
+    // A 10s loop fires; the attempt it made fails at the provider, and pi is not
+    // done with the turn yet — it is about to try again (ticket #47).
+    clock.now += 10_000;
+    await harness.pump(clock.now);
+    await harness.emit({
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [],
+        stopReason: "error",
+        errorMessage: "529 overloaded_error: the provider is busy",
+      },
+    });
+
+    const { panel, closed } = await openPanel(harness);
+    panel.handleInput("2");
+    await panel.settle();
+    expect(panel.render(100).join("\n")).toContain("retry 1/3 · 529");
+
+    panel.handleInput("\r");
+    await panel.settle();
+    panel.handleInput("\r");
+    await panel.settle();
+    const iteration = panel.render(100).join("\n");
+    expect(iteration).toContain("Retry");
+    expect(iteration).toContain("retry 1/3 · 529");
+
+    panel.handleInput("\u001bq");
+    await closed;
+
+    // The turn settles: its row is an ordinary fire again, because what the turn
+    // finally did is the iteration's status and no retry is in flight.
+    await harness.emit({ type: "agent_settled", aborted: false });
+    const reopened = await openPanel(harness);
+    reopened.panel.handleInput("2");
+    await reopened.panel.settle();
+    expect(reopened.panel.render(100).join("\n")).not.toContain("retry");
+    reopened.panel.handleInput("\u001bq");
+    await reopened.closed;
+  });
+
   it("stops a loop with k on its row, and the schedule never fires again", async () => {
     const dir = await makeTempDir();
     cleanup.push(dir.dispose);

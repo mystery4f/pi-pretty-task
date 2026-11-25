@@ -54,6 +54,23 @@ export interface IterationCall {
  */
 export type IterationStatus = "running" | "completed" | "aborted" | "interrupted";
 
+/**
+ * The provider retry the turn is on (ticket #47). pi retries a transient
+ * provider error before giving up, and without this a fire that spent three
+ * attempts on a busy provider reads as one ordinary slow turn.
+ *
+ * It describes the turn in flight only: the field is cleared at the end of the
+ * turn, because what the turn finally did is the iteration's `status`.
+ */
+export interface IterationRetry {
+  /** Attempts that have failed in this turn so far; one-based once recorded. */
+  readonly attempt: number;
+  /** Attempts the settings allow before pi gives up. */
+  readonly maxAttempts: number;
+  /** The provider status the failure carried, when it named one: `529`. */
+  readonly status?: string;
+}
+
 /** One fire's turn: the child record of the loop task that fired. */
 export interface Iteration {
   /** One-based fire number of the owning loop; unique within that loop. */
@@ -70,6 +87,11 @@ export interface Iteration {
   calls: IterationCall[];
   /** Calls the cap dropped. Non-zero means the record is truncated, and says so. */
   droppedCalls: number;
+  /**
+   * The provider retry the turn in flight is on; absent once it ended. Only ever
+   * set while `status` is `running`.
+   */
+  retry?: IterationRetry;
 }
 
 /** Argument names that identify a call, in the order they are tried. */

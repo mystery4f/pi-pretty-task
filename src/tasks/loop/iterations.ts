@@ -49,6 +49,57 @@ export interface ToolCallEndEvent {
   readonly durationMs?: number;
 }
 
+/**
+ * What one provider attempt of the turn in flight looks like from the outside:
+ * the assistant message it ended, and the retry budget the settings allow.
+ *
+ * pi 1.5.2 forwards no retry event to extensions — `auto_retry_start` and
+ * `auto_retry_end` reach public listeners only, and `ExtensionAPI.on` has no
+ * retry event to subscribe to — so the attempt is counted from the message that
+ * carries the failure (`stopReason === "error"`). The attempt after a failure
+ * ends a message too, which is what clears the count.
+ */
+export interface ProviderAttemptEvent {
+  readonly role: string;
+  readonly stopReason?: string;
+  /** What the provider said; carries the status code when it gave one. */
+  readonly errorMessage?: string;
+  /** Retries the settings allow; 0 when pi is not retrying, so nothing is counted. */
+  readonly maxAttempts: number;
+}
+
+/**
+ * Retries pi makes after a failed attempt when the settings do not say. pi's
+ * `SETTINGS_DEFAULTS` is not exported from the package root, so its default of
+ * three is restated here once instead of being spread over the call sites.
+ */
+export const DEFAULT_RETRY_BUDGET = 3;
+
+/** The retry settings an attempt counter reads; the rest of `Settings` is not its business. */
+export interface RetrySettingsLike {
+  readonly enabled?: boolean;
+  readonly maxRetries?: number;
+}
+
+/**
+ * Retries pi is configured to make after a failure. Zero — retries disabled, or a
+ * budget of zero — means the first failure is final, so no attempt is counted:
+ * `retry 1/0` would promise a retry that is never coming.
+ */
+export function retryBudget(settings: { readonly retry?: RetrySettingsLike } | undefined): number {
+  const retry = settings?.retry;
+  if (retry?.enabled === false) return 0;
+  const maxRetries = retry?.maxRetries;
+  if (maxRetries === undefined) return DEFAULT_RETRY_BUDGET;
+  return Number.isInteger(maxRetries) && maxRetries >= 1 ? maxRetries : 0;
+}
+
+/** The provider status a failure message named, when it named one: `529`. */
+function providerStatus(errorMessage: string | undefined): string | undefined {
+  if (errorMessage === undefined) return undefined;
+  return /\b([45]\d\d)\b/.exec(errorMessage)?.[1];
+}
+
 export interface IterationsOptions {
   readonly sessions: TaskSessions;
   /** Clock seam for tests; defaults to `Date.now`. */
@@ -179,6 +230,40 @@ export class Iterations {
   }
 
   /**
+   * Count one provider attempt of the turn in flight against the iteration that
+   * opened it (ticket #47). A failed attempt has no event of its own — see
+   * `ProviderAttemptEvent` — so it arrives as the assistant message that ended
+   * with `stopReason: "error"`, and the attempt after it is what clears the
+   * count while the turn is still open.
+   *
+   * Nothing is counted when the budget is zero: pi gives up at the first failure
+   * then, so there is no retry to show.
+   */
+  async recordAttempt(scope: TaskScope, attempt: ProviderAttemptEvent): Promise<void> {
+    if (attempt.role !== "assistant") return;
+    const session = await this.sessions.session(scope);
+    const iteration = this.newestOpenIteration(session);
+    if (iteration === undefined) return;
+
+    if (attempt.stopReason === "error" && attempt.maxAttempts >= 1) {
+      const status = providerStatus(attempt.errorMessage);
+      iteration.retry = {
+        attempt: (iteration.retry?.attempt ?? 0) + 1,
+        maxAttempts: attempt.maxAttempts,
+        ...(status === undefined ? {} : { status }),
+      };
+      await this.sessions.persist(session);
+      return;
+    }
+
+    // The attempt after a failure reached the provider: the turn is retrying no
+    // more, but it is still open, so only the retry goes — `settle` ends it.
+    if (iteration.retry === undefined) return;
+    iteration.retry = undefined;
+    await this.sessions.persist(session);
+  }
+
+  /**
    * Close every bound iteration still open in the session, because one run
    * settles at a time and a bound fire's turn is that run. Calls still running
    * at that point cannot end any more: `aborted` when the run was aborted,
@@ -244,6 +329,10 @@ export class Iterations {
 function closeIteration(iteration: Iteration, at: number, status: "completed" | "aborted"): void {
   iteration.endedAt = at;
   iteration.status = status;
+  // This is the turn-ended point ticket #46 shares: nothing is retried once the
+  // turn is over, whatever it finally did. #46 decides from its own field
+  // whether the turn ended because pi gave up; this one describes flight only.
+  iteration.retry = undefined;
   for (const call of iteration.calls) {
     if (call.status !== "running") continue;
     call.endedAt = at;
