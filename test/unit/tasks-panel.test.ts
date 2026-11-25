@@ -1226,6 +1226,42 @@ describe("the loop detail view", () => {
     panel.dispose();
   });
 
+  it("re-reads the prompt when a fire's page sends the reader back to its loop", async () => {
+    const source = new FakeSource();
+    const path = "/work/.pi/tasks/session/prompts/loop01.md";
+    source.prompts.set("loop01", { path, lines: ["review the diff"], changedAt: CLOCK });
+    source.rows = [
+      loopView("loop01", {
+        name: "review loop",
+        prompt: longSeedPrompt(),
+        iterations: [iterationOf(1)],
+      }),
+      view("bg-a1b2c", { name: "review loop #1", parentId: "loop01", fire: 1 }),
+    ];
+    const { panel, drawn } = await openOn("loops", source);
+    await panel.settle();
+    panel.handleInput(ENTER);
+    await panel.settle();
+    expect(source.prompted).toEqual(["loop01"]);
+
+    // The fire it started is a page of its own, and a process has no prompt: the
+    // block goes away with the loop's own page.
+    panel.openProcessPage("bg-a1b2c", 1);
+    await panel.settle();
+    expect(drawn()).not.toContain("review the diff");
+
+    panel.handleInput(LEFT);
+    await panel.settle();
+
+    // `←` reads the prompt again instead of waiting for the next tick, so the loop
+    // page is whole the moment it is drawn rather than blank under its path.
+    expect(source.prompted).toEqual(["loop01", "loop01"]);
+    expect(drawn()).toContain(path);
+    expect(drawn()).toContain("review the diff");
+
+    panel.dispose();
+  });
+
   // A fire is a full model call, so a turn that recorded no tool call is a fact a
   // reader weighs; only a second one in a row says the loop has stalled — the
   // first may be a turn that read files and thought before acting (ticket #49).

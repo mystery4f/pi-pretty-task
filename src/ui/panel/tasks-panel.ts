@@ -451,10 +451,18 @@ export class TasksPanel implements Component, PanelView {
     });
   }
 
-  /** `←` from a fire: the record it was started by, without leaving the detail. */
+  /**
+   * `←` from a fire: the record it was started by, without leaving the detail.
+   * The fire's own page emptied the prompt block, so the way back reads it again
+   * rather than leaving a hole until the next refresh tick.
+   */
   showDetailOf(id: string | undefined): void {
     this.detailId = id;
-    this.paint();
+    this.enqueue(async () => {
+      await this.readTail();
+      await this.readPrompt();
+      this.paint();
+    });
   }
 
   /** Enter on an iteration: the calls of one turn. */
