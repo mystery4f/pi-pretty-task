@@ -92,6 +92,7 @@ A prompt loop is a clock: every fire delivers a message into the session and sta
 
 - Keep the work in a progress file, one item per line with an acceptance check on each. "`npm run test:unit` exits 0" can be finished; "improve the code" cannot.
 - Put a closing contract in the loop's prompt: tick the item that finished, and when nothing is left call `pretty_task_loop_update id=<id> action=complete`.
+- Fine-tune the wording without touching the schedule: every fire reads the loop's prompt file (the path `pretty_task_loop_list` prints), so an edit takes effect on the next fire and deleting the loop deletes the file.
 - Always pass `maxFires`. It is the only stop that does not depend on the model's own judgement.
 
 The bundled `pretty-task-unattended` skill carries the whole recipe — the file shape, the exact contract text, and what to read the next morning. Ask for it in plain words ("run this unattended overnight") and it fills in the calls.

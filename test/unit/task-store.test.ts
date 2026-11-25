@@ -284,6 +284,26 @@ describe("the task record file", () => {
     expect(await new TaskStore(directory).load()).toEqual([first]);
   });
 
+  it("falls back when a prompt loop's warning is not text", async () => {
+    const directory = await stateDirectory();
+    const loop = loopRecord({ status: "running" });
+    const store = new TaskStore(directory);
+    await store.save([loop]);
+    await store.save([loop, processTask()]);
+
+    // A warning is one line of text or nothing at all; anything else is a file
+    // this version cannot trust, so the previous generation stands in (ADR-0010).
+    const path = taskRecordPath(directory);
+    const document = JSON.parse(await readFile(path, "utf8")) as {
+      version: number;
+      tasks: Array<Record<string, unknown>>;
+    };
+    document.tasks[0] = { ...document.tasks[0], promptWarning: 42 };
+    await writeFile(path, JSON.stringify(document), "utf8");
+
+    expect(await new TaskStore(directory).load()).toEqual([loop]);
+  });
+
   it("has no history when both generations are unusable, instead of throwing", async () => {
     const directory = await stateDirectory();
     const store = new TaskStore(directory);
@@ -342,6 +362,21 @@ describe("the task record file", () => {
 
     // A loop owns no process, so starting the store does not end it.
     expect(loaded).toEqual([loop]);
+  });
+
+  it("round-trips the warning a prompt loop carries between fires", async () => {
+    const directory = await stateDirectory();
+    const loop = loopRecord({
+      status: "running",
+      promptWarning:
+        "prompt file is missing; this fire used the creation prompt and rewrote the file",
+    });
+    delete loop.endedAt;
+    await new TaskStore(directory).save([loop]);
+
+    // The warning is what tells a human the last fire ran on the seed, so it has
+    // to survive the restart that follows (ADR-0024).
+    expect(await new TaskStore(directory).load()).toEqual([loop]);
   });
 
   it("interrupts the iteration a restart left running, and the calls inside it", async () => {

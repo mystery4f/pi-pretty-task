@@ -8,7 +8,11 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { sessionTaskDirectory, taskRecordPath } from "../../src/tasks/base/runtime-state.js";
+import {
+  loopPromptPath,
+  sessionTaskDirectory,
+  taskRecordPath,
+} from "../../src/tasks/base/runtime-state.js";
 import {
   createHarness,
   type Harness,
@@ -24,6 +28,8 @@ interface LoopDetails {
   status: string;
   schedule: string;
   prompt: string;
+  promptFile?: string;
+  promptWarning?: string;
   fires: number;
   maxFires?: number;
   nextFireAt?: number;
@@ -91,16 +97,23 @@ describe("loop tools", () => {
       maxFires: 3,
     });
 
+    const promptFile = loopPromptPath(
+      sessionTaskDirectory(task.turn.cwd, task.turn.sessionId),
+      created.id,
+    );
     expect(created).toMatchObject({
       kind: "prompt-loop",
       status: "running",
       schedule: "10s",
       prompt: "review the diff",
+      promptFile,
       fires: 0,
       maxFires: 3,
       nextFireAt: task.now + 10_000,
       untilNextFireMs: 10_000,
     });
+    // The seed the record keeps and the file the fires read start out the same.
+    expect(await readFile(promptFile, "utf8")).toBe("review the diff");
 
     const listed = await task.harness.call("pretty_task_loop_list", {});
     const text = resultText(listed);
@@ -109,10 +122,12 @@ describe("loop tools", () => {
     expect(text).toContain("(in 10.0s)");
     expect(text).toContain("fires: 0 / 3");
     expect(text).toContain("status: running");
-    expect(text).toContain("prompt: review the diff");
+    // The list names the file the fires read, not a copy of the text (ADR-0024).
+    expect(text).toContain(`prompt file: ${promptFile}`);
 
     const one = await task.harness.call("pretty_task_loop_list", { id: created.id });
     expect(detailsOf(one).id).toBe(created.id);
+    expect(detailsOf(one).promptFile).toBe(promptFile);
   });
 
   it("rejects a bad schedule with a clear example", async () => {

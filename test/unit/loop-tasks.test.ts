@@ -5,9 +5,12 @@
  * @author mystery4f <40482524+mystery4f@users.noreply.github.com>
  */
 
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+
 import { afterEach, describe, expect, it } from "vitest";
 
-import { sessionTaskDirectory } from "../../src/tasks/base/runtime-state.js";
+import { loopPromptPath, sessionTaskDirectory } from "../../src/tasks/base/runtime-state.js";
+import type { PromptLoopTask } from "../../src/tasks/base/task.js";
 import { TaskSessions } from "../../src/tasks/base/task-sessions.js";
 import { TaskStore } from "../../src/tasks/base/task-store.js";
 import { type LoopFire, LoopTasks, MAX_LOOPS } from "../../src/tasks/loop/loop-tasks.js";
@@ -728,5 +731,140 @@ describe("LoopTasks", () => {
     await expect(
       task.loops.create({ ...task.scope, schedule: "1h", prompt: "room again" }),
     ).resolves.toBeDefined();
+  });
+});
+
+describe("prompt file", () => {
+  /** The address of one loop's prompt file, derived the way the plugin derives it. */
+  function promptPath(task: Awaited<ReturnType<typeof setup>>, loopId: string): string {
+    return loopPromptPath(sessionTaskDirectory(task.scope.cwd, task.scope.sessionId), loopId);
+  }
+
+  async function createPromptLoop(
+    task: Awaited<ReturnType<typeof setup>>,
+    prompt = "review the diff",
+  ) {
+    return task.loops.create({ ...task.scope, schedule: "10s", prompt });
+  }
+
+  /** The record, once it is known to be the prompt loop the test created. */
+  async function promptLoopOf(
+    task: Awaited<ReturnType<typeof setup>>,
+    loopId: string,
+  ): Promise<PromptLoopTask> {
+    const view = await task.loops.get(task.scope, loopId);
+    if (view?.task.kind !== "prompt-loop")
+      throw new Error("the loop did not load as a prompt loop");
+    return view.task;
+  }
+
+  it("writes the prompt to the derived path when the loop is created", async () => {
+    const task = await setup();
+    const created = await createPromptLoop(task);
+
+    const path = promptPath(task, created.task.id);
+    expect(created.promptFile).toBe(path);
+    expect(await readFile(path, "utf8")).toBe("review the diff");
+    // The record keeps the same text as the seed, not a copy of the file's state.
+    expect((await promptLoopOf(task, created.task.id)).prompt).toBe("review the diff");
+  });
+
+  it("fires the text in the file, so an edited prompt reaches the next fire", async () => {
+    const task = await setup();
+    const created = await createPromptLoop(task);
+    await writeFile(promptPath(task, created.task.id), "refined wording\n", "utf8");
+
+    task.advance(10_000);
+    const fired = await task.loops.pump(task.now);
+
+    expect(fired).toHaveLength(1);
+    expect(fired[0]?.prompt).toBe("refined wording\n");
+    // Reading is not writing: the file stays exactly what the user saved.
+    expect(await readFile(promptPath(task, created.task.id), "utf8")).toBe("refined wording\n");
+  });
+
+  it("rebuilds a missing file from the record and says so on the record", async () => {
+    const task = await setup();
+    const created = await createPromptLoop(task);
+    const path = promptPath(task, created.task.id);
+    await rm(path);
+
+    task.advance(10_000);
+    const fired = await task.loops.pump(task.now);
+
+    expect(fired[0]?.prompt).toBe("review the diff");
+    expect(await readFile(path, "utf8")).toBe("review the diff");
+    expect((await promptLoopOf(task, created.task.id)).promptWarning).toContain("is missing");
+  });
+
+  it("treats a file of whitespace as unreadable, because an empty wake says nothing", async () => {
+    const task = await setup();
+    const created = await createPromptLoop(task);
+    const path = promptPath(task, created.task.id);
+    await writeFile(path, "  \n\t\n", "utf8");
+
+    task.advance(10_000);
+    const fired = await task.loops.pump(task.now);
+
+    expect(fired[0]?.prompt).toBe("review the diff");
+    expect(await readFile(path, "utf8")).toBe("review the diff");
+    expect((await promptLoopOf(task, created.task.id)).promptWarning).toContain("is empty");
+  });
+
+  it("clears the warning once the file reads cleanly again", async () => {
+    const task = await setup();
+    const created = await createPromptLoop(task);
+    const path = promptPath(task, created.task.id);
+    await rm(path);
+    task.advance(10_000);
+    await task.loops.pump(task.now);
+
+    task.advance(10_000);
+    await task.loops.pump(task.now);
+
+    expect((await promptLoopOf(task, created.task.id)).promptWarning).toBeUndefined();
+  });
+
+  it("keeps the schedule when the file cannot be read or rebuilt, and sends a diagnostic", async () => {
+    const task = await setup();
+    const created = await createPromptLoop(task);
+    const path = promptPath(task, created.task.id);
+    // A directory where the file belongs: unreadable, and the rebuild cannot rename over it.
+    await rm(path);
+    await mkdir(path);
+
+    task.advance(10_000);
+    const fired = await task.loops.pump(task.now);
+
+    expect(fired).toHaveLength(1);
+    const text = fired[0]?.prompt ?? "";
+    expect(text).toContain(path);
+    expect(text).toContain("keeps firing on its schedule");
+    const view = await task.loops.get(task.scope, created.task.id);
+    expect(view?.task.status).toBe("running");
+    expect(view?.task.fires).toBe(1);
+    expect(view?.task.nextFireAt).toBe(task.now + 10_000);
+  });
+
+  it("deletes the prompt file with the loop", async () => {
+    const task = await setup();
+    const created = await createPromptLoop(task);
+    const path = promptPath(task, created.task.id);
+
+    await task.loops.delete(task.scope, created.task.id);
+
+    await expect(readFile(path, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("gives a loop that predates the file its prompt file on the first fire", async () => {
+    const task = await setup();
+    const created = await createPromptLoop(task);
+    const path = promptPath(task, created.task.id);
+    await rm(path);
+
+    task.advance(10_000);
+    await task.loops.pump(task.now);
+
+    expect(await readFile(path, "utf8")).toBe("review the diff");
   });
 });

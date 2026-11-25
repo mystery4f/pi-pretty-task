@@ -53,3 +53,15 @@ export function previousTaskRecordPath(directory: string): string {
 export function processOutputPath(directory: string, taskId: string): string {
   return join(directory, `${taskId}.output`);
 }
+
+/**
+ * Prompt file of one prompt loop, named after the loop alone (ADR-0024).
+ *
+ * The address is derived, never supplied: no tool takes a path, so neither the
+ * user nor the model can point a loop at a file somewhere else. `safeSegment`
+ * keeps an id from climbing out of the session directory, and the loop's name
+ * plays no part, so renaming a loop never moves its prompt.
+ */
+export function loopPromptPath(directory: string, loopId: string): string {
+  return join(directory, `${safeSegment(loopId)}.prompt.md`);
+}
