@@ -797,6 +797,20 @@ describe("prompt file", () => {
     expect((await promptLoopOf(task, created.task.id)).promptWarning).toContain("is missing");
   });
 
+  it("treats a file of whitespace as unreadable, because an empty wake says nothing", async () => {
+    const task = await setup();
+    const created = await createPromptLoop(task);
+    const path = promptPath(task, created.task.id);
+    await writeFile(path, "  \n\t\n", "utf8");
+
+    task.advance(10_000);
+    const fired = await task.loops.pump(task.now);
+
+    expect(fired[0]?.prompt).toBe("review the diff");
+    expect(await readFile(path, "utf8")).toBe("review the diff");
+    expect((await promptLoopOf(task, created.task.id)).promptWarning).toContain("is empty");
+  });
+
   it("clears the warning once the file reads cleanly again", async () => {
     const task = await setup();
     const created = await createPromptLoop(task);

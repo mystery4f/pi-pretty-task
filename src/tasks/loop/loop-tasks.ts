@@ -158,6 +158,13 @@ export interface LoopTaskView {
   readonly promptFile?: string;
 }
 
+/**
+ * {@link LoopTaskView} while it is being assembled. Mutable so `view` can fill it
+ * in one place; a field added to the public shape must appear here too, because
+ * the type is derived from it rather than restated.
+ */
+type AssembledView = { -readonly [Field in keyof LoopTaskView]: LoopTaskView[Field] };
+
 /** A transition `pretty_task_loop_update` can apply. A retune travels in `schedule`, not here. */
 export type LoopUpdateAction = "pause" | "resume" | "complete" | "rearm" | "clear-signal";
 
@@ -455,13 +462,21 @@ export class LoopTasks {
       };
     }
 
-    // The file goes down first: a create that cannot write it fails before the
-    // session records a loop whose prompt would never reach the model (ADR-0024).
-    if (task.kind === "prompt-loop") {
-      await writePromptText(session.directory, task.id, task.prompt);
-    }
+    // The record goes down first: a create that cannot write the prompt file
+    // still records the loop, and its first fire rebuilds the file from the
+    // record; writing first would leave a file behind for a loop that was never
+    // saved (ADR-0024).
     session.tasks.set(task.id, task);
     await this.sessions.persist(session);
+    if (task.kind === "prompt-loop") {
+      try {
+        await writePromptText(session.directory, task.id, task.prompt);
+      } catch {
+        // A failed write leaves no prompt file rather than half of one; the
+        // first fire rebuilds it from the record and warns there.
+        await removePromptText(session.directory, task.id);
+      }
+    }
     return this.view(task, session.directory);
   }
 
@@ -1071,7 +1086,7 @@ export class LoopTasks {
    * the prompt file's address is derived from it, never stored (ADR-0024).
    */
   private view(task: LoopTask, directory: string): LoopTaskView {
-    const view: { task: LoopTask; untilNextFireMs?: number; promptFile?: string } = { task };
+    const view: AssembledView = { task };
     if (task.status === "running" && task.nextFireAt !== undefined) {
       view.untilNextFireMs = Math.max(0, task.nextFireAt - this.now());
     }
