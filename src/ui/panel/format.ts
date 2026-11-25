@@ -203,12 +203,16 @@ export function firesText(task: LoopBase): string {
   return `${String(task.fires)} / ${String(task.maxFires)}`;
 }
 /**
- * Failed fires in a row on a command loop. A prompt loop records the same count
- * when the provider gives up on its fire (ticket #46), but its rows do not claim
- * that yet, so they read zero until ticket #50 draws them (ADR-0017).
+ * Failed fires in a row: a command loop counts a fire that exited non-zero, and a
+ * prompt loop one whose turn the provider gave up on (ticket #46) — the same count
+ * on the same backoff curve, cleared by the same healthy fire (ADR-0017). A process
+ * and a chain have no schedule to fail, so they answer zero.
  */
 export function failureStreak(task: Task): number {
-  return task.kind === "cmd-loop" ? (task.consecutiveFailures ?? 0) : 0;
+  if (task.kind === "cmd-loop" || task.kind === "prompt-loop") {
+    return task.consecutiveFailures ?? 0;
+  }
+  return 0;
 }
 
 /** A raised signal on a command loop: the check has something outstanding (ADR-0018). */
