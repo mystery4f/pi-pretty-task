@@ -290,8 +290,38 @@ export function stepColour(status: TaskStatus): ThemeColor {
   }
 }
 
-/** One iteration row: fire number, result, when it ran, and what it cost. */
-export function iterationLine(iteration: Iteration): string {
+/**
+ * A fire whose turn finished cleanly and recorded no tool call: it spent a model
+ * call and moved nothing. A turn cut short — aborted, or interrupted with the
+ * process — is not one: it never got the chance to work (ticket #49).
+ */
+function emptyFire(iteration: Iteration): boolean {
+  return iteration.status === "completed" && iteration.calls.length === 0;
+}
+
+/**
+ * Consecutive fires that made no tool call, counting back from this one through
+ * the record's own order (oldest first). One quiet turn is legitimate — a turn
+ * may read files and think before acting — so a row marks a fire only from the
+ * second one of a run (ticket #49).
+ */
+function emptyFireRun(iterations: readonly Iteration[], iteration: Iteration): number {
+  const end = iterations.findIndex((candidate) => candidate.fire === iteration.fire);
+  if (end < 0) return emptyFire(iteration) ? 1 : 0;
+  let run = 0;
+  for (let index = end; index >= 0; index -= 1) {
+    const earlier = iterations[index];
+    if (earlier === undefined || !emptyFire(earlier)) break;
+    run += 1;
+  }
+  return run;
+}
+
+/**
+ * One iteration row: fire number, result, when it ran, what it cost, and — once a
+ * second fire in a row made no call — the run that says the loop has stalled.
+ */
+export function iterationLine(iteration: Iteration, iterations: readonly Iteration[]): string {
   const parts = [
     `fire ${String(iteration.fire)}`,
     iteration.status,
@@ -300,10 +330,12 @@ export function iterationLine(iteration: Iteration): string {
   if (iteration.endedAt !== undefined) {
     parts.push(formatDuration(iteration.endedAt - iteration.startedAt));
   }
-  parts.push(iteration.calls.length === 1 ? "1 call" : `${String(iteration.calls.length)} calls`);
+  parts.push(callsText(iteration));
   if (iteration.droppedCalls > 0) {
     parts.push(`+${String(iteration.droppedCalls)} earlier calls dropped`);
   }
+  const empty = emptyFireRun(iterations, iteration);
+  if (empty > 1) parts.push(`${String(empty)} empty in a row`);
   return parts.join(" · ");
 }
 
