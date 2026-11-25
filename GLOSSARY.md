@@ -56,8 +56,12 @@ _Avoid_: stage, phase, node, stage task
 Llm loop task 的子记录。一次触发对应一条，记录那一轮里实际调用了哪些工具、跑了哪些命令。它不是 Task，不在列表里单独占一行，只在该 Llm loop task 的详情里展开。
 _Avoid_: run, round, execution
 
+**Retry**:
+一次 Fire 的 turn 撞上 provider 错误、pi 正在替它重试时留下的那条事实：`attempt` 数已经失败的尝试（第一次也数），`maxAttempts` 是 pi 的重试预算（`retry.maxRetries`，默认 3）。行上印成 `retry 2/4 · 529`，分母是这一轮允许的全部尝试——预算加第一次尝试，所以预算 3 读出 4；`· 529` 是失败带回来的状态码，没带就不印。Iteration 页的 Retry 字段是同一句话，且 turn 结束后仍留着最后一次重试；行上的只属于还没结束的 turn，一结束就不印了——它不同于失败连击（`failureStreak`）：重试说的是这一轮还在试，连击从那一发放弃之后才开始数。
+_Avoid_: rerun, try, throttle
+
 **Empty fire**:
-一次 Fire 的 turn 正常结束、却一个工具都没调用：花了一次模型调用，什么也没推动。面板把它当事实印出来（`0 calls`），只有连续两次才标记（`2 empty in a row`）——先读文件再动手的 turn 是合法的，第一次不该被当成卡住。被 abort 或被进程带走的 turn 不算：它没得到干活的机会。
+一次 Fire 的 turn 已经关闭（`completed`）、却一个工具都没调用：花了一次模型调用，什么也没推动。面板把它当事实印出来（`0 calls`），只有连续两次才标记（`2 empty in a row`）——先读文件再动手的 turn 是合法的，第一次不该被当成卡住。代码只知道这一轮关了、没调工具，读不出「正常」：provider 放弃的那一轮也以 `completed` 关闭。被 abort 或被进程带走的 turn 不算：它没得到干活的机会。
 _Avoid_: idle fire, no-op, quiet run
 
 **Schedule**:
