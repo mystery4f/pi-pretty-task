@@ -417,8 +417,18 @@ function updateHeadline(id: string, result: Awaited<ReturnType<LoopTasks["update
       return `Loop ${id} had no signal to clear.`;
     case "failed":
       return `Loop ${id} could not be resumed: ${result.view.task.error ?? "invalid schedule"}.`;
-    case "prompt-updated":
-      return `Loop ${id} (${name}) now sends the new prompt; its next fire is ${nextFireText(result.view)}.`;
+    case "prompt-updated": {
+      // What the loop "now sends" depends on whether it can still fire: a finished
+      // loop never reads the file again, so promising a fire would describe an event
+      // that cannot happen (the same reply would say "its next fire is none").
+      const replaced = `Rewrote the prompt of loop ${id} (${name})`;
+      const status = result.view.task.status;
+      if (status === "running") {
+        return `${replaced}; its next fire is ${nextFireText(result.view)}.`;
+      }
+      if (status === "paused") return `${replaced}; it stays paused until resumed.`;
+      return `${replaced}; the loop is ${status} and will not fire again, so only its prompt file changed.`;
+    }
     case "prompt-write-failed":
       return `Could not replace the prompt of loop ${id} (${name}); its prompt file still holds the previous text.`;
   }
@@ -548,9 +558,10 @@ export function loopTaskTools(loops: LoopTasks): ToolDefinition[] {
         );
       }
 
-      // A retune, a transition and a new prompt may arrive together; the store
-      // applies the schedule first, so `resume` with a new schedule lands on the
-      // new interval, and writes the text before any of it.
+      // A retune, a transition and a new prompt may arrive together, and the store
+      // applies them in one fixed order: the schedule is retimed first, then the
+      // prompt file is written, then the action is applied, so `resume` with a new
+      // schedule already lands on the new interval.
       const input = {
         ...scopeOf(ctx),
         id,

@@ -467,7 +467,8 @@ describe("loop tools", () => {
     });
 
     const said = resultText(updated);
-    expect(said).toContain("now sends the new prompt");
+    expect(said).toContain("Rewrote the prompt of loop");
+    expect(said).toContain("its next fire is");
     expect(said).toContain("prompt text: replaced");
     // The reply names the one file it wrote, and keeps the seed and the file apart.
     expect(said).toContain(path);
@@ -489,6 +490,38 @@ describe("loop tools", () => {
     task.advance(10_000);
     expect(await task.harness.pump(task.now)).toHaveLength(1);
     expect(task.harness.messages.at(-1)?.content).toBe("review only the parser module");
+  });
+
+  // A paused or finished loop cannot act on the new text, so the reply must not
+  // promise a fire that will never happen ("its next fire is none" would be dead
+  // information dressed up as news).
+  it("does not promise a fire when the rewritten loop is paused or finished", async () => {
+    const task = await setup();
+    const paused = await createLoop(task.harness, { schedule: "10s", prompt: "keep going" });
+    await task.harness.call("pretty_task_loop_update", { id: paused.id, action: "pause" });
+    const pausedSaid = resultText(
+      await task.harness.call("pretty_task_loop_update", { id: paused.id, prompt: "paused text" }),
+    );
+    expect(pausedSaid).toContain("Rewrote the prompt of loop");
+    expect(pausedSaid).toContain("stays paused until resumed");
+    expect(pausedSaid).not.toContain("its next fire is");
+
+    const finished = await createLoop(task.harness, { schedule: "10s", prompt: "keep going" });
+    await task.harness.call("pretty_task_loop_update", { id: finished.id, action: "complete" });
+    const finishedSaid = resultText(
+      await task.harness.call("pretty_task_loop_update", {
+        id: finished.id,
+        prompt: "finished text",
+      }),
+    );
+    expect(finishedSaid).toContain("Rewrote the prompt of loop");
+    expect(finishedSaid).toContain("will not fire again");
+    expect(finishedSaid).not.toContain("its next fire is");
+
+    // Both files did change; only the promise of a fire was wrong.
+    const directory = sessionTaskDirectory(task.turn.cwd, task.turn.sessionId);
+    expect(await readFile(loopPromptPath(directory, paused.id), "utf8")).toBe("paused text");
+    expect(await readFile(loopPromptPath(directory, finished.id), "utf8")).toBe("finished text");
   });
 
   it("reports a prompt that could not be written through the result instead of throwing", async () => {
