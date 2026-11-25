@@ -23,8 +23,8 @@ Prompt loop 的提示词是创建时冻结在记录里的一个字符串（`src/
 - **插件在三个时刻写**：创建 loop 时把 `prompt` 原样写入一次（原子写，临时文件 + rename，与记录文件同一手法）；有人显式改写时写一次——`pretty_task_loop_update` 的 `prompt` 走同一条写盘路径，写失败保留旧文本、在工具结果里报出而不抛错，记录里的 `prompt` 一个字不动（[#45](https://github.com/mystery4f/pi-pretty-task/issues/45)）；文件缺失、不可读或为空时，用记录里的 `prompt` 重建一次，并记一条 warning。空文件也算不可读：发出去是一条用户看不见的空 follow-up，比一次响亮的重建更糟。其余时刻只读。
 - **每一发读一次**：pump 在触发时 `readFile`，把文本放进 `LoopFire.prompt`；`sendLoopWake` 改用 `fire.prompt`，不再读记录上的字段。改动对**下一发**生效，对正在排队或正在跑的 turn 不生效。
 - **读失败不暂停**：文件丢了、权限变了、内容不是合法 UTF-8，都照常发一发——能重建就用重建后的文本，重建失败就发一条诊断（"读不到 `<path>`：<原因>"）并让 loop 继续跑。无人值守最坏的结果是"悄无声息地停了"，不是"多发了一条诊断"。
-- **记录里的 `prompt` 保留**，语义就是"创建时的原文"，作为重建源与旧记录兼容路径：老 loop 没有对应文件，第一次触发时补落盘。详情页 `src/tasks/loop/tools.ts:175` 由 `prompt: <全文>` 改为 `prompt file: <path>`，面板 detail 同源，人能看见地址，AI 也用普通 `write` 改同一个地址。
-- **地址出现在模型会读的每一处**：`describeLoop`（`src/tasks/loop/tools.ts:150-197`）是 `create`（:435）、`list`（:489）、`update`（:526）共用的唯一投影，改 `tools.ts:175` 一行即可让三处都印出绝对路径；结构化 `loopDetails` 同时带上 `promptFile` 字段供程序化取用。压缩或换会话之后，模型只靠 `pretty_task_loop_list id=<id>` 就能重新拿到地址，不依赖创建时的返回。
+- **记录里的 `prompt` 保留**，语义就是"创建时的原文"，作为重建源与旧记录兼容路径：老 loop 没有对应文件，第一次触发时补落盘。详情页 `src/tasks/loop/tools.ts:186` 由 `prompt: <全文>` 改为 `prompt file: <path>`，面板 detail 同源，人能看见地址，AI 也用普通 `write` 改同一个地址。
+- **地址出现在模型会读的每一处**：`describeLoop`（`src/tasks/loop/tools.ts:161-211`）是 `create`（:487）、`list`（:541）、`update`（:585）共用的唯一投影，改 `tools.ts:186` 一行即可让三处都印出绝对路径；结构化 `loopDetails` 同时带上 `promptFile` 字段供程序化取用。压缩或换会话之后，模型只靠 `pretty_task_loop_list id=<id>` 就能重新拿到地址，不依赖创建时的返回。
 - **生命周期**：删除 loop 连带删除文件；`pruneOldSessions` 已按目录清扫，无需另写清理逻辑。改名不影响路径。
 
 ## 代价

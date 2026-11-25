@@ -9,6 +9,7 @@ import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises"
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { tempPathFor } from "../../src/tasks/base/atomic.js";
 import { loopPromptPath, sessionTaskDirectory } from "../../src/tasks/base/runtime-state.js";
 import type { PromptLoopTask } from "../../src/tasks/base/task.js";
 import { TaskSessions } from "../../src/tasks/base/task-sessions.js";
@@ -1203,7 +1204,7 @@ describe("prompt file", () => {
     const path = promptPath(task, created.task.id);
     // A directory where the atomic write's temp file belongs: the write fails and
     // the target keeps exactly the text it had.
-    await mkdir(`${path}.tmp`);
+    await mkdir(tempPathFor(path));
 
     const updated = await task.loops.update({
       ...task.scope,

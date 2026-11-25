@@ -653,7 +653,9 @@ export class TaskStore {
     for (let attempt = 1; ; attempt += 1) {
       try {
         // Both generation files land here, so the directory exists before the
-        // first one is written — this is the only place that creates it.
+        // first one is written. A prompt loop's prompt file is written into the
+        // same directory and creates it too (prompt-file.ts), so creation is
+        // shared: `mkdir` is recursive and either writer may arrive first.
         await this.ensureDirectory();
         if (this.lastGeneration !== undefined && this.lastGeneration !== generation) {
           await writeAtomic(previousTaskRecordPath(this.directory), this.lastGeneration);

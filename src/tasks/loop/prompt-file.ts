@@ -3,8 +3,9 @@
  * `prompt` is the seed and the rebuild source (ADR-0024).
  *
  * The address is derived from the loop id alone, so nothing here takes a path
- * from a caller. The plugin writes twice: once when the loop is created, and to
- * rebuild a file that has gone missing or unreadable. Every fire reads.
+ * from a caller. The plugin writes at three moments: creating the loop, an
+ * explicit rewrite through pretty_task_loop_update, and a rebuild of a file that
+ * is missing, unreadable or holds only whitespace. Every fire reads.
  *
  * @author mystery4f <40482524+mystery4f@users.noreply.github.com>
  */
@@ -12,7 +13,7 @@
 import { mkdir, readFile, stat, unlink } from "node:fs/promises";
 import { dirname } from "node:path";
 
-import { writeAtomic } from "../base/atomic.js";
+import { tempPathFor, writeAtomic } from "../base/atomic.js";
 import { loopPromptPath } from "../base/runtime-state.js";
 import type { PromptLoopTask } from "../base/task.js";
 
@@ -75,7 +76,7 @@ export async function removePromptText(directory: string, loopId: string): Promi
   const path = loopPromptPath(directory, loopId);
   // The temp file too: a write that failed before its rename leaves one behind.
   await removeQuietly(path);
-  await removeQuietly(`${path}.tmp`);
+  await removeQuietly(tempPathFor(path));
 }
 
 async function removeQuietly(path: string): Promise<void> {
@@ -108,12 +109,12 @@ export async function readPromptText(directory: string, task: PromptLoopTask): P
     const reason = error instanceof Error ? error.message : String(error);
     return {
       text: `The prompt file ${path} ${problem}, and rebuilding it from the loop's creation prompt failed (${reason}). Fix the file with your editor; this loop keeps firing on its schedule.`,
-      warning: `prompt file ${problem}, and rebuilding it failed (${reason})`,
+      warning: `The prompt file ${problem}, and rebuilding it failed (${reason}).`,
     };
   }
   return {
     text: task.prompt,
-    warning: `prompt file ${problem}; this fire used the creation prompt and rewrote the file`,
+    warning: `The prompt file ${problem}; this fire used the creation prompt and rewrote the file.`,
   };
 }
 

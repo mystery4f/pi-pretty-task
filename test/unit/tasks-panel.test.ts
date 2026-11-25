@@ -1214,7 +1214,7 @@ describe("the loop detail view", () => {
         name: "review loop",
         prompt: longSeedPrompt(),
         promptWarning:
-          "prompt file is missing; this fire used the creation prompt and rewrote the file",
+          "The prompt file is missing; this fire used the creation prompt and rewrote the file.",
         iterations: [iterationOf(1)],
       }),
     ];
@@ -1232,7 +1232,7 @@ describe("the loop detail view", () => {
     // But the fire that rebuilt it used the creation text, and the page says so:
     // a healthy-looking file must not hide the edit the fallback overwrote.
     expect(screen).toContain(
-      "prompt file is missing; this fire used the creation prompt and rewrote the file",
+      "The prompt file is missing; this fire used the creation prompt and rewrote the file.",
     );
 
     panel.dispose();
@@ -1300,7 +1300,7 @@ describe("the loop detail view", () => {
       loopView("loop02", {
         name: "review loop",
         prompt: longSeedPrompt(),
-        promptWarning: "prompt file is missing; this fire used the creation prompt",
+        promptWarning: "The prompt file is missing; this fire used the creation prompt",
         iterations: [iterationOf(1)],
       }),
     ];
@@ -1313,7 +1313,7 @@ describe("the loop detail view", () => {
     const screen = drawn();
     // The address is still a fact even when the text is not, and the record says why.
     expect(screen).toContain(path);
-    expect(screen).toContain("prompt file is missing; this fire used the creation prompt");
+    expect(screen).toContain("The prompt file is missing; this fire used the creation prompt");
     // The record's warning already says it, so the file's own state is not repeated.
     expect(screen).not.toContain("the prompt file");
     // No time is invented for a file that could not be read.
@@ -1492,11 +1492,48 @@ describe("the loop detail view", () => {
     const { panel, drawn } = await openOn("loops", source);
     await panel.settle();
 
-    // A fire that spent three attempts on a busy provider otherwise reads as one
+    // A fire that spent four attempts on a busy provider otherwise reads as one
     // slow turn (ticket #47).
-    expect(drawn()).toContain("retry 2/3 · 529");
+    expect(drawn()).toContain("retry 2/4 · 529");
     // The retry gives way on a narrow row rather than crossing the border.
     expectFits(panel, 70);
+    panel.dispose();
+  });
+
+  it("counts a retry's denominator as the attempts pi allows, not its retries", async () => {
+    const source = new FakeSource();
+    source.rows = [
+      loopView("loop01", {
+        name: "first failure",
+        fires: 1,
+        iterations: [
+          iterationOf(1, [], {
+            status: "running",
+            retry: { attempt: 1, maxAttempts: 3, status: "529" },
+          }),
+        ],
+      }),
+      loopView("loop02", {
+        name: "last failure",
+        fires: 1,
+        iterations: [
+          iterationOf(1, [], {
+            status: "running",
+            // `attempt` counts every failed attempt, the first try included, while
+            // `maxAttempts` is pi's retry budget: budget 3 plus the first try is
+            // four attempts, and the fourth failure is the one pi gives up on.
+            retry: { attempt: 4, maxAttempts: 3, status: "529" },
+          }),
+        ],
+      }),
+    ];
+    const { panel, drawn } = await openOn("loops", source);
+    await panel.settle();
+
+    const rows = drawn().split("\n");
+    expect(rows.find((line) => line.includes("first failure"))).toContain("retry 1/4 · 529");
+    // The frame pi gave up on must not read beyond the denominator.
+    expect(rows.find((line) => line.includes("last failure"))).toContain("retry 4/4 · 529");
 
     panel.dispose();
   });
@@ -1542,7 +1579,7 @@ describe("the loop detail view", () => {
 
     const screen = drawn();
     expect(screen).toContain("Retry");
-    expect(screen).toContain("retry 2/3 · 529");
+    expect(screen).toContain("retry 2/4 · 529");
 
     panel.dispose();
   });

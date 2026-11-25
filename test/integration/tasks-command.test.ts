@@ -355,7 +355,7 @@ describe("/tasks command", () => {
     const { panel, closed } = await openPanel(harness);
     panel.handleInput("2");
     await panel.settle();
-    expect(panel.render(100).join("\n")).toContain("retry 1/3 · 529");
+    expect(panel.render(100).join("\n")).toContain("retry 1/4 · 529");
 
     panel.handleInput("\r");
     await panel.settle();
@@ -363,7 +363,7 @@ describe("/tasks command", () => {
     await panel.settle();
     const iteration = panel.render(100).join("\n");
     expect(iteration).toContain("Retry");
-    expect(iteration).toContain("retry 1/3 · 529");
+    expect(iteration).toContain("retry 1/4 · 529");
 
     panel.handleInput("\u001bq");
     await closed;
