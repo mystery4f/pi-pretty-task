@@ -5,7 +5,7 @@
  * @author mystery4f <40482524+mystery4f@users.noreply.github.com>
  */
 
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -14,6 +14,7 @@ import type { PromptLoopTask } from "../../src/tasks/base/task.js";
 import { TaskSessions } from "../../src/tasks/base/task-sessions.js";
 import { TaskStore } from "../../src/tasks/base/task-store.js";
 import { type LoopFire, LoopTasks, MAX_LOOPS } from "../../src/tasks/loop/loop-tasks.js";
+import { readPromptPreview } from "../../src/tasks/loop/prompt-file.js";
 import { makeTempDir } from "../support/processes.js";
 
 const directories: Array<{ dispose(): Promise<void> }> = [];
@@ -866,5 +867,53 @@ describe("prompt file", () => {
     await task.loops.pump(task.now);
 
     expect(await readFile(path, "utf8")).toBe("review the diff");
+  });
+
+  it("previews three non-empty lines and the file's own modification time", async () => {
+    const task = await setup();
+    const created = await createPromptLoop(task);
+    const path = promptPath(task, created.task.id);
+    const directory = sessionTaskDirectory(task.scope.cwd, task.scope.sessionId);
+    await writeFile(
+      path,
+      "\n  step one: check the queue  \n\nstep two\nstep three\nstep four that never shows\n",
+      "utf8",
+    );
+
+    const preview = await readPromptPreview(directory, created.task.id);
+
+    // The panel draws these three lines and no more, so the iteration list keeps its room.
+    expect(preview.path).toBe(path);
+    expect(preview.lines).toEqual(["step one: check the queue", "step two", "step three"]);
+    expect(preview.changedAt).toBe((await stat(path)).mtimeMs);
+  });
+
+  it("names the path and previews nothing when the file is gone", async () => {
+    const task = await setup();
+    const created = await createPromptLoop(task);
+    const path = promptPath(task, created.task.id);
+    const directory = sessionTaskDirectory(task.scope.cwd, task.scope.sessionId);
+    await rm(path);
+
+    const preview = await readPromptPreview(directory, created.task.id);
+
+    // No throw and no preview: the reader gets the address and the record's warning.
+    expect(preview.path).toBe(path);
+    expect(preview.lines).toEqual([]);
+    expect(preview.changedAt).toBeUndefined();
+  });
+
+  it("keeps the file's time even when every line is blank", async () => {
+    const task = await setup();
+    const created = await createPromptLoop(task);
+    const path = promptPath(task, created.task.id);
+    const directory = sessionTaskDirectory(task.scope.cwd, task.scope.sessionId);
+    await writeFile(path, "  \n\t\n", "utf8");
+
+    const preview = await readPromptPreview(directory, created.task.id);
+
+    // A blank file is readable, so the panel can still say when it last changed.
+    expect(preview.lines).toEqual([]);
+    expect(preview.changedAt).toBe((await stat(path)).mtimeMs);
   });
 });

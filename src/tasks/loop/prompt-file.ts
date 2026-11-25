@@ -9,7 +9,7 @@
  * @author mystery4f <40482524+mystery4f@users.noreply.github.com>
  */
 
-import { mkdir, readFile, unlink } from "node:fs/promises";
+import { mkdir, readFile, stat, unlink } from "node:fs/promises";
 import { dirname } from "node:path";
 
 import { writeAtomic } from "../base/atomic.js";
@@ -25,6 +25,27 @@ export interface PromptRead {
    * a clean read, so the warning disappears once the file is healthy again.
    */
   readonly warning?: string;
+}
+
+/**
+ * Lines a panel previews of a prompt file. Three keep the file's gist visible
+ * while the iteration list — what a morning check is actually read for — stays
+ * in the pane; the whole text lives in the file, not on the page (ticket #48).
+ */
+export const PROMPT_PREVIEW_LINES = 3;
+
+/**
+ * A prompt file as the panel shows it: where it is, the first few lines, and
+ * when it last changed, so a reader can tell whether the version they edited
+ * is the one that fired. Never the whole text.
+ */
+export interface PromptPreview {
+  /** The file's address, derived from the loop id; present even when it cannot be read. */
+  readonly path: string;
+  /** The first `PROMPT_PREVIEW_LINES` non-empty lines, trimmed; empty when unreadable. */
+  readonly lines: readonly string[];
+  /** The file's modification time, epoch ms; absent when it could not be read. */
+  readonly changedAt?: number;
 }
 
 /** Write the loop's prompt file, replacing whatever is there. */
@@ -87,6 +108,41 @@ export async function readPromptText(directory: string, task: PromptLoopTask): P
     text: task.prompt,
     warning: `prompt file ${problem}; this fire used the creation prompt and rewrote the file`,
   };
+}
+
+/**
+ * A loop's prompt file as its panel page shows it. Reads through this layer, so
+ * the panel never joins a path or opens a file itself, and never throws: a file
+ * that is gone yields the address and no preview, which the page pairs with the
+ * record's own warning (ADR-0024, ticket #48).
+ */
+export async function readPromptPreview(
+  directory: string,
+  loopId: string,
+  count = PROMPT_PREVIEW_LINES,
+): Promise<PromptPreview> {
+  const path = loopPromptPath(directory, loopId);
+  const [read, stamp] = await Promise.all([readText(path), modifiedAt(path)]);
+  if (read.text === undefined) return { path, lines: [] };
+  return { path, lines: previewLines(read.text, count), changedAt: stamp };
+}
+
+/** The first `count` non-empty lines, trimmed: a preview, never the whole prompt. */
+function previewLines(text: string, count: number): string[] {
+  return text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .slice(0, count);
+}
+
+/** When the file last changed; undefined when it cannot be stat'ed. */
+async function modifiedAt(path: string): Promise<number | undefined> {
+  try {
+    return (await stat(path)).mtimeMs;
+  } catch {
+    return undefined;
+  }
 }
 
 interface TextRead {
