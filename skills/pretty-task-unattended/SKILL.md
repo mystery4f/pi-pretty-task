@@ -91,7 +91,9 @@ and recreate a loop to change its wording: that is how its history is lost.
   with the tool calls its turn made. A turn with no tool calls and no tick is a
   fire that did nothing.
 - `/tasks` opens the panel; the loop row carries the fire count, the next fire and
-  any failure streak (command loops only today).
+  any failure streak. A failing loop's page adds its last error and when it last
+  failed, and `loopDetails` carries the same two as `consecutiveFailures` and
+  `lastError`.
 - A loop still `running` with all items ticked means the contract did not fire:
   close it with `pretty_task_loop_update id=<loopId> action=complete`.
 
