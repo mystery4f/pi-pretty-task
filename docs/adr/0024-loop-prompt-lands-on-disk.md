@@ -2,7 +2,7 @@
 
 ## 状态
 
-草案（待签，2026-11-25）
+已接受（2026-11-25）。实现见 [#44](https://github.com/mystery4f/pi-pretty-task/issues/44)。
 
 ## 背景
 
