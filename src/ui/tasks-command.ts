@@ -23,6 +23,7 @@ import {
 import type { Task } from "../tasks/base/task.js";
 import type { ChainTasks, ChainTaskView } from "../tasks/chain/chain-tasks.js";
 import type { LoopTasks, LoopTaskView } from "../tasks/loop/loop-tasks.js";
+import { readPromptPreview } from "../tasks/loop/prompt-file.js";
 import type { ProcessTasks, ProcessTaskView } from "../tasks/process/process-tasks.js";
 import { PANEL_HEIGHT_SHARE, PANEL_MARGIN, rowOf } from "./panel/model.js";
 import {
@@ -143,6 +144,12 @@ export function panelSourceFor(
         }
       }
       return rows;
+    },
+    async prompt(id, sessionId) {
+      // The prompt is a file the loop's own layer writes and reads, so the panel
+      // asks that layer for its path, its first lines and its time (ticket #48).
+      const owner = sessionId === undefined ? scope : { ...scope, sessionId };
+      return readPromptPreview(sessionTaskDirectory(owner.cwd, owner.sessionId), id);
     },
     async tail(id, sessionId) {
       const logs = await processes.logs(

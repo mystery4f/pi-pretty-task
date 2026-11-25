@@ -11,6 +11,7 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { CmdLoopTask, FireRecord, PromptLoopTask } from "../../tasks/base/task.js";
 import type { Iteration } from "../../tasks/loop/iteration.js";
+import type { PromptPreview } from "../../tasks/loop/prompt-file.js";
 import type { PanelFilter, PanelMode, PanelSource, PanelTab, PanelTaskView } from "./model.js";
 import type { RowMatch } from "./query.js";
 
@@ -44,6 +45,12 @@ export interface PanelView {
   readonly detailLines: readonly string[];
   readonly detailTruncated: boolean;
   readonly detailError: string | undefined;
+  /**
+   * The open loop's prompt file, or undefined when nothing is open that has one.
+   * The panel reads it through the loop's own layer before drawing, so a page
+   * never joins a path or opens a file itself (ticket #48).
+   */
+  readonly promptPreview: PromptPreview | undefined;
   readonly scrollBack: number;
   readonly following: boolean;
   readonly iterationFire: number | undefined;

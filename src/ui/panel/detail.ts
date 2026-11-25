@@ -26,6 +26,7 @@ import {
   iterationsText,
   missedText,
   nextFireText,
+  promptBody,
   retryText,
   STEP_MARK,
   singleLine,
@@ -236,7 +237,7 @@ export function renderLoopDetail(panel: PanelView, row: PanelTaskView, width: nu
     task.expiresAt === undefined ? [] : field(panel, "Expires", formatClockTime(task.expiresAt)),
     task.endedAt === undefined ? [] : field(panel, "Ended", formatClockTime(task.endedAt)),
     task.error === undefined ? [] : block(panel, "Error", theme.fg(colour, task.error)),
-    block(panel, "Prompt", task.prompt),
+    promptBlock(panel, task.promptWarning),
   ];
 
   const notice = panel.notice === undefined ? 0 : 1;
@@ -579,6 +580,32 @@ function wrapValue(panel: PanelView, value: string, indent: number): string[] {
   const lines = wrapTextWithAnsi(value, room);
   const lead = " ".repeat(indent);
   return (lines.length === 0 ? [""] : lines).map((line) => `${lead}${line}`);
+}
+
+/**
+ * The prompt's own block: the file's address, three lines of it and when it last
+ * changed — plus whatever the record has to say about it. The prompt is a file,
+ * and the whole of it is never drawn here: the iteration list below is what a
+ * reader opens this page for (ticket #48).
+ */
+function promptBlock(panel: PanelView, warning: string | undefined): string[] {
+  const preview = panel.promptPreview;
+  if (preview === undefined) return [];
+  const theme = panel.theme;
+  const body = promptBody(preview, warning);
+  // The labelled value above continues at LABEL_WIDTH on a wide pane, so its own
+  // sublines continue there too; a narrow pane starts both at 2 (ADR-0019).
+  const indent = panel.renderWidth >= DETAIL_WIDE_MIN_WIDTH ? LABEL_WIDTH : 2;
+  const sub = (text: string, colour: "dim" | "warning"): string[] =>
+    wrapValue(panel, text, indent).map((line) => theme.fg(colour, line));
+  return [
+    ...block(panel, "Prompt file", preview.path),
+    // The warning sits right under the path it is about; a fired loop that had to
+    // rebuild the file carries it even now that the file reads fine again.
+    ...(body.problem === undefined ? [] : sub(body.problem, "warning")),
+    ...body.lines.flatMap((line) => sub(line, "dim")),
+    ...(body.changed === undefined ? [] : sub(body.changed, "dim")),
+  ];
 }
 
 export function sessionField(panel: PanelView, row: PanelTaskView): string[] {

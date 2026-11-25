@@ -31,6 +31,7 @@ import type {
   IterationRetry,
   IterationStatus,
 } from "../../tasks/loop/iteration.js";
+import type { PromptPreview } from "../../tasks/loop/prompt-file.js";
 import { STATUS_COLOUR } from "../status-colour.js";
 import { DETAIL_OUTPUT_LINES, type PanelTaskView } from "./model.js";
 
@@ -422,4 +423,31 @@ export function kindWord(kind: TaskKind): "proc" | "llm" | "cmd" | "chn" {
       // The word a reader types to find a chain once the panel gives it a tab (#27).
       return "chn";
   }
+}
+
+/**
+ * What a loop page says under the prompt's path. `lines` is at most the three the
+ * loop layer trimmed; `changed` carries the file's own time in the same clock the
+ * `Updated` row above it uses, so a reader can tell a prompt written a moment ago
+ * from one nobody has touched. `problem` is whatever needs saying alongside them:
+ * the record's own warning first — a fire that fell back to the creation text
+ * leaves behind a file that reads fine again, so the file alone would hide it —
+ * and otherwise the file's own state ("the prompt file is empty").
+ */
+export interface PromptBody {
+  readonly lines: readonly string[];
+  readonly changed?: string;
+  readonly problem?: string;
+}
+
+export function promptBody(preview: PromptPreview, warning: string | undefined): PromptBody {
+  const changed =
+    preview.changedAt === undefined ? undefined : `changed ${formatClockTime(preview.changedAt)}`;
+  const problem =
+    warning ?? (preview.problem === undefined ? undefined : `the prompt file ${preview.problem}`);
+  return {
+    lines: preview.lines,
+    ...(changed === undefined ? {} : { changed }),
+    ...(problem === undefined ? {} : { problem }),
+  };
 }
