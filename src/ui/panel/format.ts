@@ -186,8 +186,7 @@ export function messageOf(error: unknown): string {
 /** Tools whose subject is a command line, so the panel can make them stand out. */
 const COMMAND_TOOLS: ReadonlySet<string> = new Set(["bash", "pretty_task_bg_run"]);
 
-/** Iteration states, read from the one task-status palette. */
-/** How a turn reads, from the one task-status palette; see {@link IterationVerdict}. */
+// How a turn reads, from the one task-status palette; see {@link IterationVerdict}.
 export const ITERATION_COLOUR = {
   running: STATUS_COLOUR.running,
   completed: STATUS_COLOUR.completed,
@@ -337,15 +336,17 @@ export function stepColour(status: TaskStatus): ThemeColor {
 }
 
 /**
-/**
  * A fire whose turn finished cleanly and recorded no tool call: it spent a model
  * call and moved nothing. A turn cut short — aborted, or interrupted with the
  * process — is not one: it never got the chance to work (ticket #49), and neither
- * is a turn the provider gave up on (ticket #53).
+ * is a turn the provider gave up on (ticket #53), nor one it never heard back
+ * from (unobserved): both stopped working before they could succeed.
  */
 function emptyFire(iteration: Iteration): boolean {
   return (
-    iteration.status === "completed" && iteration.end !== "failed" && iteration.calls.length === 0
+    iteration.status === "completed" &&
+    iteration.calls.length === 0 &&
+    (iteration.end === undefined || iteration.end === "healthy")
   );
 }
 

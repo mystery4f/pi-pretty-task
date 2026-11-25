@@ -96,9 +96,11 @@ export interface Iteration {
   status: IterationStatus;
   /**
    * How the turn ended, recorded by the settle that closed it (ticket #53): the
-   * same verdict the loop's schedule charges. Absent while the turn is open, and
-   * on a record written before the field existed; a view that shows a settled
-   * turn reads this rather than inferring a verdict from the calls it made.
+   * same verdict the loop's schedule charges. Absent while the turn is open, on
+   * a record the process died on before it settled (interrupted), and on a record
+   * written before the field existed — so a settled turn that really ended clean
+   * always carries it, and a view that shows a settled turn reads this rather
+   * than inferring a verdict from the calls it made.
    */
   end?: TurnOutcome;
   /**

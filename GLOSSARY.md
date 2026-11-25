@@ -61,7 +61,7 @@ _Avoid_: run, round, execution
 _Avoid_: rerun, try, throttle
 
 **Empty fire**:
-一次 Fire 的 turn 已经关闭、结局是 `healthy`、却一个工具都没调用：花了一次模型调用，什么也没推动。面板把它当事实印出来（`0 calls`），只有连续两次才标记（`2 empty in a row`）——先读文件再动手的 turn 是合法的，第一次不该被当成卡住。provider 放弃的那一轮（`end` 是 `failed`，见 Iteration）不是空转，被 abort 或被进程带走的 turn 也不算：它们没得到干活的机会。
+一次 Fire 的 turn 已经关闭、结局是 `healthy`、却一个工具都没调用：花了一次模型调用，什么也没推动。面板把它当事实印出来（`0 calls`），只有连续两次才标记（`2 empty in a row`）——先读文件再动手的 turn 是合法的，第一次不该被当成卡住。provider 放弃的那一轮（`end` 是 `failed`）和 provider 一声没吭、turn 静默关闭的那一轮（`end` 是 `unobserved`，见 Iteration）都不是空转，被 abort 或被进程带走的 turn 也不算：它们都没得到干活的机会。
 _Avoid_: idle fire, no-op, quiet run
 
 **Schedule**:

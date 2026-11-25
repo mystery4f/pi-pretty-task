@@ -1531,6 +1531,35 @@ describe("the loop detail view", () => {
 
     panel.dispose();
   });
+  it("does not count a turn the provider never answered as an empty fire", async () => {
+    const source = new FakeSource();
+    source.rows = [
+      loopView("loop01", {
+        name: "review loop",
+        fires: 2,
+        iterations: [
+          iterationOf(1, [], { end: "unobserved" }),
+          iterationOf(2, [], { end: "unobserved" }),
+        ],
+      }),
+    ];
+    const { panel, drawn } = await openOn("loops", source);
+    await panel.settle();
+
+    panel.handleInput(ENTER);
+    await panel.settle();
+
+    // The turn made no call because the provider went silent: an empty fire is a
+    // clean turn that chose not to act, and this one never got the choice (ticket 53).
+    const rows = drawn().split("\n");
+    for (const fire of [1, 2]) {
+      const line = rows.find((row) => row.includes(`fire ${String(fire)}`));
+      expect(line).toContain("0 calls");
+      expect(line).not.toContain("empty");
+    }
+
+    panel.dispose();
+  });
 
   it("prints the failed end of a turn on its own page, where it printed completed", async () => {
     const source = new FakeSource();

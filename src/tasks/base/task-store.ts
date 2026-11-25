@@ -320,8 +320,9 @@ function parseIteration(value: unknown): Iteration | undefined {
   const retry = value.retry === undefined ? undefined : parseIterationRetry(value.retry);
   if (value.retry !== undefined && retry === undefined) return undefined;
   // The end is written when the turn closes, so an absent one reads as a record
-  // from before the field existed; a word outside the vocabulary is corruption,
-  // and the whole document is refused (ticket #53).
+  // from before the field existed — or one the process died on while it was open
+  // (interrupted); a word outside the vocabulary is corruption, and the whole
+  // document is refused (ticket #53).
   const end = value.end === undefined ? undefined : parseTurnOutcome(value.end);
   if (value.end !== undefined && end === undefined) return undefined;
   // SAFETY: the iteration's own fields, its retry and end and every call were
