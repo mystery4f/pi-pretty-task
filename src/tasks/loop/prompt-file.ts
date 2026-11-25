@@ -32,20 +32,27 @@ export interface PromptRead {
  * while the iteration list — what a morning check is actually read for — stays
  * in the pane; the whole text lives in the file, not on the page (ticket #48).
  */
-export const PROMPT_PREVIEW_LINES = 3;
+const PROMPT_PREVIEW_LINES = 3;
 
 /**
- * A prompt file as the panel shows it: where it is, the first few lines, and
- * when it last changed, so a reader can tell whether the version they edited
- * is the one that fired. Never the whole text.
+ * A prompt file as the panel shows it: where it is, the first few lines, when it
+ * last changed, and what went wrong with the read if anything did, so a reader
+ * can tell whether the version they edited is the one that fired. Never the
+ * whole text.
  */
 export interface PromptPreview {
   /** The file's address, derived from the loop id; present even when it cannot be read. */
   readonly path: string;
-  /** The first `PROMPT_PREVIEW_LINES` non-empty lines, trimmed; empty when unreadable. */
+  /** The first `PROMPT_PREVIEW_LINES` non-empty lines, trimmed; empty when there are none. */
   readonly lines: readonly string[];
-  /** The file's modification time, epoch ms; absent when it could not be read. */
+  /** The file's modification time, epoch ms; absent when it could not be stat'ed. */
   readonly changedAt?: number;
+  /**
+   * Why there is no text — "is missing", "is empty", "could not be read (…)" — the
+   * same words the fire's warning uses. Absent when the file read cleanly, so a
+   * failed stat of a readable file still shows the lines it did read.
+   */
+  readonly problem?: string;
 }
 
 /** Write the loop's prompt file, replacing whatever is there. */
@@ -90,9 +97,9 @@ export async function readPromptText(directory: string, task: PromptLoopTask): P
   const read = await readText(path);
   // A file of nothing but whitespace counts as unreadable: it would deliver an
   // empty follow-up the user never sees, which is worse than a loud rebuild.
-  if (read.text !== undefined && read.text.trim().length > 0) return { text: read.text };
+  if ("text" in read && read.text.trim().length > 0) return { text: read.text };
 
-  const problem = read.text !== undefined ? "is empty" : (read.problem ?? "could not be read");
+  const problem = "text" in read ? "is empty" : read.problem;
   try {
     await writePromptText(directory, task.id, task.prompt);
   } catch (error) {
@@ -116,24 +123,28 @@ export async function readPromptText(directory: string, task: PromptLoopTask): P
  * that is gone yields the address and no preview, which the page pairs with the
  * record's own warning (ADR-0024, ticket #48).
  */
-export async function readPromptPreview(
-  directory: string,
-  loopId: string,
-  count = PROMPT_PREVIEW_LINES,
-): Promise<PromptPreview> {
+export async function readPromptPreview(directory: string, loopId: string): Promise<PromptPreview> {
   const path = loopPromptPath(directory, loopId);
   const [read, stamp] = await Promise.all([readText(path), modifiedAt(path)]);
-  if (read.text === undefined) return { path, lines: [] };
-  return { path, lines: previewLines(read.text, count), changedAt: stamp };
+  // Text and time are two facts, not one: a file that was read keeps its lines
+  // even when the stat that follows it failed, and a read that failed says why.
+  if ("problem" in read) return { path, lines: [], problem: read.problem };
+  const lines = previewLines(read.text);
+  return {
+    path,
+    lines,
+    ...(stamp === undefined ? {} : { changedAt: stamp }),
+    ...(lines.length === 0 ? { problem: "is empty" } : {}),
+  };
 }
 
-/** The first `count` non-empty lines, trimmed: a preview, never the whole prompt. */
-function previewLines(text: string, count: number): string[] {
+/** The first few non-empty lines, trimmed: a preview, never the whole prompt. */
+function previewLines(text: string): string[] {
   return text
     .split("\n")
     .map((line) => line.trim())
     .filter((line) => line.length > 0)
-    .slice(0, count);
+    .slice(0, PROMPT_PREVIEW_LINES);
 }
 
 /** When the file last changed; undefined when it cannot be stat'ed. */
@@ -145,10 +156,8 @@ async function modifiedAt(path: string): Promise<number | undefined> {
   }
 }
 
-interface TextRead {
-  readonly text?: string;
-  readonly problem?: string;
-}
+/** A read either yields the text or the one word why it did not — never both. */
+type TextRead = { readonly text: string } | { readonly problem: string };
 
 async function readText(path: string): Promise<TextRead> {
   try {
