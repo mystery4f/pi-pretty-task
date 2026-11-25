@@ -21,6 +21,7 @@ import type {
 import type { Iteration, IterationCall } from "../../src/tasks/loop/iteration.js";
 import type { PromptPreview } from "../../src/tasks/loop/prompt-file.js";
 import { block, detailRows } from "../../src/ui/panel/detail.js";
+import { LABEL_WIDTH } from "../../src/ui/panel/model.js";
 import {
   DEFAULT_PANEL_FILTER,
   DEFAULT_RENDER_ROWS,
@@ -2973,6 +2974,42 @@ describe("the frame never draws past the terminal", () => {
 
     const text = expectFits(panel, NARROW).join("\n");
     expect(text).toContain("calls");
+
+    panel.dispose();
+  });
+
+  it("wraps a prompt preview's long line and keeps the block's own column", async () => {
+    const source = new FakeSource();
+    const path = "/work/.pi/tasks/session/prompts/loop01.md";
+    const long =
+      "review the diff of every changed file, run the full suite under the release profile, then report";
+    source.prompts.set("loop01", { path, lines: [long], changedAt: CLOCK });
+    source.rows = [
+      loopView("loop01", {
+        name: "review loop",
+        prompt: longSeedPrompt(),
+        iterations: [iterationOf(1)],
+      }),
+    ];
+    // A pane taller than a real one, so the field budget keeps the prompt block: this
+    // case is about the width a preview line wraps in, not about what a short pane drops.
+    const { panel } = openPanel(source, () => 13_000, plainTheme(), 80);
+    await panel.settle();
+    panel.handleInput(tabKey("loops"));
+    await panel.settle();
+    panel.handleInput(ENTER);
+    await panel.settle();
+
+    // A wide pane continues the preview at the labelled value's own column, and the
+    // whole line is on the page: wrapped, never cut with an ellipsis (ADR-0019).
+    const wide = expectFits(panel, NARROW).join("\n");
+    expect(wide).toContain(`${" ".repeat(LABEL_WIDTH)}review the diff`);
+    expect(wide).toContain("then report");
+
+    // A narrow pane keeps the same promise at the page's own 2-column indent.
+    const narrow = expectFits(panel, 50).join("\n");
+    expect(narrow).toContain("  review the diff");
+    expect(narrow).toContain("then report");
 
     panel.dispose();
   });
