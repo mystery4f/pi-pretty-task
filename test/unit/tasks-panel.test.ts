@@ -38,6 +38,7 @@ import {
   TasksPanel,
 } from "../../src/ui/panel/tasks-panel.js";
 import type { PanelView } from "../../src/ui/panel/view.js";
+import { STATUS_COLOUR } from "../../src/ui/status-colour.js";
 import { plainTheme } from "../support/extension-harness.js";
 
 const UP = "\u001b[A";
@@ -1021,6 +1022,50 @@ describe("loop tasks in the list", () => {
     panel.dispose();
   });
 
+  it("counts a prompt loop's failed fires beside the count, and drops it once one is healthy", async () => {
+    const source = new FakeSource();
+    source.rows = [
+      loopView(
+        "loop01",
+        {
+          name: "review loop",
+          fires: 4,
+          consecutiveFailures: 2,
+          lastError: "529 overloaded_error",
+          lastFailureAt: CLOCK,
+        },
+        12_000,
+        4_000,
+      ),
+    ];
+    const { panel, drawn } = await openOn("loops", source);
+    await panel.settle();
+
+    const row = (): string => {
+      const line = drawn()
+        .split("\n")
+        .find((candidate) => candidate.includes("review loop"));
+      if (line === undefined) throw new Error("the loop row must render");
+      return line;
+    };
+    // A prompt loop's fire fails once the provider gives up on its turn, so its row
+    // counts the run the way a command loop's does (ticket #46, ADR-0017).
+    expect(row()).toContain("2 failed");
+    expect(row()).toContain("4 fires");
+
+    // The next turn finished: a healthy fire is the round that clears the streak, and
+    // the row stops saying anything about failures.
+    source.rows = [
+      loopView("loop01", { name: "review loop", fires: 5, consecutiveFailures: 0 }, 12_000, 10_000),
+    ];
+    // The store is read again the way the panel's own tick reads it.
+    await panel.refresh();
+    expect(row()).toContain("5 fires");
+    expect(row()).not.toContain("failed");
+
+    panel.dispose();
+  });
+
   it("opens a loop without asking the source for an output tail", async () => {
     const source = new FakeSource();
     source.rows = [loopView("loop01", { name: "review loop" })];
@@ -1473,6 +1518,66 @@ describe("the loop detail view", () => {
     const screen = drawn();
     expect(screen).toContain("Retry");
     expect(screen).toContain("retry 2/3 · 529");
+
+    panel.dispose();
+  });
+
+  it("names the failure streak, the time and the error the provider gave up with", async () => {
+    const source = new FakeSource();
+    const lastFailureAt = CLOCK + 20_000;
+    source.rows = [
+      loopView(
+        "loop01",
+        {
+          name: "review loop",
+          fires: 4,
+          consecutiveFailures: 2,
+          lastError: "529 overloaded_error: the provider is busy",
+          lastFailureAt,
+          nextFireAt: lastFailureAt + 40_000,
+        },
+        12_000,
+        40_000,
+      ),
+    ];
+    const { theme, painted } = recordingTheme();
+    const { panel, drawn } = await openOn("loops", source, () => 13_000, theme);
+    await panel.settle();
+    panel.handleInput(ENTER);
+    await panel.settle();
+
+    const screen = drawn();
+    expect(screen).toContain("Failures:");
+    expect(screen).toContain("2 in a row");
+    expect(screen).toContain("Last error:");
+    expect(screen).toContain("529 overloaded_error: the provider is busy");
+    // A failed turn is a failure like a command's, so its message takes the colour
+    // the status already uses for one rather than the page's ordinary accent.
+    expect(painted).toContainEqual({
+      colour: STATUS_COLOUR.failed,
+      text: "529 overloaded_error: the provider is busy",
+    });
+    // The wait the streak pushed out says why it is longer than the expression.
+    expect(screen).toContain("backoff");
+
+    panel.dispose();
+  });
+
+  it("says nothing about failures on a loop whose fires finished", async () => {
+    const source = new FakeSource();
+    source.rows = [loopView("loop01", { name: "review loop", fires: 3 }, 12_000, 10_000)];
+    const { theme, painted } = recordingTheme();
+    const { panel, drawn } = await openOn("loops", source, () => 13_000, theme);
+    await panel.settle();
+    panel.handleInput(ENTER);
+    await panel.settle();
+
+    const screen = drawn();
+    expect(screen).not.toContain("Failures:");
+    expect(screen).not.toContain("Last error");
+    expect(screen).not.toContain("backoff");
+    // A healthy loop paints no error at all, so nothing wears the failure colour.
+    expect(painted.filter((entry) => entry.colour === STATUS_COLOUR.failed)).toEqual([]);
 
     panel.dispose();
   });
@@ -3073,6 +3178,41 @@ describe("the frame never draws past the terminal", () => {
     const narrow = expectFits(panel, 50).join("\n");
     expect(narrow).toContain("  review the diff");
     expect(narrow).toContain("then report");
+
+    panel.dispose();
+  });
+
+  it("wraps the error a loop's fire died with instead of cutting it", async () => {
+    const source = new FakeSource();
+    const error =
+      "529 overloaded_error: the provider is busy, retried three times, then gave up on the turn";
+    source.rows = [
+      loopView("loop01", {
+        name: "review loop",
+        fires: 4,
+        consecutiveFailures: 2,
+        lastError: error,
+        lastFailureAt: CLOCK,
+        iterations: [iterationOf(4)],
+      }),
+    ];
+    // Taller than a real pane, so the field budget keeps the block this case is
+    // about; the point is the column the error wraps in, not what a short pane drops.
+    const { panel } = openPanel(source, () => 13_000, plainTheme(), 80);
+    await panel.settle();
+    panel.handleInput(tabKey("loops"));
+    await panel.settle();
+    panel.handleInput(ENTER);
+    await panel.settle();
+
+    // A long provider message is wrapped under its label's column, never cut: the
+    // part that explains the failure is usually its tail (ADR-0019, ticket #50).
+    const narrow = expectFits(panel, 50).join("\n");
+    expect(narrow).toContain("Last error:");
+    // Read back with the borders and the wrapped lines joined: the whole message is
+    // on the page, in order, which a cut one could not be.
+    const page = narrow.split("│").join(" ").replace(/\s+/g, " ");
+    expect(page).toContain(error);
 
     panel.dispose();
   });
