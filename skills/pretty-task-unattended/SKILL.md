@@ -8,7 +8,7 @@ description: Run long work unattended with a prompt loop that advances one step 
 A prompt loop is a clock that delivers a message into the session; every fire
 starts one agent turn. It is the right tool for "keep advancing this job while I
 am away" and the wrong tool for "retry a failed request" — pi retries transient
-provider errors itself (`retry.maxRetries`, three attempts by default).
+provider errors itself (`retry.maxRetries`, three retries and so four attempts by default).
 
 The parts that decide whether an unattended night succeeds are not the schedule:
 they are **a durable progress file**, **a closing contract inside the prompt**,

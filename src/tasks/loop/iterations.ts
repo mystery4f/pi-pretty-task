@@ -113,7 +113,7 @@ export interface RetrySettingsLike {
 /**
  * Retries pi is configured to make after a failure. Zero — retries disabled, or a
  * budget of zero — means the first failure is final, so no attempt is counted:
- * `retry 1/0` would promise a retry that is never coming.
+ * `retry 1/1` would promise a retry that is never coming.
  */
 export function retryBudget(settings: { readonly retry?: RetrySettingsLike } | undefined): number {
   const retry = settings?.retry;

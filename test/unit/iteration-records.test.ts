@@ -450,7 +450,7 @@ describe("the provider retry of a turn", () => {
   });
 
   it("counts nothing when pi's retries are budgeted at zero", async () => {
-    // A zero budget means pi gives up at the first failure, so `retry 1/0` would
+    // A zero budget means pi gives up at the first failure, so `retry 1/1` would
     // promise a retry that is never coming: the failed attempt records nothing.
     const { task, created } = await openTurn({ maxRetries: 0 });
     await endAttempt(task.harness, { stopReason: "error", errorMessage: "529 overloaded_error" });

@@ -1492,11 +1492,48 @@ describe("the loop detail view", () => {
     const { panel, drawn } = await openOn("loops", source);
     await panel.settle();
 
-    // A fire that spent three attempts on a busy provider otherwise reads as one
+    // A fire that spent four attempts on a busy provider otherwise reads as one
     // slow turn (ticket #47).
-    expect(drawn()).toContain("retry 2/3 · 529");
+    expect(drawn()).toContain("retry 2/4 · 529");
     // The retry gives way on a narrow row rather than crossing the border.
     expectFits(panel, 70);
+    panel.dispose();
+  });
+
+  it("counts a retry's denominator as the attempts pi allows, not its retries", async () => {
+    const source = new FakeSource();
+    source.rows = [
+      loopView("loop01", {
+        name: "first failure",
+        fires: 1,
+        iterations: [
+          iterationOf(1, [], {
+            status: "running",
+            retry: { attempt: 1, maxAttempts: 3, status: "529" },
+          }),
+        ],
+      }),
+      loopView("loop02", {
+        name: "last failure",
+        fires: 1,
+        iterations: [
+          iterationOf(1, [], {
+            status: "running",
+            // `attempt` counts every failed attempt, the first try included, while
+            // `maxAttempts` is pi's retry budget: budget 3 plus the first try is
+            // four attempts, and the fourth failure is the one pi gives up on.
+            retry: { attempt: 4, maxAttempts: 3, status: "529" },
+          }),
+        ],
+      }),
+    ];
+    const { panel, drawn } = await openOn("loops", source);
+    await panel.settle();
+
+    const rows = drawn().split("\n");
+    expect(rows.find((line) => line.includes("first failure"))).toContain("retry 1/4 · 529");
+    // The frame pi gave up on must not read beyond the denominator.
+    expect(rows.find((line) => line.includes("last failure"))).toContain("retry 4/4 · 529");
 
     panel.dispose();
   });
@@ -1542,7 +1579,7 @@ describe("the loop detail view", () => {
 
     const screen = drawn();
     expect(screen).toContain("Retry");
-    expect(screen).toContain("retry 2/3 · 529");
+    expect(screen).toContain("retry 2/4 · 529");
 
     panel.dispose();
   });

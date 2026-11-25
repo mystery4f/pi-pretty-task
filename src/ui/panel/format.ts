@@ -58,12 +58,15 @@ export function exitText(task: Task): string {
 }
 
 /**
- * The provider retry as one phrase: `retry 2/3`, and the status the failure named
- * when it named one. A fire that spent three attempts on a busy provider otherwise
- * reads as one ordinary slow turn (ticket #47).
+ * The provider retry as one phrase: `retry 2/4`, and the status the failure named
+ * when it named one. The denominator is every attempt the turn is allowed — pi's
+ * retry budget plus the first try — because `attempt` counts the first try too: a
+ * budget of 3 gives four attempts, and the fourth failure is the one pi gives up
+ * on. A fire that spent those attempts on a busy provider otherwise reads as one
+ * ordinary slow turn (ticket #47).
  */
 export function retryText(retry: IterationRetry): string {
-  const count = `retry ${String(retry.attempt)}/${String(retry.maxAttempts)}`;
+  const count = `retry ${String(retry.attempt)}/${String(retry.maxAttempts + 1)}`;
   return retry.status === undefined ? count : `${count} · ${retry.status}`;
 }
 
