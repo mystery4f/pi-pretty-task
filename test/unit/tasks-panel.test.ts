@@ -1066,6 +1066,31 @@ describe("loop tasks in the list", () => {
     panel.dispose();
   });
 
+  it("gives up a prompt loop's fire count before its failure streak", async () => {
+    const source = new FakeSource();
+    source.rows = [
+      loopView("loop01", { name: "review loop", fires: 4, consecutiveFailures: 2 }, 12_000, 4_000),
+    ];
+    const { panel } = await openOn("loops", source, () => 13_000, plainTheme());
+    await panel.settle();
+
+    const rowAt = (width: number): string => {
+      const line = panel.render(width).find((candidate) => candidate.includes("review loop"));
+      if (line === undefined) throw new Error("the loop row must render");
+      return line;
+    };
+    // The count is the cheap half of the state and the streak is the load-bearing one:
+    // a row that kept `4 fires` and dropped `2 failed` would show a failing loop as a
+    // working one at the width a reader is skimming (spec story 10, ticket #50).
+    const widths = [100, 96, 92, 88, 84, 80, 76, 72, 68, 64];
+    const rows = widths.map((width) => rowAt(width));
+    for (const row of rows) if (row.includes("fires")) expect(row).toContain("failed");
+    // And the property is not vacuous here: on some of them the streak stands alone.
+    expect(rows.some((row) => row.includes("failed") && !row.includes("fires"))).toBe(true);
+
+    panel.dispose();
+  });
+
   it("opens a loop without asking the source for an output tail", async () => {
     const source = new FakeSource();
     source.rows = [loopView("loop01", { name: "review loop" })];
@@ -1549,6 +1574,12 @@ describe("the loop detail view", () => {
     const screen = drawn();
     expect(screen).toContain("Failures:");
     expect(screen).toContain("2 in a row");
+    // Wide page: the label column is twelve columns *with* its colon (model.ts:37),
+    // so a longer label is chopped and its value glued on. This one is whole and the
+    // value starts after the column, not on top of a lost colon.
+    const failedAt = screen.split("\n").find((line) => line.includes("Failed at"));
+    if (failedAt === undefined) throw new Error("the failed-at field must render");
+    expect(failedAt).toMatch(/Failed at: +\d\d:\d\d:\d\d/);
     expect(screen).toContain("Last error:");
     expect(screen).toContain("529 overloaded_error: the provider is busy");
     // A failed turn is a failure like a command's, so its message takes the colour
