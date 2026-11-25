@@ -1129,10 +1129,75 @@ describe("the loop detail view", () => {
     panel.dispose();
   });
 
+  it("keeps the preview and says the edit was lost when the file was rebuilt", async () => {
+    const source = new FakeSource();
+    const changedAt = CLOCK + 5_000;
+    const path = "/work/.pi/tasks/session/prompts/loop03.md";
+    source.prompts.set("loop03", {
+      path,
+      lines: ["a fresh edit", "and a second line"],
+      changedAt,
+    });
+    source.rows = [
+      loopView("loop03", {
+        name: "review loop",
+        prompt: longSeedPrompt(),
+        promptWarning:
+          "prompt file is missing; this fire used the creation prompt and rewrote the file",
+        iterations: [iterationOf(1)],
+      }),
+    ];
+    const { panel, drawn } = await openOn("loops", source);
+    await panel.settle();
+
+    panel.handleInput(ENTER);
+    await panel.settle();
+
+    const screen = drawn();
+    // The file reads fine again, so the preview and its clock are both real facts.
+    expect(screen).toContain(path);
+    expect(screen).toContain(`changed ${formatClockTime(changedAt)}`);
+    expect(screen).toContain("a fresh edit");
+    // But the fire that rebuilt it used the creation text, and the page says so:
+    // a healthy-looking file must not hide the edit the fallback overwrote.
+    expect(screen).toContain(
+      "prompt file is missing; this fire used the creation prompt and rewrote the file",
+    );
+
+    panel.dispose();
+  });
+
+  it("says a blank prompt file is empty instead of drawing nothing", async () => {
+    const source = new FakeSource();
+    const changedAt = CLOCK + 5_000;
+    const path = "/work/.pi/tasks/session/prompts/loop04.md";
+    source.prompts.set("loop04", { path, lines: [], changedAt, problem: "is empty" });
+    source.rows = [
+      loopView("loop04", {
+        name: "review loop",
+        prompt: longSeedPrompt(),
+        iterations: [iterationOf(1)],
+      }),
+    ];
+    const { panel, drawn } = await openOn("loops", source);
+    await panel.settle();
+
+    panel.handleInput(ENTER);
+    await panel.settle();
+
+    const screen = drawn();
+    // Nothing between the path and the time reads as a lost prompt, not an empty one.
+    expect(screen).toContain(path);
+    expect(screen).toContain(`changed ${formatClockTime(changedAt)}`);
+    expect(screen).toContain("the prompt file is empty");
+
+    panel.dispose();
+  });
+
   it("keeps the prompt's path and says the record's warning when the file is gone", async () => {
     const source = new FakeSource();
     const path = "/work/.pi/tasks/session/prompts/loop02.md";
-    source.prompts.set("loop02", { path, lines: [] });
+    source.prompts.set("loop02", { path, lines: [], problem: "is missing" });
     source.rows = [
       loopView("loop02", {
         name: "review loop",
@@ -1151,6 +1216,8 @@ describe("the loop detail view", () => {
     // The address is still a fact even when the text is not, and the record says why.
     expect(screen).toContain(path);
     expect(screen).toContain("prompt file is missing; this fire used the creation prompt");
+    // The record's warning already says it, so the file's own state is not repeated.
+    expect(screen).not.toContain("the prompt file");
     // No time is invented for a file that could not be read.
     expect(screen).not.toContain("changed ");
     expect(screen).not.toContain("seed line 1");
