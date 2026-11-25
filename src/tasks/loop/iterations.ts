@@ -30,8 +30,42 @@ import {
   ITERATION_CALL_LIMIT,
   ITERATION_HISTORY_LIMIT,
   type Iteration,
+  type TurnEnd,
 } from "./iteration.js";
 import type { LoopFire } from "./loop-tasks.js";
+
+/**
+ * The turn a settle closed, in the loop's own terms (ticket #46). The iteration
+ * says what the turn did; the loop record needs this to count the fire.
+ */
+export interface SettledTurn {
+  /** The loop whose fire the turn belongs to. */
+  readonly id: string;
+  readonly fire: number;
+  readonly end: TurnEnd;
+  /** What the provider said, when it gave up and said something. */
+  readonly error?: string;
+}
+
+/** The turn in flight as its own message described it, before the settle. */
+interface TurnVerdict {
+  /** The session whose run produced the message; a settle of another run is not it. */
+  readonly directory: string;
+  readonly end: TurnEnd;
+  readonly error?: string;
+}
+
+/**
+ * What one assistant message says about its turn (ticket #46): an error stop is
+ * the provider giving up, and every other stop is a turn that ran. pi reports no
+ * retry event, so the message is the only place this is visible.
+ */
+function turnVerdict(attempt: ProviderAttemptEvent): { end: TurnEnd; error?: string } {
+  if (attempt.stopReason !== "error") return { end: "healthy" };
+  return attempt.errorMessage === undefined
+    ? { end: "failed" }
+    : { end: "failed", error: attempt.errorMessage };
+}
 
 /** The start event's fields the recorder needs; pi passes the same ones. */
 export interface ToolCallStartEvent {
@@ -124,6 +158,13 @@ export class Iterations {
   private readonly now: () => number;
   private readonly callLimit: number;
   private readonly historyLimit: number;
+  /**
+   * The last word of the turn in flight, waiting for its settle (ticket #46).
+   * The assistant message is the only place a turn's outcome is visible, and
+   * `settle` is the only event that says the turn is over, so the two facts meet
+   * here rather than in the loop record.
+   */
+  private turn: TurnVerdict | undefined;
 
   constructor(options: IterationsOptions) {
     this.sessions = options.sessions;
@@ -242,6 +283,10 @@ export class Iterations {
   async recordAttempt(scope: TaskScope, attempt: ProviderAttemptEvent): Promise<void> {
     if (attempt.role !== "assistant") return;
     const session = await this.sessions.session(scope);
+    // The assistant message is the turn's own last word (ticket #46): an error
+    // stop is the provider giving up, any other stop is a turn that ran. A later
+    // assistant message replaces it, so what is held here is final.
+    this.turn = { directory: session.directory, ...turnVerdict(attempt) };
     const iteration = this.newestOpenIteration(session);
     if (iteration === undefined) return;
 
@@ -270,16 +315,21 @@ export class Iterations {
    * `interrupted` otherwise. Pending iterations stay pending: their wake has not
    * produced a turn yet, so this settle is not theirs.
    */
-  async settle(scope: TaskScope, aborted: boolean): Promise<void> {
+  async settle(scope: TaskScope, aborted: boolean): Promise<SettledTurn | undefined> {
     const session = await this.sessions.session(scope);
+    const verdict = this.takeTurn(session.directory);
     const at = this.now();
     let changed = false;
+    let newest: { task: PromptLoopTask; iteration: Iteration } | undefined;
     for (const task of session.tasks.values()) {
       if (task.kind !== "prompt-loop") continue;
       let closed = false;
       for (const iteration of task.iterations) {
         if (iteration.bound !== true || iteration.status !== "running") continue;
         closeIteration(iteration, at, aborted ? "aborted" : "completed");
+        if (newest === undefined || iteration.startedAt >= newest.iteration.startedAt) {
+          newest = { task, iteration };
+        }
         closed = true;
       }
       if (!closed) continue;
@@ -289,6 +339,17 @@ export class Iterations {
       changed = true;
     }
     if (changed) await this.sessions.persist(session);
+    if (newest === undefined) return undefined;
+
+    // A run that settled without a bound fire belongs to the user, and a stop by
+    // the user is not a failed fire (ticket #46).
+    const end: TurnEnd = aborted ? "aborted" : (verdict?.end ?? "healthy");
+    return {
+      id: newest.task.id,
+      fire: newest.iteration.fire,
+      end,
+      ...(end === "failed" && verdict?.error !== undefined ? { error: verdict.error } : {}),
+    };
   }
 
   /** Drop the oldest iterations until the history cap holds. */
@@ -317,6 +378,17 @@ export class Iterations {
       }
     }
     return newest;
+  }
+
+  /**
+   * Take the verdict waiting for this session's settle. A verdict from another
+   * session belongs to a turn that has not settled yet, so it stays where it is.
+   */
+  private takeTurn(directory: string): TurnVerdict | undefined {
+    const verdict = this.turn;
+    if (verdict === undefined || verdict.directory !== directory) return undefined;
+    this.turn = undefined;
+    return verdict;
   }
 
   private resolve(session: TaskSession, taskId: string, fire: number): Iteration | undefined {

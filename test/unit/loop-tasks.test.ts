@@ -347,6 +347,147 @@ describe("LoopTasks", () => {
     expect(view?.task.updatedAt).toBeGreaterThan(view?.task.createdAt ?? 0);
   });
 
+  it("records a failed turn on the loop, with its error and time, and waits longer", async () => {
+    const task = await setup();
+    const created = await task.loops.create({
+      ...task.scope,
+      schedule: "10s",
+      prompt: "keep going",
+    });
+    task.advance(10_000);
+    expect(await task.loops.pump(task.now)).toHaveLength(1);
+    const firedAt = task.now;
+
+    // The turn the fire woke ends with the provider giving up, two seconds in.
+    task.advance(2_000);
+    await task.loops.completeIteration({
+      ...task.scope,
+      id: created.task.id,
+      fire: 1,
+      end: "failed",
+      error: "529 overloaded_error: the provider is busy",
+    });
+
+    const view = await task.loops.get(task.scope, created.task.id);
+    if (view?.task.kind !== "prompt-loop") throw new Error("expected a prompt loop");
+    expect(view.task.consecutiveFailures).toBe(1);
+    expect(view.task.lastError).toBe("529 overloaded_error: the provider is busy");
+    expect(view.task.lastFailureAt).toBe(task.now);
+    // One failure on a ten-second schedule waits twenty seconds from the failure.
+    expect(view.task.nextFireAt).toBe(task.now + 20_000);
+    expect(view.task.lastFireAt).toBe(firedAt);
+
+    // The record only exists on disk: a reader must see the failure there too.
+    const records = await task.reload();
+    expect(records.find((record) => record.id === created.task.id)).toMatchObject({
+      consecutiveFailures: 1,
+      lastError: "529 overloaded_error: the provider is busy",
+      lastFailureAt: task.now,
+    });
+  });
+
+  it("clears the failure streak and its error on a turn that finished", async () => {
+    const task = await setup();
+    const created = await task.loops.create({
+      ...task.scope,
+      schedule: "10s",
+      prompt: "keep going",
+    });
+    task.advance(10_000);
+    await task.loops.pump(task.now);
+    task.advance(1_000);
+    await task.loops.completeIteration({
+      ...task.scope,
+      id: created.task.id,
+      fire: 1,
+      end: "failed",
+      error: "fetch failed",
+    });
+
+    task.advance(20_000);
+    await task.loops.pump(task.now);
+    const firedAt = task.now;
+    task.advance(1_000);
+    await task.loops.completeIteration({
+      ...task.scope,
+      id: created.task.id,
+      fire: 2,
+      end: "healthy",
+    });
+
+    const view = await task.loops.get(task.scope, created.task.id);
+    if (view?.task.kind !== "prompt-loop") throw new Error("expected a prompt loop");
+    expect(view.task.consecutiveFailures).toBe(0);
+    expect(view.task.lastError).toBeUndefined();
+    expect(view.task.lastFailureAt).toBeUndefined();
+    // A healthy fire ends the backoff: the next fire is one interval away.
+    expect(view.task.nextFireAt).toBe(firedAt + 10_000);
+  });
+
+  it("leaves the streak alone when the user aborted the turn", async () => {
+    const task = await setup();
+    const created = await task.loops.create({
+      ...task.scope,
+      schedule: "10s",
+      prompt: "keep going",
+    });
+    task.advance(10_000);
+    await task.loops.pump(task.now);
+    task.advance(1_000);
+    await task.loops.completeIteration({
+      ...task.scope,
+      id: created.task.id,
+      fire: 1,
+      end: "failed",
+      error: "fetch failed",
+    });
+    const failed = await task.loops.get(task.scope, created.task.id);
+    if (failed?.task.kind !== "prompt-loop") throw new Error("expected a prompt loop");
+
+    task.advance(20_000);
+    const secondFireAt = task.now;
+    await task.loops.pump(task.now);
+    task.advance(1_000);
+    await task.loops.completeIteration({
+      ...task.scope,
+      id: created.task.id,
+      fire: 2,
+      end: "aborted",
+    });
+
+    const view = await task.loops.get(task.scope, created.task.id);
+    if (view?.task.kind !== "prompt-loop") throw new Error("expected a prompt loop");
+    // A stop by the user says nothing about the provider: the streak and the
+    // error of the failed fire before it stay exactly as they were.
+    expect(view.task.consecutiveFailures).toBe(1);
+    expect(view.task.lastError).toBe("fetch failed");
+    expect(view.task.lastFailureAt).toBe(failed.task.lastFailureAt);
+    // The aborted fire leaves the schedule where the pump put it: no backoff.
+    expect(view.task.nextFireAt).toBe(secondFireAt + 10_000);
+  });
+
+  it("records nothing against a loop whose fire is no longer in the record", async () => {
+    const task = await setup();
+    const created = await task.loops.create({
+      ...task.scope,
+      schedule: "10s",
+      prompt: "keep going",
+    });
+    task.advance(10_000);
+    await task.loops.pump(task.now);
+
+    // A turn that outlived its loop: the late settle must not resurrect it.
+    await task.loops.delete(task.scope, created.task.id);
+    await task.loops.completeIteration({
+      ...task.scope,
+      id: created.task.id,
+      fire: 1,
+      end: "failed",
+      error: "fetch failed",
+    });
+    expect(await task.loops.list(task.scope)).toEqual([]);
+  });
+
   it("completes after the maximum number of fires", async () => {
     const task = await setup();
     const created = await task.loops.create({

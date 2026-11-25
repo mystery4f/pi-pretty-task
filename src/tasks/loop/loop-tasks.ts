@@ -30,6 +30,7 @@ import type {
 } from "../base/task.js";
 import { FIRE_HISTORY_LIMIT } from "../base/task.js";
 import type { AnyTaskSession, OwnedTaskSession, TaskSessions } from "../base/task-sessions.js";
+import type { TurnEnd } from "./iteration.js";
 import type { Recurrence } from "./schedule.js";
 import {
   parseDurationMs,
@@ -96,6 +97,21 @@ export interface CompletedFire {
   readonly signalled: boolean;
   /** True when this signalled fire raised the latch, so the caller wakes exactly once. */
   readonly raised: boolean;
+}
+
+/**
+ * How the turn a prompt loop's fire woke ended, for the loop's failure account
+ * (ticket #46). The iteration record says what the turn did; this says what it
+ * means to the schedule, which is the only thing the loop counts.
+ */
+export interface IterationResult extends TaskScope {
+  /** The loop that fired. */
+  readonly id: string;
+  /** The fire whose turn this is. */
+  readonly fire: number;
+  readonly end: TurnEnd;
+  /** What the provider said, when it gave up and said something. */
+  readonly error?: string;
 }
 
 export interface CreateLoopInput extends TaskScope {
@@ -799,6 +815,43 @@ export class LoopTasks {
     return undefined;
   }
 
+  /**
+   * Account for the turn a prompt loop's fire woke (ticket #46). A turn the
+   * provider gave up on is a failed fire like a command's: it leaves its error
+   * and time on the record and backs the schedule off. A turn that finished is
+   * the healthy round that clears the streak, and one the user stopped changes
+   * nothing — the person behind the loop is not a broken provider.
+   *
+   * Only the sessions this extension owns are written, and a late settle for a
+   * fire that is already gone from the record changes nothing.
+   */
+  async completeIteration(result: IterationResult): Promise<void> {
+    for (const { session } of await this.ownedSessions()) {
+      const loop = this.findLoop(session, result.id);
+      if (loop?.kind !== "prompt-loop") continue;
+      // The loop's own fire count says which fires happened; a settle for a fire it
+      // never had changes nothing.
+      if (result.fire < 1 || result.fire > loop.fires) return;
+      // An aborted turn says nothing about the provider: the streak and the last
+      // error stay exactly as they were.
+      if (result.end === "aborted") return;
+
+      const at = this.now();
+      if (result.end === "failed") {
+        if (result.error !== undefined) loop.lastError = result.error;
+        loop.lastFailureAt = at;
+        this.noteFailure(loop, at);
+      } else {
+        loop.consecutiveFailures = 0;
+        loop.lastError = undefined;
+        loop.lastFailureAt = undefined;
+      }
+      loop.updatedAt = at;
+      await this.sessions.persist(session);
+      return;
+    }
+  }
+
   private async pumpOnce(at: number): Promise<LoopFire[]> {
     const fires: LoopFire[] = [];
     const commandFires: CommandFire[] = [];
@@ -983,7 +1036,7 @@ export class LoopTasks {
    * The next natural fire time is never pulled earlier: a long schedule keeps
    * its spacing and a short one gets the room the failure asked for.
    */
-  private noteFailure(loop: CmdLoopTask, at: number): void {
+  private noteFailure(loop: LoopBase, at: number): void {
     loop.consecutiveFailures = (loop.consecutiveFailures ?? 0) + 1;
     if (loop.status !== "running" || loop.nextFireAt === undefined) return;
     const base = Math.max(1, loop.nextFireAt - (loop.lastFireAt ?? loop.nextFireAt));

@@ -55,6 +55,14 @@ export interface IterationCall {
 export type IterationStatus = "running" | "completed" | "aborted" | "interrupted";
 
 /**
+ * How a fire's turn ended, as the loop's schedule needs to know it (ticket #46):
+ * `failed` when the provider gave up on the turn, `healthy` when the turn
+ * finished, and `aborted` when the user stopped it. A stop by the user says
+ * nothing about the provider, so it is neither a failure nor a success.
+ */
+export type TurnEnd = "failed" | "healthy" | "aborted";
+
+/**
  * The provider retry the turn is on (ticket #47). pi retries a transient
  * provider error before giving up, and without this a fire that spent three
  * attempts on a busy provider reads as one ordinary slow turn.
