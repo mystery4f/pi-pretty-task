@@ -86,6 +86,16 @@ A long build is already running in front of you — the first frames of the anim
 
 `PI_PRETTY_TASK_FOREGROUND_TIMEOUT` does the same on a timer, for the terminal you have already walked away from; `0`, the default, never moves anything. A call's own `timeout` still stops the tree — a timeout is a failure, not a move. The takeover is off by default because it re-registers pi's own shell tools; see [ADR-0020](docs/adr/0020-foreground-command-detaches-to-a-task.md).
 
+## Leave it running while you are away
+
+A prompt loop is a clock: every fire delivers a message into the session and starts one turn. That is enough to keep a long job moving overnight, provided the work has somewhere to live and the loop knows when to stop.
+
+- Keep the work in a progress file, one item per line with an acceptance check on each. "`npm run test:unit` exits 0" can be finished; "improve the code" cannot.
+- Put a closing contract in the loop's prompt: tick the item that finished, and when nothing is left call `pretty_task_loop_update id=<id> action=complete`.
+- Always pass `maxFires`. It is the only stop that does not depend on the model's own judgement.
+
+The bundled `pretty-task-unattended` skill carries the whole recipe — the file shape, the exact contract text, and what to read the next morning. Ask for it in plain words ("run this unattended overnight") and it fills in the calls.
+
 ## Tools
 
 | Tool | What it answers |

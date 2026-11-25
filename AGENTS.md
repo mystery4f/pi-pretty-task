@@ -47,6 +47,7 @@ Source references from the two upstream plugins are cloned under `.tmp/` (git-ig
 - Tests read the panel's filter list and key counts from the exported constants (`PANEL_FILTERS`, `DEFAULT_PANEL_FILTER`) instead of hard-coding presses, so a default that moves does not turn four cases red.
 - Every state file write is atomic (temp file + rename) and every read tolerates a corrupt file by falling back to `.prev`.
 - Style is machine-enforced: `.editorconfig` (2 spaces, LF, final newline) plus Biome for both formatting and linting — one tool, so there is no Prettier/ESLint pair to keep in sync. `npm run lint` must be clean before a change is done; do not reformat files you did not otherwise touch. The same run catches import cycles (`suspicious/noImportCycles`): a split that leaves two files importing each other fails `npm run lint`, so the direction of a dependency is enforced rather than remembered.
+- `README.md` is the user-facing entry point, not a changelog: every user-visible capability change lands there in the same change (what it does, the call that uses it, and a regenerated screenshot when the panel changes). The key list and the preview images are test-guarded against panel drift, so edit the README when the panel moves rather than keeping a second copy somewhere else. Material a user never reads — ADRs, scope notes, handoff state — stays out of it.
 
 ### pi-lens hints
 
