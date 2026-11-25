@@ -13,16 +13,20 @@ _Avoid_: job, bg item, background job, task list entry
 _Avoid_: bg task, background job, subprocess, shell task
 
 **Llm loop task**:
-`kind: "prompt-loop"` 的 Task。不跑命令；到点把一段预置 prompt 送进会话，唤醒 LLM 跑一轮。有间隔或 cron 表达式、prompt、最大触发次数、下次触发时间。
+`kind: "prompt-loop"` 的 Task。不跑命令；到点把一段预置 prompt 送进会话，唤醒 LLM 跑一轮。有间隔或 cron 表达式、prompt（落盘为 Prompt file）、最大触发次数、下次触发时间。
 _Avoid_: cron, timer, scheduler, job, watcher, loop（单独用时含义太宽）
+
+**Prompt file**:
+Llm loop task 的提示词落盘成的那一个文件：每一发从它读出正文送进会话，所以改它不必重建 loop 就生效，改文件对下一发生效、对正在跑的 turn 不生效。地址由 loop id 派生，用户与模型都不提供路径（ADR-0024）。记录上的 `prompt` 是创建时的原文兼重建源，不是真源——只有文件缺失或不可读时才用它重建。
+_Avoid_: prompt path, prompt template, template file
 
 **Cmd loop task**:
 `kind: "cmd-loop"` 的 Task。到点跑一条命令，每次触发产生一个普通的 Process task 作为子记录。和 Llm loop task 共用一个调度器，区别只在触发后做什么。
 _Avoid_: shell loop, cron job, monitor
 
 **Fire**:
-Cmd loop task 的一次触发，落在一个子 Process task 上。它有自己的输出文件与退出码，不是独立记录类型，只在所属 Cmd loop task 的详情里列出。
-_Avoid_: run, tick, execution
+任一种 loop task 的一次触发：Llm loop task 落成一条 Iteration，Cmd loop task 落成一个子 Process task。落点不同，触发本身是同一个概念，所以代码（`LoopFire`）与面板（`fire 3`）对两种 loop 都用这个词。
+_Avoid_: run, tick, execution, invocation
 
 **Foreground run**:
 本扩展替内置工具 spawn、正在被某个工具调用等待的那条命令。它还不是 Task，不在面板里、没有记录；只有被改道（或跑完）时才落地。同一时刻可以有多个（并行工具调用），所以「当前前台命令」这个说法只在恰好一条时才成立。
@@ -50,7 +54,7 @@ _Avoid_: stage, phase, node, stage task
 
 **Iteration**:
 Llm loop task 的子记录。一次触发对应一条，记录那一轮里实际调用了哪些工具、跑了哪些命令。它不是 Task，不在列表里单独占一行，只在该 Llm loop task 的详情里展开。
-_Avoid_: fire, run, round, execution
+_Avoid_: run, round, execution
 
 **Schedule**:
 一次触发的时间规则，两种写法归一成一个「下次触发时刻」函数：间隔简写（`30s`、`10m`、`2h`）与五段 cron 表达式（`0 9 * * 1-5`，本地时区）。六段（含秒）明确拒绝，秒级改用间隔。
