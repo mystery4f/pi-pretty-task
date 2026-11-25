@@ -74,10 +74,13 @@ Never claim progress without updating .pi/progress.md in the same turn.
 Two properties make this work: the tick and the claim are one action, and the
 close is a tool call rather than a sentence the model may forget to say.
 
-The prompt is stored on the loop record, so changing it means recreating the loop
-(and losing its iteration history). Prompt files on disk are drafted in
-`docs/adr/0024-loop-prompt-lands-on-disk.md`; once that lands, the same text lives
-in `.pi/tasks/<sessionId>/<loopId>.prompt.md` and can be edited in place.
+The prompt is not a tool argument you can revise. Each prompt loop keeps it in a
+file whose path the plugin derives from the loop id; the create, list and update
+calls print that address, and `loopDetails.promptFile` carries it too. Every fire
+reads the file, so editing it in place changes what the loop says on its next
+fire, and the record keeps the text the loop was created with as the seed a
+missing file is rebuilt from. Changing the prompt through a tool still means
+recreating the loop (and losing its iteration history).
 
 ## Morning after
 
