@@ -226,11 +226,15 @@ export function renderLoopDetail(panel: PanelView, row: PanelTaskView, width: nu
   // The count, the time and the error sit with the schedule facts and never rewrite
   // them, exactly as a command loop's page draws the same run (ADR-0017, ticket #50).
   // The message is coloured as the failure it is, not as the loop's own status.
+  // `Failed at`, not `Last failure`: the label column is LABEL_WIDTH wide *with* its
+  // colon and `field` pads the label to exactly that, so a twelve-character label
+  // loses its colon and its value glues onto a chopped word (model.ts:37). The
+  // command loop's `Wake on failure` already ships that clipping; not fixed here.
   const failureFacts: string[] = [
     ...(streak > 0 ? field(panel, "Failures", `${String(streak)} in a row`) : []),
     ...(task.lastFailureAt === undefined
       ? []
-      : field(panel, "Last failure", updatedText(panel, task.lastFailureAt))),
+      : field(panel, "Failed at", updatedText(panel, task.lastFailureAt))),
     ...(task.lastError === undefined
       ? []
       : block(panel, "Last error", theme.fg(STATUS_COLOUR.failed, task.lastError))),
