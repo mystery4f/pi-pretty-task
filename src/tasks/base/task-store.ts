@@ -14,6 +14,7 @@ import type {
   Iteration,
   IterationCall,
   IterationCallStatus,
+  IterationRetry,
   IterationStatus,
 } from "../loop/iteration.js";
 import { previousTaskRecordPath, taskRecordPath } from "./runtime-state.js";
@@ -303,8 +304,12 @@ function parseIteration(value: unknown): Iteration | undefined {
     if (call === undefined) return undefined;
     calls.push(call);
   }
-  // SAFETY: the iteration's own fields and every call were parsed above.
-  return { ...value, calls } as unknown as Iteration;
+  // The retry is written only while a turn is open, so its absence is the normal
+  // read: a record the process stopped writing still has a valid turn record.
+  const retry = value.retry === undefined ? undefined : parseIterationRetry(value.retry);
+  if (value.retry !== undefined && retry === undefined) return undefined;
+  // SAFETY: the iteration's own fields, its retry and every call were parsed above.
+  return { ...value, calls, ...(retry === undefined ? {} : { retry }) } as unknown as Iteration;
 }
 
 function parseIterationCall(value: unknown): IterationCall | undefined {
@@ -319,6 +324,24 @@ function parseIterationCall(value: unknown): IterationCall | undefined {
   if (!ITERATION_CALL_STATUSES.some((status) => status === value.status)) return undefined;
   // SAFETY: every field and the status of an IterationCall was checked above.
   return value as unknown as IterationCall;
+}
+
+/**
+ * The provider retry a turn was on. Attempt counts are whole numbers from one:
+ * `0/3` is corruption rather than an older generation, because no writer could
+ * produce it. The status is whatever the provider named, so it stays free text.
+ */
+function parseIterationRetry(value: unknown): IterationRetry | undefined {
+  if (!isObject(value)) return undefined;
+  if (typeof value.attempt !== "number" || !Number.isInteger(value.attempt)) return undefined;
+  if (value.attempt < 1) return undefined;
+  if (typeof value.maxAttempts !== "number" || !Number.isInteger(value.maxAttempts)) {
+    return undefined;
+  }
+  if (value.maxAttempts < 1) return undefined;
+  if (value.status !== undefined && typeof value.status !== "string") return undefined;
+  // SAFETY: both counts and the optional status were checked above.
+  return value as unknown as IterationRetry;
 }
 
 /**

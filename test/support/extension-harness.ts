@@ -70,6 +70,12 @@ export interface HarnessOptions {
   /** Iterations one loop keeps; omitted means the extension's default. */
   readonly iterationHistoryLimit?: number;
   /**
+   * `retry.maxRetries` as pi reports it through `getSettings`; omitted means the
+   * harness reports no retry settings, the way pi looks before a settings file
+   * sets them (ticket #47).
+   */
+  readonly maxRetries?: number;
+  /**
    * Project root holding `.pi/pretty-task.json`; defaults to the harness turn's
    * cwd so a test never reads the repository's own configuration.
    */
@@ -353,6 +359,13 @@ export function createHarness(defaultTurn: Turn, options: HarnessOptions = {}): 
     },
     registerMessageRenderer(customType: string, renderer: MessageRenderer): void {
       renderers.set(customType, renderer);
+    },
+    // pi's settings, as far as the extension reads them: the retry budget only,
+    // because that is the one setting a test varies (ticket #47).
+    getSettings(): { readonly retry?: { readonly enabled: boolean; readonly maxRetries: number } } {
+      return options.maxRetries === undefined
+        ? {}
+        : { retry: { enabled: true, maxRetries: options.maxRetries } };
     },
     on(event: string, handler: (event: unknown, ctx: unknown) => unknown): () => void {
       const list = handlers.get(event) ?? [];

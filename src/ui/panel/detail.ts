@@ -26,6 +26,7 @@ import {
   iterationsText,
   missedText,
   nextFireText,
+  retryText,
   STEP_MARK,
   singleLine,
   stepColour,
@@ -387,6 +388,11 @@ export function renderIterationDetail(panel: PanelView, width: number): string[]
   const groups: string[][] = [
     field(panel, "Status", theme.fg(ITERATION_COLOUR[iteration.status], iteration.status)),
     field(panel, "Started", formatClockTime(iteration.startedAt)),
+    // What the turn spent on a provider that was failing, whether it is still
+    // doing so or has since finished (ticket #47).
+    iteration.retry === undefined
+      ? []
+      : field(panel, "Retry", theme.fg("warning", retryText(iteration.retry))),
     iteration.endedAt === undefined
       ? []
       : field(panel, "Took", formatDuration(iteration.endedAt - iteration.startedAt)),

@@ -1191,6 +1191,78 @@ describe("the loop detail view", () => {
     panel.dispose();
   });
 
+  it("prints the provider retry a fire is on, with the status the failure carried", async () => {
+    const source = new FakeSource();
+    source.rows = [
+      loopView("loop01", {
+        name: "review loop",
+        fires: 1,
+        iterations: [
+          iterationOf(1, [], {
+            status: "running",
+            retry: { attempt: 2, maxAttempts: 3, status: "529" },
+          }),
+        ],
+      }),
+    ];
+    const { panel, drawn } = await openOn("loops", source);
+    await panel.settle();
+
+    // A fire that spent three attempts on a busy provider otherwise reads as one
+    // slow turn (ticket #47).
+    expect(drawn()).toContain("retry 2/3 · 529");
+    // The retry gives way on a narrow row rather than crossing the border.
+    expectFits(panel, 70);
+
+    panel.dispose();
+  });
+
+  it("prints no retry once the turn it belonged to has settled", async () => {
+    const source = new FakeSource();
+    source.rows = [
+      loopView("loop01", {
+        name: "review loop",
+        fires: 1,
+        // A record that kept the field after its turn ended — a process that died
+        // mid-turn — must not read as a retry in flight now.
+        iterations: [iterationOf(1, [], { retry: { attempt: 3, maxAttempts: 3, status: "529" } })],
+      }),
+    ];
+    const { panel, drawn } = await openOn("loops", source);
+    await panel.settle();
+
+    expect(drawn()).not.toContain("retry");
+
+    panel.dispose();
+  });
+
+  it("names the retry a finished iteration was on, in its own page", async () => {
+    const source = new FakeSource();
+    source.rows = [
+      loopView("loop01", {
+        name: "review loop",
+        fires: 1,
+        iterations: [
+          iterationOf(1, [callOf("c1", "bash", "npm test")], {
+            retry: { attempt: 2, maxAttempts: 3, status: "529" },
+          }),
+        ],
+      }),
+    ];
+    const { panel, drawn } = await openOn("loops", source);
+    await panel.settle();
+    panel.handleInput(ENTER);
+    await panel.settle();
+    panel.handleInput(ENTER);
+    await panel.settle();
+
+    const screen = drawn();
+    expect(screen).toContain("Retry");
+    expect(screen).toContain("retry 2/3 · 529");
+
+    panel.dispose();
+  });
+
   it("opens an iteration with its tool calls in order, commands highlighted and errors kept", async () => {
     const source = new FakeSource();
     const calls = [
