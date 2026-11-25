@@ -63,6 +63,14 @@ export type IterationStatus = "running" | "completed" | "aborted" | "interrupted
 export type TurnEnd = "failed" | "healthy" | "aborted";
 
 /**
+ * What a settle can tell a loop's schedule about a turn (ticket #46): its
+ * {@link TurnEnd}, or `unobserved` when no assistant message described it — a run
+ * cut off before the model spoke. An unobserved turn is not a success, so it
+ * clears nothing: the streak it might have ended stays until a turn is seen.
+ */
+export type TurnOutcome = TurnEnd | "unobserved";
+
+/**
  * The provider retry the turn is on (ticket #47). pi retries a transient
  * provider error before giving up, and without this a fire that spent three
  * attempts on a busy provider reads as one ordinary slow turn.

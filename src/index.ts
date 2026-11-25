@@ -557,11 +557,11 @@ export function createExtension(
   // settle with the turn before it, and its own events open the next run.
   pi.on("agent_settled", async (event, ctx) => {
     await remember(ctx);
-    // The turn's outcome reaches the loop that fired it (ticket #46), so a fire the
-    // provider gave up on is counted before the next wake can fire.
-    const turn = await recordSafely(iterations.settle(scopeOf(ctx), event.aborted));
-    if (turn !== undefined)
-      await recordSafely(loops.completeIteration({ ...scopeOf(ctx), ...turn }));
+    // The turn's outcome reaches every loop that fired it (ticket #46), so a fire the
+    // provider gave up on is counted before the next wake can fire. One turn can be
+    // several loops' fire, which is why the settle reports one result per loop.
+    const turns = await recordSafely(iterations.settle(scopeOf(ctx), event.aborted));
+    await recordSafely(loops.completeTurns(scopeOf(ctx), turns ?? []));
     await wakes.settled();
   });
   pi.on("session_shutdown", () => {

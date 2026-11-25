@@ -15,8 +15,10 @@
  * - `tool_execution_end` pairs by tool call id across every iteration, so a late
  *   result still lands on the call that produced it.
  *
- * Every write is persisted with the loop record, because the record only exists
- * on disk: a reader sees an iteration only after it has been written out.
+ * Opening, binding and recording an iteration is written out at once, because the
+ * record only exists on disk: a reader sees an iteration only after it is written.
+ * Closing one is not written here — a settle closes iterations and their loops'
+ * schedules together, so the caller writes that one record once (ticket #46).
  *
  * @author mystery4f <40482524+mystery4f@users.noreply.github.com>
  */
@@ -31,21 +33,9 @@ import {
   ITERATION_HISTORY_LIMIT,
   type Iteration,
   type TurnEnd,
+  type TurnOutcome,
 } from "./iteration.js";
-import type { LoopFire } from "./loop-tasks.js";
-
-/**
- * The turn a settle closed, in the loop's own terms (ticket #46). The iteration
- * says what the turn did; the loop record needs this to count the fire.
- */
-export interface SettledTurn {
-  /** The loop whose fire the turn belongs to. */
-  readonly id: string;
-  readonly fire: number;
-  readonly end: TurnEnd;
-  /** What the provider said, when it gave up and said something. */
-  readonly error?: string;
-}
+import type { IterationResult, LoopFire } from "./loop-tasks.js";
 
 /** The turn in flight as its own message described it, before the settle. */
 interface TurnVerdict {
@@ -57,8 +47,13 @@ interface TurnVerdict {
 
 /**
  * What one assistant message says about its turn (ticket #46): an error stop is
- * the provider giving up, and every other stop is a turn that ran. pi reports no
- * retry event, so the message is the only place this is visible.
+ * the provider giving up, and every other stop is a turn that ran.
+ *
+ * The spec names two signals for a fire the provider gave up on —
+ * `auto_retry_end` with `success: false`, and a final `stopReason === "error"` —
+ * and pi 1.5.2 makes them one: it emits the error message first and then the
+ * retry's end, but it does not forward `auto_retry_end` to extensions, so the
+ * final message's stop reason is the only observable and covers both cases.
  */
 function turnVerdict(attempt: ProviderAttemptEvent): { end: TurnEnd; error?: string } {
   if (attempt.stopReason !== "error") return { end: "healthy" };
@@ -314,21 +309,31 @@ export class Iterations {
    * at that point cannot end any more: `aborted` when the run was aborted,
    * `interrupted` otherwise. Pending iterations stay pending: their wake has not
    * produced a turn yet, so this settle is not theirs.
+   *
+   * One turn can be several loops' fire — every loop that came due while the agent
+   * was busy is bound and delivered before the turn starts — so the caller gets one
+   * result per loop that had an iteration closed here, read from that loop's newest
+   * one. A loop with two iterations in the same turn is still one fire to charge.
    */
-  async settle(scope: TaskScope, aborted: boolean): Promise<SettledTurn | undefined> {
+  async settle(scope: TaskScope, aborted: boolean): Promise<IterationResult[]> {
     const session = await this.sessions.session(scope);
     const verdict = this.takeTurn(session.directory);
     const at = this.now();
-    let changed = false;
-    let newest: { task: PromptLoopTask; iteration: Iteration } | undefined;
+    // A run that settled without a bound fire belongs to the user, and a stop by
+    // the user is not a failed fire (ticket #46). A run nothing was observed about
+    // says nothing either way: it is neither a failure nor the healthy round that
+    // clears one.
+    const end: TurnOutcome = aborted ? "aborted" : (verdict?.end ?? "unobserved");
+    const newest = new Map<string, { task: PromptLoopTask; iteration: Iteration }>();
     for (const task of session.tasks.values()) {
       if (task.kind !== "prompt-loop") continue;
       let closed = false;
       for (const iteration of task.iterations) {
         if (iteration.bound !== true || iteration.status !== "running") continue;
         closeIteration(iteration, at, aborted ? "aborted" : "completed");
-        if (newest === undefined || iteration.startedAt >= newest.iteration.startedAt) {
-          newest = { task, iteration };
+        const seen = newest.get(task.id);
+        if (seen === undefined || iteration.startedAt >= seen.iteration.startedAt) {
+          newest.set(task.id, { task, iteration });
         }
         closed = true;
       }
@@ -336,20 +341,14 @@ export class Iterations {
       // The turn the loop woke has settled, which is the loop's own change: its
       // row moves on that, not only on the fire that started the turn (ADR-0010).
       task.updatedAt = at;
-      changed = true;
     }
-    if (changed) await this.sessions.persist(session);
-    if (newest === undefined) return undefined;
-
-    // A run that settled without a bound fire belongs to the user, and a stop by
-    // the user is not a failed fire (ticket #46).
-    const end: TurnEnd = aborted ? "aborted" : (verdict?.end ?? "healthy");
-    return {
-      id: newest.task.id,
-      fire: newest.iteration.fire,
+    if (newest.size === 0) return [];
+    return [...newest.values()].map(({ task, iteration }) => ({
+      id: task.id,
+      fire: iteration.fire,
       end,
       ...(end === "failed" && verdict?.error !== undefined ? { error: verdict.error } : {}),
-    };
+    }));
   }
 
   /** Drop the oldest iterations until the history cap holds. */
