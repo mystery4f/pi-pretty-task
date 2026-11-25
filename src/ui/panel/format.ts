@@ -31,6 +31,7 @@ import type {
   IterationRetry,
   IterationStatus,
 } from "../../tasks/loop/iteration.js";
+import type { PromptPreview } from "../../tasks/loop/prompt-file.js";
 import { STATUS_COLOUR } from "../status-colour.js";
 import { DETAIL_OUTPUT_LINES, type PanelTaskView } from "./model.js";
 
@@ -421,4 +422,28 @@ export function kindWord(kind: TaskKind): "proc" | "llm" | "cmd" | "chn" {
       // The word a reader types to find a chain once the panel gives it a tab (#27).
       return "chn";
   }
+}
+
+/** What the page says in place of a preview when neither the file nor the record speaks. */
+export const PROMPT_UNREADABLE = "the prompt file could not be read";
+
+/**
+ * What a loop page says under the prompt's path. `lines` is at most the three the
+ * loop layer trimmed; `changed` carries the file's own time in the same clock the
+ * `Updated` row above it uses, so a reader can tell a prompt written a moment ago
+ * from one nobody has touched. When the file cannot be read the record's own
+ * warning takes the preview's place: the page says why instead of throwing.
+ */
+export interface PromptBody {
+  readonly lines: readonly string[];
+  readonly changed?: string;
+  readonly problem?: string;
+}
+
+export function promptBody(preview: PromptPreview, warning: string | undefined): PromptBody {
+  // No mtime means the read failed: the path is still real, the text is not.
+  if (preview.changedAt === undefined) {
+    return { lines: [], problem: warning ?? PROMPT_UNREADABLE };
+  }
+  return { lines: preview.lines, changed: `changed ${formatClockTime(preview.changedAt)}` };
 }

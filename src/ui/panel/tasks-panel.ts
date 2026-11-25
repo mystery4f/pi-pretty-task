@@ -17,6 +17,7 @@ import { type Component, truncateToWidth, visibleWidth } from "@earendil-works/p
 import { formatBytes } from "../../tasks/base/format.js";
 import type { CmdLoopTask, FireRecord, PromptLoopTask, Task } from "../../tasks/base/task.js";
 import type { Iteration } from "../../tasks/loop/iteration.js";
+import type { PromptPreview } from "../../tasks/loop/prompt-file.js";
 import { renderDetail, renderIterationDetail, windowRowsFor } from "./detail.js";
 import { messageOf } from "./format.js";
 import { handlePanelInput } from "./input.js";
@@ -155,6 +156,11 @@ export class TasksPanel implements Component, PanelView {
   detailLines: readonly string[] = [];
   detailTruncated = false;
   detailError: string | undefined;
+  /**
+   * The open loop's prompt file as last read, or undefined when nothing open has
+   * one. Projection, not drawing: the page renders whatever sits here (ticket #48).
+   */
+  promptPreview: PromptPreview | undefined;
   /** Lines the reader has scrolled up from the newest; 0 follows the tail. */
   scrollBack = 0;
   /** False while scrolled up: the buffer stays frozen so the view does not move. */
@@ -220,8 +226,11 @@ export class TasksPanel implements Component, PanelView {
     this.trackGrowth();
 
     this.keepSelection();
-    if (this.mode === "detail" && this.following && this.detailRow()?.task.kind === "process") {
-      await this.readTail();
+    if (this.mode === "detail") {
+      // A process refreshes the output it follows; a loop refreshes the prompt
+      // file a fire may have rewritten. Both are reads of the outside world.
+      if (this.following && this.detailRow()?.task.kind === "process") await this.readTail();
+      if (this.detailRow()?.task.kind === "prompt-loop") await this.readPrompt();
     }
     if (this.mode === "iteration") {
       const open = this.detailRow();
@@ -423,6 +432,7 @@ export class TasksPanel implements Component, PanelView {
     this.iterationTop = 0;
     this.enqueue(async () => {
       await this.readTail();
+      await this.readPrompt();
       this.paint();
     });
   }
@@ -436,6 +446,7 @@ export class TasksPanel implements Component, PanelView {
     this.scrollBack = 0;
     this.enqueue(async () => {
       await this.readTail();
+      await this.readPrompt();
       this.paint();
     });
   }
@@ -510,6 +521,7 @@ export class TasksPanel implements Component, PanelView {
     this.scrollBack = 0;
     this.enqueue(async () => {
       await this.readTail();
+      await this.readPrompt();
       this.paint();
     });
   }
@@ -534,6 +546,7 @@ export class TasksPanel implements Component, PanelView {
     this.detailId = undefined;
     this.detailLines = [];
     this.detailError = undefined;
+    this.promptPreview = undefined;
     this.following = true;
     this.scrollBack = 0;
     this.selectedId = this.selectedByTab[next];
@@ -599,6 +612,30 @@ export class TasksPanel implements Component, PanelView {
       if (found !== undefined) return found;
     }
     return task.fireHistory.at(-1);
+  }
+
+  /**
+   * The open loop's prompt file, read through the loop's own layer: the panel
+   * never joins a path or opens a file. A source that cannot read prompt files,
+   * a chain, or a process leaves nothing here, and the page then says nothing
+   * about a prompt rather than something wrong.
+   */
+  async readPrompt(): Promise<void> {
+    const row = this.detailRow();
+    const id = this.detailId;
+    this.promptPreview = undefined;
+    if (row?.task.kind !== "prompt-loop" || id === undefined) return;
+    if (this.source.prompt === undefined) return;
+    try {
+      const preview = await this.source.prompt(id, row.sessionId);
+      // The reader may have moved on while the file was being read.
+      if (this.detailId !== id) return;
+      this.promptPreview = preview;
+    } catch {
+      // The loop's own layer never throws; a source that does has nothing to show,
+      // and the page draws no prompt block rather than a guessed one.
+      this.promptPreview = undefined;
+    }
   }
 
   async readTail(): Promise<void> {

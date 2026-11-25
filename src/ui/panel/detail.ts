@@ -26,6 +26,7 @@ import {
   iterationsText,
   missedText,
   nextFireText,
+  promptBody,
   retryText,
   STEP_MARK,
   singleLine,
@@ -236,7 +237,7 @@ export function renderLoopDetail(panel: PanelView, row: PanelTaskView, width: nu
     task.expiresAt === undefined ? [] : field(panel, "Expires", formatClockTime(task.expiresAt)),
     task.endedAt === undefined ? [] : field(panel, "Ended", formatClockTime(task.endedAt)),
     task.error === undefined ? [] : block(panel, "Error", theme.fg(colour, task.error)),
-    block(panel, "Prompt", task.prompt),
+    promptBlock(panel, task.promptWarning),
   ];
 
   const notice = panel.notice === undefined ? 0 : 1;
@@ -579,6 +580,28 @@ function wrapValue(panel: PanelView, value: string, indent: number): string[] {
   const lines = wrapTextWithAnsi(value, room);
   const lead = " ".repeat(indent);
   return (lines.length === 0 ? [""] : lines).map((line) => `${lead}${line}`);
+}
+
+/**
+ * The prompt's own block: the file's address, three lines of it and when it last
+ * changed — or the one sentence that says why there is no preview. The prompt is
+ * a file, and the whole of it is never drawn here: the iteration list below is
+ * what a reader opens this page for (ticket #48).
+ */
+export function promptBlock(panel: PanelView, warning: string | undefined): string[] {
+  const preview = panel.promptPreview;
+  if (preview === undefined) return [];
+  const theme = panel.theme;
+  const body = promptBody(preview, warning);
+  const lines = block(panel, "Prompt file", preview.path);
+  // A read that failed keeps the address and says why; a read that worked shows
+  // the lines and the file's own clock, and no warning is repeated over it.
+  if (body.problem !== undefined) {
+    return [...lines, ...wrapValue(panel, theme.fg("warning", body.problem), 2)];
+  }
+  for (const line of body.lines) lines.push(theme.fg("dim", `  ${line}`));
+  if (body.changed !== undefined) lines.push(theme.fg("dim", `  ${body.changed}`));
+  return lines;
 }
 
 export function sessionField(panel: PanelView, row: PanelTaskView): string[] {

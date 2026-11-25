@@ -19,6 +19,7 @@ import type {
   PromptLoopTask,
 } from "../../src/tasks/base/task.js";
 import type { Iteration, IterationCall } from "../../src/tasks/loop/iteration.js";
+import type { PromptPreview } from "../../src/tasks/loop/prompt-file.js";
 import { block, detailRows } from "../../src/ui/panel/detail.js";
 import {
   DEFAULT_PANEL_FILTER,
@@ -220,6 +221,15 @@ class FakeSource implements PanelSource {
     return this.otherRows;
   }
 
+  /** Prompt files by loop id, as the loop's own store hands them over. */
+  readonly prompts = new Map<string, PromptPreview>();
+  readonly prompted: string[] = [];
+
+  async prompt(id: string): Promise<PromptPreview | undefined> {
+    this.prompted.push(id);
+    return this.prompts.get(id);
+  }
+
   async tail(id: string, sessionId?: string): Promise<OutputTail | undefined> {
     this.tailed.push(id);
     this.tailedFrom.push(sessionId);
@@ -363,6 +373,11 @@ function numberedOutput(count: number): string[] {
     { length: count },
     (_, index) => `output-${String(index + 1).padStart(2, "0")}`,
   );
+}
+
+/** A creation prompt long enough that drawing it would push the iterations off the page. */
+function longSeedPrompt(): string {
+  return Array.from({ length: 40 }, (_, index) => `seed line ${index + 1}`).join("\n");
 }
 
 function tailOf(lines: string[]): OutputTail {
@@ -1052,11 +1067,50 @@ describe("the loop detail view", () => {
     expect(screen).toContain("prompt-loop");
     expect(screen).toContain("10s");
     expect(screen).toContain("5 / 10");
-    expect(screen).toContain("review the diff and report");
+    expect(screen).not.toContain("review the diff and report");
     expect(screen).toContain(formatClockTime(lastFireAt + 10_000));
     expect(screen).toContain("in 4.0s");
     expect(screen).toContain("3 kept · 2 older dropped");
     expect(screen.indexOf("fire 5")).toBeLessThan(screen.indexOf("fire 3"));
+
+    panel.dispose();
+  });
+
+  it("previews the prompt file's path, three lines and time, so the iterations stay on screen", async () => {
+    const source = new FakeSource();
+    const changedAt = CLOCK + 5_000;
+    const path = "/work/.pi/tasks/session/prompts/loop01.md";
+    source.prompts.set("loop01", {
+      path,
+      lines: ["review the diff", "then run the tests", "and report the failures"],
+      changedAt,
+    });
+    source.rows = [
+      loopView("loop01", {
+        name: "review loop",
+        prompt: longSeedPrompt(),
+        iterations: [iterationOf(1), iterationOf(2), iterationOf(3)],
+      }),
+    ];
+    const { panel, drawn } = await openOn("loops", source);
+    await panel.settle();
+
+    panel.handleInput(ENTER);
+    await panel.settle();
+
+    const screen = drawn();
+    // The path and the file's facts are read through the loop's own layer, once.
+    expect(source.prompted).toEqual(["loop01"]);
+    expect(screen).toContain(path);
+    for (const line of ["review the diff", "then run the tests", "and report the failures"]) {
+      expect(screen).toContain(line);
+    }
+    // The file's own time, in the same clock the `Updated` row above it uses.
+    expect(screen).toContain(`changed ${formatClockTime(changedAt)}`);
+    // The creation prompt is no longer the prompt, and it never eats the page.
+    expect(screen).not.toContain("seed line 40");
+    // The list the page is opened for survives the prompt block.
+    expect(screen).toContain("fire 3");
 
     panel.dispose();
   });
@@ -1071,6 +1125,35 @@ describe("the loop detail view", () => {
     await panel.settle();
 
     expect(drawn()).toContain("iterations · none kept · 40 older dropped");
+
+    panel.dispose();
+  });
+
+  it("keeps the prompt's path and says the record's warning when the file is gone", async () => {
+    const source = new FakeSource();
+    const path = "/work/.pi/tasks/session/prompts/loop02.md";
+    source.prompts.set("loop02", { path, lines: [] });
+    source.rows = [
+      loopView("loop02", {
+        name: "review loop",
+        prompt: longSeedPrompt(),
+        promptWarning: "prompt file is missing; this fire used the creation prompt",
+        iterations: [iterationOf(1)],
+      }),
+    ];
+    const { panel, drawn } = await openOn("loops", source);
+    await panel.settle();
+
+    panel.handleInput(ENTER);
+    await panel.settle();
+
+    const screen = drawn();
+    // The address is still a fact even when the text is not, and the record says why.
+    expect(screen).toContain(path);
+    expect(screen).toContain("prompt file is missing; this fire used the creation prompt");
+    // No time is invented for a file that could not be read.
+    expect(screen).not.toContain("changed ");
+    expect(screen).not.toContain("seed line 1");
 
     panel.dispose();
   });

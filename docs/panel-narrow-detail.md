@@ -13,7 +13,7 @@ Herdr 分格之后，`/tasks` 的详情页"看不到信息"。这是两个独立
 - **D1 面板自己算高度预算**：`panelHeightBudget(rows)` 复刻 pi overlay 的算式（`min(floor(rows × PANEL_HEIGHT_SHARE), rows − margin × 2)`），`tasks-command` 用同一组常量生成 `maxHeight`，两边不会漂。`render()` 每次刷新预算，pane 一改尺寸下一次绘制就按新预算走。
 - **D2 按预算分配，而不是画完再被裁**：列表行数、详情字段数、输出窗口行数都由预算算出来。溢出发生在面板内部，读者能看到"还有东西"，而不是底部整块被终端切掉。
 - **D3 字段与窗口按同一份预算分配**：`detailRows(height, below)` 把一页可用的行（`height − FRAME_ROWS − 2 条框线 − 窗口下方行数`）分成字段行与窗口行两块。窗口先拿到 `DETAIL_MIN_OUTPUT_LINES`，最多长到 `DETAIL_OUTPUT_LINES`；字段拿剩下的、上限是 `DETAIL_FIELD_RESERVE`，放不下就按整块丢字段，并以 `… N more fields — a taller pane shows them` 收尾。矮 pane 上先让位的是字段，不是输出尾巴。
-- **D4 宽度分两档，长值折行**：≥ `DETAIL_WIDE_MIN_WIDTH` 时标签列 `LABEL_WIDTH` 内联、仍超宽才截断；更窄时标签独占一行、值折行缩进 2 列。`Command` / `CWD` / `Output` / `Prompt` / `Error` 这类长值统一走 `block()`，一律 `wrapTextWithAnsi` 折行，不再出现 `C:\Users\1…`。
+- **D4 宽度分两档，长值折行**：≥ `DETAIL_WIDE_MIN_WIDTH` 时标签列 `LABEL_WIDTH` 内联、仍超宽才截断；更窄时标签独占一行、值折行缩进 2 列。`Command` / `CWD` / `Output` / `Prompt file` / `Error` 这类长值统一走 `block()`，一律 `wrapTextWithAnsi` 折行，不再出现 `C:\Users\1…`。
 - **D5 子行状态前置**：chain 步骤行是 `标记 + 状态 + 名字 + · exit/耗时`，fire 行与 iteration 行的名字在状态前、数字在名字后，窄的时候被截的是名字尾巴，`exit 1` 和耗时优先留下。
 ## 代价
 
