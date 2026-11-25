@@ -117,11 +117,12 @@ export interface ExtensionController {
 const DEFAULT_PUMP_INTERVAL_MS = 1_000;
 
 /** Recording is bookkeeping: a failure belongs on stderr, never in the session. */
-async function recordSafely(work: Promise<void>): Promise<void> {
+async function recordSafely<T>(work: Promise<T>): Promise<T | undefined> {
   try {
-    await work;
+    return await work;
   } catch (error) {
     process.stderr.write(`pi-pretty-task: iteration record failed: ${String(error)}\n`);
+    return undefined;
   }
 }
 
@@ -556,7 +557,11 @@ export function createExtension(
   // settle with the turn before it, and its own events open the next run.
   pi.on("agent_settled", async (event, ctx) => {
     await remember(ctx);
-    await recordSafely(iterations.settle(scopeOf(ctx), event.aborted));
+    // The turn's outcome reaches every loop that fired it (ticket #46), so a fire the
+    // provider gave up on is counted before the next wake can fire. One turn can be
+    // several loops' fire, which is why the settle reports one result per loop.
+    const turns = await recordSafely(iterations.settle(scopeOf(ctx), event.aborted));
+    await recordSafely(loops.completeTurns(scopeOf(ctx), turns ?? []));
     await wakes.settled();
   });
   pi.on("session_shutdown", () => {

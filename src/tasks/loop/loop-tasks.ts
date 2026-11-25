@@ -29,6 +29,7 @@ import type {
 } from "../base/task.js";
 import { FIRE_HISTORY_LIMIT } from "../base/task.js";
 import type { AnyTaskSession, OwnedTaskSession, TaskSessions } from "../base/task-sessions.js";
+import type { TurnOutcome } from "./iteration.js";
 import { readPromptText, removePromptText, writePromptText } from "./prompt-file.js";
 import type { Recurrence } from "./schedule.js";
 import {
@@ -102,6 +103,22 @@ export interface CompletedFire {
   readonly signalled: boolean;
   /** True when this signalled fire raised the latch, so the caller wakes exactly once. */
   readonly raised: boolean;
+}
+
+/**
+ * What one settled turn means for one loop's failure account (ticket #46). A turn
+ * can fire more than one loop — every loop that came due while the agent was busy
+ * is bound and delivered into the same turn — so a settle reports one of these per
+ * loop and the loop that owns each fire is the one that counts it.
+ */
+export interface IterationResult {
+  /** The loop that fired. */
+  readonly id: string;
+  /** The fire whose turn this is: the newest one the loop had bound. */
+  readonly fire: number;
+  readonly end: TurnOutcome;
+  /** What the provider said, when it gave up and said something. */
+  readonly error?: string;
 }
 
 export interface CreateLoopInput extends TaskScope {
@@ -833,6 +850,46 @@ export class LoopTasks {
     return undefined;
   }
 
+  /**
+   * Charge a settled turn to every loop that had a fire in it (ticket #46). One
+   * turn can be the fire of several loops: every loop that came due while the
+   * agent was busy is bound and delivered into the same turn, so the settle hands
+   * over one entry per loop and each loop moves its own schedule.
+   *
+   * A failed turn is a failed fire like a command's: it leaves its error and time
+   * on the record and backs the schedule off. A turn that finished is the healthy
+   * round that clears the streak. A turn the user stopped changes nothing — the
+   * person behind the loop is not a broken provider — and so does a turn nothing
+   * was observed about: no evidence must not read as a success.
+   *
+   * The closed iterations and the loops they are charged to are one record, so this
+   * writes the session once for the whole settle rather than once per half of it.
+   */
+  async completeTurns(scope: TaskScope, turns: readonly IterationResult[]): Promise<void> {
+    if (turns.length === 0) return;
+    const session = await this.sessions.session(scope);
+    const at = this.now();
+    for (const turn of turns) {
+      const loop = this.findLoop(session, turn.id);
+      if (loop?.kind !== "prompt-loop") continue;
+      if (turn.end === "aborted" || turn.end === "unobserved") continue;
+
+      if (turn.end === "failed") {
+        // A failure that said nothing clears what the fire before it said: the pair
+        // must name the same fire.
+        loop.lastError = turn.error;
+        loop.lastFailureAt = at;
+        this.noteFailure(loop, at);
+      } else {
+        loop.consecutiveFailures = 0;
+        loop.lastError = undefined;
+        loop.lastFailureAt = undefined;
+      }
+      loop.updatedAt = at;
+    }
+    await this.sessions.persist(session);
+  }
+
   private async pumpOnce(at: number): Promise<LoopFire[]> {
     const fires: LoopFire[] = [];
     const commandFires: CommandFire[] = [];
@@ -1022,7 +1079,7 @@ export class LoopTasks {
    * The next natural fire time is never pulled earlier: a long schedule keeps
    * its spacing and a short one gets the room the failure asked for.
    */
-  private noteFailure(loop: CmdLoopTask, at: number): void {
+  private noteFailure(loop: LoopBase, at: number): void {
     loop.consecutiveFailures = (loop.consecutiveFailures ?? 0) + 1;
     if (loop.status !== "running" || loop.nextFireAt === undefined) return;
     const base = Math.max(1, loop.nextFireAt - (loop.lastFireAt ?? loop.nextFireAt));

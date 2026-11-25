@@ -217,6 +217,14 @@ export interface PromptLoopTask extends LoopBase {
   iterations: Iteration[];
   /** Iterations the history cap dropped; non-zero means the loop's list is truncated. */
   droppedIterations?: number;
+  /**
+   * What the provider said when it last gave up on a fire's turn (ticket #46).
+   * `error` above is the schedule's own stop reason, so a turn that failed needs
+   * a field of its own; a turn that finished clears it.
+   */
+  lastError?: string;
+  /** Epoch ms of that failed turn, cleared with it. */
+  lastFailureAt?: number;
 }
 
 /**

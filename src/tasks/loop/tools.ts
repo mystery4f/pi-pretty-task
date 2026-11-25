@@ -350,6 +350,8 @@ function loopDetails(
       promptWarning: task.promptWarning,
       iterationCount: task.iterations.length,
       droppedIterations: task.droppedIterations,
+      lastError: task.lastError,
+      lastFailureAt: task.lastFailureAt,
       ...(options.iterations === true ? { iterations: task.iterations } : {}),
     };
   }

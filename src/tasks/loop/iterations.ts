@@ -15,8 +15,10 @@
  * - `tool_execution_end` pairs by tool call id across every iteration, so a late
  *   result still lands on the call that produced it.
  *
- * Every write is persisted with the loop record, because the record only exists
- * on disk: a reader sees an iteration only after it has been written out.
+ * Opening, binding and recording an iteration is written out at once, because the
+ * record only exists on disk: a reader sees an iteration only after it is written.
+ * Closing one is not written here — a settle closes iterations and their loops'
+ * schedules together, so the caller writes that one record once (ticket #46).
  *
  * @author mystery4f <40482524+mystery4f@users.noreply.github.com>
  */
@@ -30,8 +32,35 @@ import {
   ITERATION_CALL_LIMIT,
   ITERATION_HISTORY_LIMIT,
   type Iteration,
+  type TurnEnd,
+  type TurnOutcome,
 } from "./iteration.js";
-import type { LoopFire } from "./loop-tasks.js";
+import type { IterationResult, LoopFire } from "./loop-tasks.js";
+
+/** The turn in flight as its own message described it, before the settle. */
+interface TurnVerdict {
+  /** The session whose run produced the message; a settle of another run is not it. */
+  readonly directory: string;
+  readonly end: TurnEnd;
+  readonly error?: string;
+}
+
+/**
+ * What one assistant message says about its turn (ticket #46): an error stop is
+ * the provider giving up, and every other stop is a turn that ran.
+ *
+ * The spec names two signals for a fire the provider gave up on —
+ * `auto_retry_end` with `success: false`, and a final `stopReason === "error"` —
+ * and pi 1.5.2 makes them one: it emits the error message first and then the
+ * retry's end, but it does not forward `auto_retry_end` to extensions, so the
+ * final message's stop reason is the only observable and covers both cases.
+ */
+function turnVerdict(attempt: ProviderAttemptEvent): { end: TurnEnd; error?: string } {
+  if (attempt.stopReason !== "error") return { end: "healthy" };
+  return attempt.errorMessage === undefined
+    ? { end: "failed" }
+    : { end: "failed", error: attempt.errorMessage };
+}
 
 /** The start event's fields the recorder needs; pi passes the same ones. */
 export interface ToolCallStartEvent {
@@ -124,6 +153,13 @@ export class Iterations {
   private readonly now: () => number;
   private readonly callLimit: number;
   private readonly historyLimit: number;
+  /**
+   * The last word of the turn in flight, waiting for its settle (ticket #46).
+   * The assistant message is the only place a turn's outcome is visible, and
+   * `settle` is the only event that says the turn is over, so the two facts meet
+   * here rather than in the loop record.
+   */
+  private turn: TurnVerdict | undefined;
 
   constructor(options: IterationsOptions) {
     this.sessions = options.sessions;
@@ -242,6 +278,10 @@ export class Iterations {
   async recordAttempt(scope: TaskScope, attempt: ProviderAttemptEvent): Promise<void> {
     if (attempt.role !== "assistant") return;
     const session = await this.sessions.session(scope);
+    // The assistant message is the turn's own last word (ticket #46): an error
+    // stop is the provider giving up, any other stop is a turn that ran. A later
+    // assistant message replaces it, so what is held here is final.
+    this.turn = { directory: session.directory, ...turnVerdict(attempt) };
     const iteration = this.newestOpenIteration(session);
     if (iteration === undefined) return;
 
@@ -269,26 +309,46 @@ export class Iterations {
    * at that point cannot end any more: `aborted` when the run was aborted,
    * `interrupted` otherwise. Pending iterations stay pending: their wake has not
    * produced a turn yet, so this settle is not theirs.
+   *
+   * One turn can be several loops' fire — every loop that came due while the agent
+   * was busy is bound and delivered before the turn starts — so the caller gets one
+   * result per loop that had an iteration closed here, read from that loop's newest
+   * one. A loop with two iterations in the same turn is still one fire to charge.
    */
-  async settle(scope: TaskScope, aborted: boolean): Promise<void> {
+  async settle(scope: TaskScope, aborted: boolean): Promise<IterationResult[]> {
     const session = await this.sessions.session(scope);
+    const verdict = this.takeTurn(session.directory);
     const at = this.now();
-    let changed = false;
+    // A run that settled without a bound fire belongs to the user, and a stop by
+    // the user is not a failed fire (ticket #46). A run nothing was observed about
+    // says nothing either way: it is neither a failure nor the healthy round that
+    // clears one.
+    const end: TurnOutcome = aborted ? "aborted" : (verdict?.end ?? "unobserved");
+    const newest = new Map<string, { task: PromptLoopTask; iteration: Iteration }>();
     for (const task of session.tasks.values()) {
       if (task.kind !== "prompt-loop") continue;
       let closed = false;
       for (const iteration of task.iterations) {
         if (iteration.bound !== true || iteration.status !== "running") continue;
         closeIteration(iteration, at, aborted ? "aborted" : "completed");
+        const seen = newest.get(task.id);
+        if (seen === undefined || iteration.startedAt >= seen.iteration.startedAt) {
+          newest.set(task.id, { task, iteration });
+        }
         closed = true;
       }
       if (!closed) continue;
       // The turn the loop woke has settled, which is the loop's own change: its
       // row moves on that, not only on the fire that started the turn (ADR-0010).
       task.updatedAt = at;
-      changed = true;
     }
-    if (changed) await this.sessions.persist(session);
+    if (newest.size === 0) return [];
+    return [...newest.values()].map(({ task, iteration }) => ({
+      id: task.id,
+      fire: iteration.fire,
+      end,
+      ...(end === "failed" && verdict?.error !== undefined ? { error: verdict.error } : {}),
+    }));
   }
 
   /** Drop the oldest iterations until the history cap holds. */
@@ -317,6 +377,17 @@ export class Iterations {
       }
     }
     return newest;
+  }
+
+  /**
+   * Take the verdict waiting for this session's settle. A verdict from another
+   * session belongs to a turn that has not settled yet, so it stays where it is.
+   */
+  private takeTurn(directory: string): TurnVerdict | undefined {
+    const verdict = this.turn;
+    if (verdict === undefined || verdict.directory !== directory) return undefined;
+    this.turn = undefined;
+    return verdict;
   }
 
   private resolve(session: TaskSession, taskId: string, fire: number): Iteration | undefined {

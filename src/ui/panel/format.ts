@@ -202,8 +202,9 @@ export function firesText(task: LoopBase): string {
   return `${String(task.fires)} / ${String(task.maxFires)}`;
 }
 /**
- * Failed fires in a row on a command loop. Only a fire that ran can fail, so an
- * prompt loop never carries a streak and its rows never claim one (ADR-0017).
+ * Failed fires in a row on a command loop. A prompt loop records the same count
+ * when the provider gives up on its fire (ticket #46), but its rows do not claim
+ * that yet, so they read zero until ticket #50 draws them (ADR-0017).
  */
 export function failureStreak(task: Task): number {
   return task.kind === "cmd-loop" ? (task.consecutiveFailures ?? 0) : 0;

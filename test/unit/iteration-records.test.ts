@@ -44,6 +44,13 @@ interface LoopDetails {
   iterations?: IterationDetails[];
   iterationCount?: number;
   droppedIterations?: number;
+  /** The failure streak a fire's turn adds to or clears (ticket #46). */
+  consecutiveFailures?: number;
+  /** What the provider said when it last gave up on a fire's turn. */
+  lastError?: string;
+  lastFailureAt?: number;
+  nextFireAt?: number;
+  lastFireAt?: number;
 }
 
 const cleanup: Array<() => Promise<void>> = [];
@@ -122,6 +129,11 @@ async function endCall(
 async function iterationsOf(harness: Harness, id: string): Promise<IterationDetails[]> {
   const result = await harness.call("pretty_task_loop_list", { id });
   return detailsOf<LoopDetails>(result).iterations ?? [];
+}
+
+/** One loop's own facts — streak, error, schedule — as the tools report them. */
+async function loopOf(harness: Harness, id: string): Promise<LoopDetails> {
+  return detailsOf<LoopDetails>(await harness.call("pretty_task_loop_list", { id }));
 }
 
 describe("iteration recording", () => {
@@ -449,6 +461,70 @@ describe("the provider retry of a turn", () => {
   });
 });
 
+/**
+ * The loop record of a turn that gave up (ticket #46). A fire's turn can end
+ * because the provider refused it rather than because it did its work, and a
+ * record that says nothing about that reads exactly like a healthy turn.
+ */
+describe("a fire's turn that gave up", () => {
+  it("clears the streak and the error on the next turn that finished", async () => {
+    const { task, created } = await openTurn();
+    await endAttempt(task.harness, { stopReason: "error", errorMessage: "fetch failed" });
+    await task.harness.emit({ type: "agent_settled", aborted: false });
+    const failed = await loopOf(task.harness, created.id);
+    expect(failed.consecutiveFailures).toBe(1);
+    expect(failed.nextFireAt).toBeDefined();
+
+    // The backed-off fire: due where the failure pushed it, and this turn lands.
+    task.advance((failed.nextFireAt ?? task.now) - task.now);
+    await task.harness.pump(task.now);
+    const firedAt = task.now;
+    await endAttempt(task.harness);
+    await task.harness.emit({ type: "agent_settled", aborted: false });
+
+    const recovered = await loopOf(task.harness, created.id);
+    expect(recovered.consecutiveFailures).toBe(0);
+    expect(recovered.lastError).toBeUndefined();
+    expect(recovered.lastFailureAt).toBeUndefined();
+    // A healthy fire ends the backoff: the next fire is one schedule interval away.
+    expect((recovered.nextFireAt ?? 0) - firedAt).toBe(10_000);
+  });
+
+  it("does not count a turn the user stopped, nor clear the streak it had", async () => {
+    const { task, created } = await openTurn();
+    task.advance(1_000);
+    await endAttempt(task.harness, { stopReason: "error", errorMessage: "fetch failed" });
+    await task.harness.emit({ type: "agent_settled", aborted: false });
+    const failed = await loopOf(task.harness, created.id);
+    expect(failed.consecutiveFailures).toBe(1);
+
+    // The next fire is aborted by the user mid-turn: the provider is not at fault,
+    // so the streak and the error of the failed fire before it stay as they were.
+    task.advance((failed.nextFireAt ?? task.now) - task.now);
+    await task.harness.pump(task.now);
+    await task.harness.emit({ type: "agent_settled", aborted: true });
+
+    const after = await loopOf(task.harness, created.id);
+    expect(after.consecutiveFailures).toBe(1);
+    expect(after.lastError).toBe("fetch failed");
+    expect(after.lastFailureAt).toBe(failed.lastFailureAt);
+  });
+
+  it("counts a turn that made no tool calls and finished cleanly as healthy", async () => {
+    const { task, created } = await openTurn();
+    await endAttempt(task.harness, { stopReason: "error", errorMessage: "fetch failed" });
+    await task.harness.emit({ type: "agent_settled", aborted: false });
+
+    task.advance(20_000);
+    await task.harness.pump(task.now);
+    await endAttempt(task.harness);
+    await task.harness.emit({ type: "agent_settled", aborted: false });
+
+    const quiet = await loopOf(task.harness, created.id);
+    expect(quiet.consecutiveFailures).toBe(0);
+    expect(quiet.lastError).toBeUndefined();
+  });
+});
 describe("the retry budget", () => {
   it("reads pi's own count and falls back to pi's default when the key is absent", () => {
     expect(retryBudget({ retry: { maxRetries: 5 } })).toBe(5);
