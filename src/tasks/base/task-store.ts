@@ -16,6 +16,7 @@ import type {
   IterationCallStatus,
   IterationRetry,
   IterationStatus,
+  TurnOutcome,
 } from "../loop/iteration.js";
 import { writeAtomic } from "./atomic.js";
 import { previousTaskRecordPath, taskRecordPath } from "./runtime-state.js";
@@ -260,6 +261,8 @@ const ITERATION_STATUSES: readonly IterationStatus[] = [
   "interrupted",
 ];
 
+const TURN_OUTCOMES: readonly TurnOutcome[] = ["failed", "healthy", "aborted", "unobserved"];
+
 const ITERATION_CALL_STATUSES: readonly IterationCallStatus[] = [
   "running",
   "completed",
@@ -316,8 +319,19 @@ function parseIteration(value: unknown): Iteration | undefined {
   // read: a record the process stopped writing still has a valid turn record.
   const retry = value.retry === undefined ? undefined : parseIterationRetry(value.retry);
   if (value.retry !== undefined && retry === undefined) return undefined;
-  // SAFETY: the iteration's own fields, its retry and every call were parsed above.
-  return { ...value, calls, ...(retry === undefined ? {} : { retry }) } as unknown as Iteration;
+  // The end is written when the turn closes, so an absent one reads as a record
+  // from before the field existed; a word outside the vocabulary is corruption,
+  // and the whole document is refused (ticket #53).
+  const end = value.end === undefined ? undefined : parseTurnOutcome(value.end);
+  if (value.end !== undefined && end === undefined) return undefined;
+  // SAFETY: the iteration's own fields, its retry and end and every call were
+  // parsed above.
+  return {
+    ...value,
+    calls,
+    ...(retry === undefined ? {} : { retry }),
+    ...(end === undefined ? {} : { end }),
+  } as unknown as Iteration;
 }
 
 function parseIterationCall(value: unknown): IterationCall | undefined {
@@ -350,6 +364,15 @@ function parseIterationRetry(value: unknown): IterationRetry | undefined {
   if (value.status !== undefined && typeof value.status !== "string") return undefined;
   // SAFETY: both counts and the optional status were checked above.
   return value as unknown as IterationRetry;
+}
+
+/**
+ * The end a settle recorded on the turn (ticket #53). The field is written once,
+ * when the turn closes, so an absent one is an older generation; a word outside
+ * the vocabulary is corruption, because no writer could produce it.
+ */
+function parseTurnOutcome(value: unknown): TurnOutcome | undefined {
+  return TURN_OUTCOMES.find((outcome) => outcome === value);
 }
 
 /**

@@ -133,7 +133,10 @@ describe("a loop fire the provider gave up on", () => {
       lastError: "529 overloaded_error: the provider is busy",
       lastFailureAt: task.now,
     });
-    expect(stored.iterations?.[0]?.status).toBe("completed");
+    // The turn closed, so the lifecycle word stays `completed`; the end is what
+    // says the provider gave up, and a page that shows this iteration has to read
+    // `failed` or it contradicts the loop's own `1 failed` row (ticket #53).
+    expect(stored.iterations?.[0]).toMatchObject({ status: "completed", end: "failed" });
   });
 
   it("charges both loops when one turn is the fire of both", async () => {
