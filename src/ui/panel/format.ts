@@ -124,7 +124,9 @@ export function rightText(
   // failure streak sits next to the count, and the wait it pushed out is labelled
   // a backoff so the two read together (ADR-0017).
   const streak = failureStreak(task);
-  const failed = streak === 0 ? "" : ` · ${String(streak)} failed`;
+  // The streak without its separator, so it can stand alone once the count is gone.
+  const streakText = streak === 0 ? "" : `${String(streak)} failed`;
+  const failed = streakText === "" ? "" : ` · ${streakText}`;
   // A turn pi is retrying is the loudest thing the row can say about right now: a
   // fire that spent three attempts on a busy provider is not an ordinary slow one
   // (ticket #47). Only prompt loops wake a model, so only they can be retrying.
@@ -138,17 +140,20 @@ export function rightText(
       : ` · next ${formatDuration(row.untilNextFireMs)}`;
   // The state the ticket asks the row to carry is the streak, the retry and the
   // backoff, so the age gives way first, then the word marking the wait a backoff,
-  // then the wait itself. The count is the last number to go, and a row too narrow
-  // even for it drops the numbers instead of crossing the border (ADR-0015, ticket
-  // #34).
+  // then the wait itself, and then the fire count. The streak outlives the count: a
+  // row that kept `4 fires` and dropped `2 failed` would make a failing loop read as
+  // a working one at the very width a reader is skimming, so it is the last thing to
+  // go — and a row too narrow even for it drops the numbers instead of crossing the
+  // border (ADR-0015, spec story 10, tickets #34 and #50).
   const fires = `${firesText(task)} fires`;
+  const keep = streakText === "" ? fires : streakText;
   const candidates = [
     `${state}${next ?? ""}${backingOff}${age}`,
     `${state}${next ?? ""}${backingOff}`,
     ...(next === undefined ? [] : [`${state}${next}`, state]),
     `${fires}${failed}${retrying}`,
-    `${fires}${failed}`,
-    fires,
+    `${keep}${retrying}`,
+    keep,
   ];
   return candidates.find((candidate) => visibleWidth(candidate) <= room) ?? "";
 }
