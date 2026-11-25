@@ -101,3 +101,6 @@
 ## [2026-11-24T16:57:20.846Z] retro
 - slug: "npm-trusted-publishing-oidc-not-token", title: "npm 发布改用 trusted publishing（OIDC），放弃绕 2FA 的长期 token", category: "ci"
 
+## [2026-11-25T12:35:33.893Z] observe
+- slug: "obs-2026-11-25-pi-auto-retry", title: "pi 扩展拿不到 auto_retry 事件，重试进度只能派生", relevance: "high"
+

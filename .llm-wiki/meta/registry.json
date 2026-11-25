@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "last_updated": "2026-11-24T16:57:20.890Z",
+  "last_updated": "2026-11-25T12:35:33.925Z",
   "pages": {
     "sources/await-state-not-bytes-in-process-tests": {
       "type": "source",
@@ -269,6 +269,23 @@
       "source_context": "处理 pi-pretty-task 的 pi-lens（LSP）检查告警",
       "created": "2026-11-24",
       "updated": "2026-11-24"
+    },
+    "sources/obs-2026-11-25-pi-auto-retry": {
+      "type": "source",
+      "title": "Observation: pi 扩展拿不到 auto_retry 事件，重试进度只能派生",
+      "tags": [
+        "pi-extension",
+        "api-gap",
+        "retry",
+        "loop"
+      ],
+      "status": "observation",
+      "slug": "obs-2026-11-25-pi-auto-retry",
+      "relevance": "high",
+      "observed_at": "2026-11-25T12:35:33.885Z",
+      "source_context": "pi-pretty-task 实现 ticket #47（重试可见）时子代理发现的 API 缺口",
+      "created": "2026-11-25",
+      "updated": "2026-11-25"
     },
     "sources/pi-extension-stale-instance-unhandled-rejection": {
       "type": "source",
