@@ -5,7 +5,7 @@
  * @author mystery4f <40482524+mystery4f@users.noreply.github.com>
  */
 
-import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -917,7 +917,7 @@ describe("LoopTasks", () => {
     });
 
     await expect(task.loops.update({ ...task.scope, id: created.task.id })).rejects.toThrow(
-      /Give an action or a schedule/,
+      /Give an action, a schedule or a prompt/,
     );
   });
 
@@ -1162,5 +1162,131 @@ describe("prompt file", () => {
     expect(preview.lines).toEqual([]);
     expect(preview.changedAt).toBe((await stat(path)).mtimeMs);
     expect(preview.problem).toBe("is empty");
+  });
+
+  it("replaces the text through an update, writing the derived path and not the seed", async () => {
+    const task = await setup();
+    const created = await createPromptLoop(task);
+    const path = promptPath(task, created.task.id);
+    const before = await promptLoopOf(task, created.task.id);
+
+    const updated = await task.loops.update({
+      ...task.scope,
+      id: created.task.id,
+      prompt: "review only the parser module",
+    });
+
+    expect(updated?.outcome).toBe("prompt-updated");
+    expect(updated?.promptWrite).toEqual({ outcome: "written" });
+    expect(await readFile(path, "utf8")).toBe("review only the parser module");
+    // The address is derived from the id, so an update cannot write anywhere else.
+    const directory = sessionTaskDirectory(task.scope.cwd, task.scope.sessionId);
+    expect((await readdir(directory)).filter((name) => name.endsWith(".prompt.md"))).toEqual([
+      `${created.task.id}.prompt.md`,
+    ]);
+    // The record keeps the creation text as its seed; only the file moved.
+    expect((await promptLoopOf(task, created.task.id)).prompt).toBe("review the diff");
+    expect(before.prompt).toBe("review the diff");
+
+    // The replacement is what the next fire sends, and it cost no fire and no iteration.
+    task.advance(10_000);
+    const fired = await task.loops.pump(task.now);
+    expect(fired[0]?.prompt).toBe("review only the parser module");
+    const after = await promptLoopOf(task, created.task.id);
+    expect(after.fires).toBe(1);
+    expect(after.iterations).toEqual([]);
+  });
+
+  it("keeps the old text and reports the failure when the write cannot land", async () => {
+    const task = await setup();
+    const created = await createPromptLoop(task);
+    const path = promptPath(task, created.task.id);
+    // A directory where the atomic write's temp file belongs: the write fails and
+    // the target keeps exactly the text it had.
+    await mkdir(`${path}.tmp`);
+
+    const updated = await task.loops.update({
+      ...task.scope,
+      id: created.task.id,
+      prompt: "review only the parser module",
+    });
+
+    expect(updated?.outcome).toBe("prompt-write-failed");
+    expect(updated?.promptWrite).toMatchObject({ outcome: "failed" });
+    expect(await readFile(path, "utf8")).toBe("review the diff");
+    expect((await promptLoopOf(task, created.task.id)).prompt).toBe("review the diff");
+  });
+
+  it("refuses a prompt on a command loop, and an empty prompt on a prompt loop", async () => {
+    const task = await setup();
+    const prompt = await createPromptLoop(task);
+    const command = await task.loops.create({
+      ...task.scope,
+      schedule: "1h",
+      command: "echo hi",
+    });
+
+    await expect(
+      task.loops.update({ ...task.scope, id: command.task.id, prompt: "review the diff" }),
+    ).rejects.toThrow(/runs a command, so it has no prompt file to rewrite/i);
+    await expect(
+      task.loops.update({ ...task.scope, id: prompt.task.id, prompt: "   " }),
+    ).rejects.toThrow(/empty/i);
+    expect(await readFile(promptPath(task, prompt.task.id), "utf8")).toBe("review the diff");
+  });
+
+  it("takes a new prompt together with a retune in one call", async () => {
+    const task = await setup();
+    const created = await createPromptLoop(task);
+
+    const updated = await task.loops.update({
+      ...task.scope,
+      id: created.task.id,
+      schedule: "1h",
+      prompt: "review only the parser module",
+    });
+
+    expect(updated?.outcome).toBe("rescheduled");
+    expect(updated?.promptWrite).toEqual({ outcome: "written" });
+    expect(updated?.view.task.nextFireAt).toBe(task.now + 3_600_000);
+    expect(await readFile(promptPath(task, created.task.id), "utf8")).toBe(
+      "review only the parser module",
+    );
+  });
+
+  it("leaves the text alone when the same call carries an unusable schedule", async () => {
+    const task = await setup();
+    const created = await createPromptLoop(task);
+
+    await expect(
+      task.loops.update({
+        ...task.scope,
+        id: created.task.id,
+        schedule: "every other tuesday",
+        prompt: "review only the parser module",
+      }),
+    ).rejects.toThrow(/Invalid schedule/);
+
+    // Nothing half-applied: the refusal came before the write, not after it.
+    expect(await readFile(promptPath(task, created.task.id), "utf8")).toBe("review the diff");
+    expect((await promptLoopOf(task, created.task.id)).schedule).toBe("10s");
+  });
+
+  it("clears a warning about a rebuilt prompt once the text is replaced", async () => {
+    const task = await setup();
+    const created = await createPromptLoop(task);
+    await rm(promptPath(task, created.task.id));
+    task.advance(10_000);
+    await task.loops.pump(task.now);
+    expect((await promptLoopOf(task, created.task.id)).promptWarning).toContain("is missing");
+
+    await task.loops.update({
+      ...task.scope,
+      id: created.task.id,
+      prompt: "review only the parser module",
+    });
+
+    // The file is healthy now, so the old warning would be a lie the panel repeats.
+    expect((await promptLoopOf(task, created.task.id)).promptWarning).toBeUndefined();
   });
 });

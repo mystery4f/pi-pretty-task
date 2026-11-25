@@ -18,7 +18,12 @@ import { Type } from "typebox";
 import { fireLabel, formatBytes, formatDuration } from "../base/format.js";
 import type { TaskScope } from "../base/runtime-state.js";
 import type { CmdLoopTask, FireRecord, PromptLoopTask } from "../base/task.js";
-import { LoopInputError, type LoopTasks, type LoopTaskView } from "./loop-tasks.js";
+import {
+  LoopInputError,
+  type LoopTasks,
+  type LoopTaskView,
+  type LoopUpdateResult,
+} from "./loop-tasks.js";
 
 const CreateParameters = Type.Object({
   schedule: Type.String({
@@ -100,7 +105,7 @@ const UpdateParameters = Type.Object({
       ],
       {
         description:
-          "pause stops fires but keeps the record; resume re-arms from now; complete ends the loop; rearm recomputes the next fire from now on the unchanged schedule (the way back onto a slot after a backoff or a resume pushed it late); clear-signal drops an outstanding signal without waiting for a healthy round, and is only meaningful on a command loop that declared notifyExitCodes. Omit it to change only the schedule.",
+          "pause stops fires but keeps the record; resume re-arms from now; complete ends the loop; rearm recomputes the next fire from now on the unchanged schedule (the way back onto a slot after a backoff or a resume pushed it late); clear-signal drops an outstanding signal without waiting for a healthy round, and is only meaningful on a command loop that declared notifyExitCodes. Omit it to change only the schedule or the prompt.",
       },
     ),
   ),
@@ -108,6 +113,12 @@ const UpdateParameters = Type.Object({
     Type.String({
       description:
         "New schedule for the same loop, in the forms pretty_task_loop_create accepts. The loop keeps its id, fire count and every recorded iteration; a running loop is re-armed from this update, never from the slot the old schedule had picked. An invalid expression is refused and the old schedule stays in force.",
+    }),
+  ),
+  prompt: Type.Optional(
+    Type.String({
+      description:
+        "New text for a prompt loop to send on every fire, replacing what its prompt file holds now. This is how to refine the wording: the loop keeps its id, fire count and every recorded iteration, and the prompt given at create time stays the seed it falls back to. Only for a prompt loop (a command loop runs no prompt), and the text cannot be blank. If the file cannot be written, the old text stays in place and the reply says so.",
     }),
   ),
 });
@@ -406,7 +417,39 @@ function updateHeadline(id: string, result: Awaited<ReturnType<LoopTasks["update
       return `Loop ${id} had no signal to clear.`;
     case "failed":
       return `Loop ${id} could not be resumed: ${result.view.task.error ?? "invalid schedule"}.`;
+    case "prompt-updated": {
+      // What the loop "now sends" depends on whether it can still fire: a finished
+      // loop never reads the file again, so promising a fire would describe an event
+      // that cannot happen (the same reply would say "its next fire is none").
+      const replaced = `Rewrote the prompt of loop ${id} (${name})`;
+      const status = result.view.task.status;
+      if (status === "running") {
+        return `${replaced}; its next fire is ${nextFireText(result.view)}.`;
+      }
+      if (status === "paused") return `${replaced}; it stays paused until resumed.`;
+      return `${replaced}; the loop is ${status} and will not fire again, so only its prompt file changed.`;
+    }
+    case "prompt-write-failed":
+      return `Could not replace the prompt of loop ${id} (${name}); its prompt file still holds the previous text.`;
   }
+}
+
+/**
+ * What an update did with the text it was given, in the words the caller needs to know
+ * whether every fire will now read the new wording. Absent when the call carried no
+ * prompt, because then nothing happened to the file worth a line.
+ */
+function describePromptWrite(result: LoopUpdateResult): string | undefined {
+  const write = result.promptWrite;
+  if (write === undefined) return undefined;
+  const path = result.view.promptFile ?? "the prompt file";
+  if (write.outcome === "failed") {
+    return `prompt text: not replaced (${write.error}); ${path} still holds the previous text.`;
+  }
+  return [
+    `prompt text: replaced — ${path} now holds the new wording, and every fire reads it from there.`,
+    "The prompt given at create time stays the record's seed, so it is still what restores the file if it is ever lost.",
+  ].join("\n");
 }
 
 /** The loop-task tools, bound to one store. */
@@ -503,9 +546,9 @@ export function loopTaskTools(loops: LoopTasks): ToolDefinition[] {
 
   const update: ToolDefinition<typeof UpdateParameters> = {
     name: "pretty_task_loop_update",
-    label: "Pause, resume, complete or retune a loop",
+    label: "Pause, resume, complete, retune or reword a loop",
     description:
-      "Change a loop without deleting its history: pause stops fires, resume re-arms from now, complete ends it, and schedule retunes when it fires. A retune keeps the id, the fire count and every recorded iteration; a running loop's next fire is computed from this update rather than from the slot the old schedule had already picked, a paused loop keeps the new schedule and arms onto it when resumed, and an invalid expression is refused with the old schedule still in force. action=rearm does the same arithmetic without changing the expression, which is the way back onto a slot after a failure or a resume pushed the next fire late; action=clear-signal drops an outstanding signal on a command loop that declared notifyExitCodes, so a condition you have already dealt with stops muting the next report. Both keep the id, the fire count and every iteration. Pausing or completing also cancels a wake that is still waiting for the agent to be idle, so the loop will not wake the model after you stop it.",
+      "Change a loop without deleting its history: pause stops fires, resume re-arms from now, complete ends it, and schedule retunes when it fires. A retune keeps the id, the fire count and every recorded iteration; a running loop's next fire is computed from this update rather than from the slot the old schedule had already picked, a paused loop keeps the new schedule and arms onto it when resumed, and an invalid expression is refused with the old schedule still in force. action=rearm does the same arithmetic without changing the expression, which is the way back onto a slot after a failure or a resume pushed the next fire late; action=clear-signal drops an outstanding signal on a command loop that declared notifyExitCodes, so a condition you have already dealt with stops muting the next report. Both keep the id, the fire count and every iteration. Pausing or completing also cancels a wake that is still waiting for the agent to be idle, so the loop will not wake the model after you stop it. prompt replaces the text a prompt loop sends on every fire, which is the way to refine its wording without deleting the loop: the id, the fire count and every recorded iteration survive, and the text given at create time stays the seed the file falls back to. A prompt only fits a prompt loop; if its file cannot be written the old text stays in place and the reply says so.",
     parameters: UpdateParameters,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const id = params.id.trim();
@@ -515,27 +558,40 @@ export function loopTaskTools(loops: LoopTasks): ToolDefinition[] {
         );
       }
 
-      // A retune and a transition may arrive together; the store applies the
-      // schedule first, so `resume` with a new schedule lands on the new interval.
+      // A retune, a transition and a new prompt may arrive together, and the store
+      // applies them in one fixed order: the schedule is retimed first, then the
+      // prompt file is written, then the action is applied, so `resume` with a new
+      // schedule already lands on the new interval.
       const input = {
         ...scopeOf(ctx),
         id,
         ...(params.action === undefined ? {} : { action: params.action }),
         ...(params.schedule === undefined ? {} : { schedule: params.schedule }),
+        ...(params.prompt === undefined ? {} : { prompt: params.prompt }),
       };
       try {
         const result = await loops.update(input);
         if (result === undefined) {
           return text(`No loop with id ${id} in this session.`);
         }
+        const promptLine = describePromptWrite(result);
         return {
           content: [
             {
               type: "text",
-              text: [updateHeadline(id, result), "", describeLoop(result.view)].join("\n"),
+              text: [
+                updateHeadline(id, result),
+                "",
+                describeLoop(result.view),
+                ...(promptLine === undefined ? [] : ["", promptLine]),
+              ].join("\n"),
             },
           ],
-          details: { ...loopDetails(result.view), outcome: result.outcome },
+          details: {
+            ...loopDetails(result.view),
+            outcome: result.outcome,
+            ...(result.promptWrite === undefined ? {} : { promptWrite: result.promptWrite }),
+          },
         };
       } catch (error) {
         if (error instanceof LoopInputError) return inputError(error);

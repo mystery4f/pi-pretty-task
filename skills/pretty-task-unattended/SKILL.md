@@ -74,13 +74,16 @@ Never claim progress without updating .pi/progress.md in the same turn.
 Two properties make this work: the tick and the claim are one action, and the
 close is a tool call rather than a sentence the model may forget to say.
 
-The prompt is not a tool argument you can revise. Each prompt loop keeps it in a
-file whose path the plugin derives from the loop id; the create, list and update
-calls print that address, and `loopDetails.promptFile` carries it too. Every fire
-reads the file, so editing it in place changes what the loop says on its next
-fire, and the record keeps the text the loop was created with as the seed a
-missing file is rebuilt from. Changing the prompt through a tool still means
-recreating the loop (and losing its iteration history).
+The prompt is not a create-only argument. Each prompt loop keeps it in a file
+whose path the plugin derives from the loop id; the create, list and update calls
+print that address, and `loopDetails.promptFile` carries it too. Every fire reads
+the file, so an edit in place changes what the loop says on its next fire. The
+tool route is `pretty_task_loop_update id=<loopId> prompt="<new text>"`: it
+rewrites the same file atomically, keeps the id, the fire count and every recorded
+iteration, and leaves the text the loop was created with alone — that text stays
+the seed a missing file is rebuilt from. A write that cannot land keeps the old
+text and says so in the reply, so a revise call never costs the loop. Never delete
+and recreate a loop to change its wording: that is how its history is lost.
 
 ## Morning after
 
@@ -101,5 +104,5 @@ recreating the loop (and losing its iteration history).
 - **A loop as a retry engine.** Fires are full model calls; a loop whose only job
   is to knock again burns tokens and hides the real provider error.
 - **Handing the model a path.** The prompt file's location is derived from the
-  loop id (ADR-0024); there is no path parameter, and a copy written elsewhere is
-  inert.
+  loop id (ADR-0024); there is no path parameter — `prompt` carries the text, never
+  a location — and a copy written elsewhere is inert.

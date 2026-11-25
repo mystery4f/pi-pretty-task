@@ -152,16 +152,32 @@ export interface CreateLoopInput extends TaskScope {
 }
 
 /**
- * What one `pretty_task_loop_update` call asks for: a transition, a retune, or both. The
- * retune is applied first, so resuming onto a new schedule is one call.
+ * What one `pretty_task_loop_update` call asks for: a transition, a retune, a new
+ * prompt, or any of them together. The retune is applied first, so resuming onto a
+ * new schedule is one call.
  */
 export interface UpdateLoopInput extends TaskScope {
   readonly id: string;
-  /** Transition to apply; omit it to change only the schedule. */
+  /** Transition to apply; omit it to change only the schedule or the prompt. */
   readonly action?: LoopUpdateAction;
   /** New schedule expression; a running loop re-arms from this moment. */
   readonly schedule?: string;
+  /**
+   * New text for the prompt file every fire reads, replacing what is in it now.
+   * The record keeps the creation prompt as its seed (ADR-0024), so refining the
+   * wording costs neither the fire count nor a recorded iteration.
+   */
+  readonly prompt?: string;
 }
+
+/**
+ * What became of a prompt an update was asked to write. A failure is a fact the
+ * caller has to see, not an exception: the file keeps the text it had, and the
+ * schedule or transition that travelled with it still applies.
+ */
+export type PromptWriteResult =
+  | { readonly outcome: "written" }
+  | { readonly outcome: "failed"; readonly error: string };
 
 /** A loop as the tools and the panel read it. */
 export interface LoopTaskView {
@@ -202,11 +218,17 @@ export type LoopUpdateOutcome =
   /** The outstanding signal was dropped without waiting for a healthy round. */
   | "signal-cleared"
   /** A clear-signal request on a loop that was not reporting anything. */
-  | "no-signal";
+  | "no-signal"
+  /** The prompt text was replaced; nothing about the timing or the status changed. */
+  | "prompt-updated"
+  /** The prompt text could not be written; the file still holds the previous text. */
+  | "prompt-write-failed";
 
 export interface LoopUpdateResult {
   readonly view: LoopTaskView;
   readonly outcome: LoopUpdateOutcome;
+  /** What became of an update that carried a prompt; absent when it did not. */
+  readonly promptWrite?: PromptWriteResult;
 }
 
 /** A loop input the user can correct; the message is meant to be shown as-is. */
@@ -228,6 +250,29 @@ function invalidScheduleError(expression: string, problem: ScheduleProblem): Loo
       ? "six fields were given: a cron expression here has five (minute, hour, day of month, month, day of week) and no seconds column — for second-level timing use the interval shorthand such as 30s, 10m or 2h; for a calendar schedule drop the seconds field, for example 0 9 * * 1-5."
       : "use the interval shorthand such as 30s, 10m or 2h, or a five-field cron expression such as 0 9 * * 1-5 (every workday at 09:00).";
   return new LoopInputError(`Invalid schedule "${expression.trim()}": ${remedy}`);
+}
+
+/**
+ * The text an update will write, or the refusal that leaves the file as it is.
+ *
+ * Only a prompt loop has a prompt file to replace. Blank text is refused rather
+ * than written: a file of nothing but whitespace reads as unreadable, so every
+ * fire would quietly fall back to the creation prompt (ADR-0024) — the user would
+ * think the wording took while the old text kept being sent.
+ */
+function replaceablePrompt(task: LoopTask, prompt: string): string {
+  if (task.kind !== "prompt-loop") {
+    throw new LoopInputError(
+      `Loop "${task.id}" runs a command, so it has no prompt file to rewrite: only a prompt loop keeps the text it sends on disk.`,
+    );
+  }
+  const text = prompt.trim();
+  if (text.length === 0) {
+    throw new LoopInputError(
+      "Invalid prompt: the text is empty. A prompt file that holds only whitespace counts as unreadable, so every fire would fall back to the loop's creation prompt; give the wording to send, or omit the prompt to keep the text the file holds now.",
+    );
+  }
+  return text;
 }
 
 /** The session limit from the product scope. Finished loops do not count. */
@@ -516,18 +561,30 @@ export class LoopTasks {
   }
 
   /**
-   * Change one loop: a pause/resume/complete transition, a retune, or both in one
-   * call. A retune re-arms a running loop from `now` — never from the slot the old
-   * schedule had already picked — and only stores the expression on a paused one,
-   * which arms onto it when resumed. Nothing is rebuilt, so the id, the fire count
-   * and every recorded iteration survive. An unusable expression is refused before
-   * the record changes, on the same message `pretty_task_loop_create` gives (ADR-0006).
+   * Change one loop: a pause/resume/complete transition, a retune, a new prompt, or
+   * any of them in one call. A retune re-arms a running loop from `now` — never from
+   * the slot the old schedule had already picked — and only stores the expression on
+   * a paused one, which arms onto it when resumed. A new prompt rewrites the file
+   * every fire reads and leaves the recorded seed alone, so the wording can be
+   * refined without rebuilding the loop: the id, the fire count and every recorded
+   * iteration survive. Nothing is rebuilt and nothing is thrown for a write that
+   * fails — the file keeps its text and the result says so. An unusable expression
+   * is refused before the record changes, on the same message
+   * `pretty_task_loop_create` gives (ADR-0006).
    */
   async update(input: UpdateLoopInput): Promise<LoopUpdateResult | undefined> {
     this.ownScope(input);
     const session = await this.sessions.session(input);
     const task = this.findLoop(session, input.id);
     if (task === undefined) return undefined;
+
+    // The prompt goes to the one file the create path wrote, addressed by the id the
+    // caller already holds (ADR-0024). A text that cannot be written there is refused
+    // before anything else happens; the write itself waits for the schedule to be
+    // accepted, so a call that asked for both does not half-apply when the expression
+    // is unusable.
+    const replacement =
+      input.prompt === undefined ? undefined : replaceablePrompt(task, input.prompt);
 
     const now = this.now();
     let outcome: LoopUpdateOutcome | undefined;
@@ -561,6 +618,13 @@ export class LoopTasks {
         outcome = "already-completed";
       }
     }
+
+    // A write that fails is reported, not thrown: the file keeps the text it had, and
+    // the retune or transition this call also carried still applies.
+    const promptWrite =
+      replacement === undefined
+        ? undefined
+        : await this.replacePromptText(session.directory, task.id, replacement);
 
     // pi-lens-ignore: switch-without-default -- every action has its case and `undefined` is one; a default would have nothing to do
     switch (input.action) {
@@ -680,16 +744,29 @@ export class LoopTasks {
         changed = true;
         break;
     }
+    if (outcome === undefined && promptWrite !== undefined) {
+      // A prompt is a change of its own, so a call that carried only one is not the
+      // "neither action nor schedule" mistake. A write that failed still counts as
+      // the call's business: the caller has to be told the text did not land.
+      outcome = promptWrite.outcome === "written" ? "prompt-updated" : "prompt-write-failed";
+    }
 
     if (outcome === undefined) {
       throw new LoopInputError(
-        "Give an action or a schedule: action pauses, resumes or completes the loop, while schedule retunes when it fires.",
+        "Give an action, a schedule or a prompt: action pauses, resumes or completes the loop, schedule retunes when it fires, and prompt replaces the text every fire reads.",
       );
     }
 
+    if (promptWrite?.outcome === "written" && task.kind === "prompt-loop") {
+      // The file holds readable text now, so a warning left by a fire that had to
+      // fall back to the creation prompt is no longer true (ADR-0024).
+      task.promptWarning = undefined;
+      changed = true;
+    }
+
     if (changed) {
-      // Pause, resume, complete and retune are the user-visible changes of a loop,
-      // so each one moves the record up in the panel (ADR-0010).
+      // Pause, resume, complete, retune and a rewritten prompt are the user-visible
+      // changes of a loop, so each one moves the record up in the panel (ADR-0010).
       task.updatedAt = now;
       await this.sessions.persist(session);
     }
@@ -699,7 +776,11 @@ export class LoopTasks {
     // on its own never stops a loop, so it never drops a wake.
     const stopped = input.action !== undefined && changed && task.status !== "running";
     if (stopped) await this.onCancel?.(task.id);
-    return { view: this.view(task, session.directory), outcome };
+    return {
+      view: this.view(task, session.directory),
+      outcome,
+      ...(promptWrite === undefined ? {} : { promptWrite }),
+    };
   }
 
   /**
@@ -1129,6 +1210,23 @@ export class LoopTasks {
     return task?.kind === "cmd-loop" ? task : undefined;
   }
 
+  /**
+   * Write an update's new prompt text through the same helper the create path uses,
+   * and report a failure instead of throwing: the file keeps the text it had, which
+   * is what the caller needs to be able to count on (ADR-0024).
+   */
+  private async replacePromptText(
+    directory: string,
+    loopId: string,
+    text: string,
+  ): Promise<PromptWriteResult> {
+    try {
+      await writePromptText(directory, loopId, text);
+      return { outcome: "written" };
+    } catch (error) {
+      return { outcome: "failed", error: messageOf(error) };
+    }
+  }
   private finish(task: LoopBase, at: number, status: "completed" | "failed"): void {
     task.status = status;
     task.endedAt = at;
