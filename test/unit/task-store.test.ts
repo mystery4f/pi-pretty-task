@@ -369,7 +369,7 @@ describe("the task record file", () => {
     const loop = loopRecord({
       status: "running",
       promptWarning:
-        "prompt file is missing; this fire used the creation prompt and rewrote the file",
+        "The prompt file is missing; this fire used the creation prompt and rewrote the file.",
     });
     delete loop.endedAt;
     await new TaskStore(directory).save([loop]);

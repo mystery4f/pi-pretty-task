@@ -1214,7 +1214,7 @@ describe("the loop detail view", () => {
         name: "review loop",
         prompt: longSeedPrompt(),
         promptWarning:
-          "prompt file is missing; this fire used the creation prompt and rewrote the file",
+          "The prompt file is missing; this fire used the creation prompt and rewrote the file.",
         iterations: [iterationOf(1)],
       }),
     ];
@@ -1232,7 +1232,7 @@ describe("the loop detail view", () => {
     // But the fire that rebuilt it used the creation text, and the page says so:
     // a healthy-looking file must not hide the edit the fallback overwrote.
     expect(screen).toContain(
-      "prompt file is missing; this fire used the creation prompt and rewrote the file",
+      "The prompt file is missing; this fire used the creation prompt and rewrote the file.",
     );
 
     panel.dispose();
@@ -1300,7 +1300,7 @@ describe("the loop detail view", () => {
       loopView("loop02", {
         name: "review loop",
         prompt: longSeedPrompt(),
-        promptWarning: "prompt file is missing; this fire used the creation prompt",
+        promptWarning: "The prompt file is missing; this fire used the creation prompt",
         iterations: [iterationOf(1)],
       }),
     ];
@@ -1313,7 +1313,7 @@ describe("the loop detail view", () => {
     const screen = drawn();
     // The address is still a fact even when the text is not, and the record says why.
     expect(screen).toContain(path);
-    expect(screen).toContain("prompt file is missing; this fire used the creation prompt");
+    expect(screen).toContain("The prompt file is missing; this fire used the creation prompt");
     // The record's warning already says it, so the file's own state is not repeated.
     expect(screen).not.toContain("the prompt file");
     // No time is invented for a file that could not be read.
