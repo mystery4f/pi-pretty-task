@@ -2,6 +2,10 @@
 
 ## 2026-11-25
 
+- **retro**: {"category":"tooling","slug":"subagent-structured-verdict-path","title":"Subagent structured verdicts live in structured-output/output.json, not the artifact md"}
+- **retro**: {"category":"bugfix","slug":"git-cat-file-full-sha-flake-multipack","title":"git cat-file -e rejects a valid full SHA in a multi-pack repo"}
+- **retro**: {"category":"devops","slug":"matt-implement-gate-needs-node-modules","title":"A typed workflow gate returns null when its worktree lacks node_modules"}
+- **retro**: {"category":"devops","slug":"matt-implement-sync-ticket-comments","title":"matt-implement sync reads merge SHA from a ticket's Comments section"}
 - **observe**: {"relevance":"high","slug":"obs-2026-11-25-pi-auto-retry","title":"pi 扩展拿不到 auto_retry 事件，重试进度只能派生"}
 
 ## 2026-11-24

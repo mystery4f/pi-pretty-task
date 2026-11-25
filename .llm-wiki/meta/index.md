@@ -6,6 +6,9 @@
 
 - [[sources/await-state-not-bytes-in-process-tests]] — 进程类测试要等状态，不要等字节 *(created: 2026-11-15)*
 - [[sources/delete-remote-branch-via-gh-api]] — 删远端分支走 gh API，git push --delete 会被拦 *(created: 2026-11-15)*
+- [[sources/git-cat-file-full-sha-flake-multipack]] — git cat-file -e rejects a valid full SHA in a multi-pack repo *(created: 2026-11-25)*
+- [[sources/matt-implement-gate-needs-node-modules]] — A typed workflow gate returns null when its worktree lacks node_modules *(created: 2026-11-25)*
+- [[sources/matt-implement-sync-ticket-comments]] — matt-implement sync reads merge SHA from a ticket's Comments section *(created: 2026-11-25)*
 - [[sources/npm-trusted-publishing-oidc-not-token]] — npm 发布改用 trusted publishing（OIDC），放弃绕 2FA 的长期 token *(created: 2026-11-24)*
 - [[sources/obs-2026-11-14-kill-path-skipped-persist-and-notice-in-pi-pretty-task]] — Observation: Kill path skipped persist and notice in pi-pretty-task *(created: 2026-11-14)*
 - [[sources/obs-2026-11-14-loop-wake-backlog-storms-after-a-long-turn]] — Observation: Loop wake backlog storms after a long turn *(created: 2026-11-14)*
@@ -31,6 +34,7 @@
 - [[sources/pi-pretty-task-session-hub-required]] — 会话 hub 必须由入口注入，默认值会分裂写入权 *(created: 2026-11-16)*
 - [[sources/pi-pretty-task-side-index-to-field]] — 并行索引应当塌回记录上的一个字段 *(created: 2026-11-16)*
 - [[sources/slow-suite-timings-not-workers]] — 慢测试先治写死的时长，再谈并行度 *(created: 2026-11-15)*
+- [[sources/subagent-structured-verdict-path]] — Subagent structured verdicts live in structured-output/output.json, not the artifact md *(created: 2026-11-25)*
 - [[sources/windows-ci-slow-fsync-record-write]] — Windows CI: fsync per state write outran the record wait *(created: 2026-11-16)*
 - [[sources/windows-taskkill-t-needs-force-for-console-node]] — Windows 上 taskkill /T 不加 /F 停不下控制台 node *(created: 2026-11-15)*
 
@@ -44,4 +48,4 @@
 - [[syntheses/verify-red-tests-handoff]] — verify 红测修复交接（5 个 integration 用例） *(created: 2026-11-16)*
 
 ---
-*Last updated: 2026-11-25T12:35:33.925Z* | *Total pages: 35*
+*Last updated: 2026-11-25T17:00:48.080Z* | *Total pages: 39*

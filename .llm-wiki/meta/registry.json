@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "last_updated": "2026-11-25T12:35:33.925Z",
+  "last_updated": "2026-11-25T17:00:48.080Z",
   "pages": {
     "sources/await-state-not-bytes-in-process-tests": {
       "type": "source",
@@ -19,6 +19,33 @@
       "slug": "delete-remote-branch-via-gh-api",
       "created": "2026-11-15",
       "updated": "2026-11-15"
+    },
+    "sources/git-cat-file-full-sha-flake-multipack": {
+      "type": "source",
+      "title": "git cat-file -e rejects a valid full SHA in a multi-pack repo",
+      "category": "bugfix",
+      "status": "insight",
+      "slug": "git-cat-file-full-sha-flake-multipack",
+      "created": "2026-11-25",
+      "updated": "2026-11-25"
+    },
+    "sources/matt-implement-gate-needs-node-modules": {
+      "type": "source",
+      "title": "A typed workflow gate returns null when its worktree lacks node_modules",
+      "category": "devops",
+      "status": "insight",
+      "slug": "matt-implement-gate-needs-node-modules",
+      "created": "2026-11-25",
+      "updated": "2026-11-25"
+    },
+    "sources/matt-implement-sync-ticket-comments": {
+      "type": "source",
+      "title": "matt-implement sync reads merge SHA from a ticket's Comments section",
+      "category": "devops",
+      "status": "insight",
+      "slug": "matt-implement-sync-ticket-comments",
+      "created": "2026-11-25",
+      "updated": "2026-11-25"
     },
     "sources/npm-trusted-publishing-oidc-not-token": {
       "type": "source",
@@ -367,6 +394,15 @@
       "slug": "slow-suite-timings-not-workers",
       "created": "2026-11-15",
       "updated": "2026-11-15"
+    },
+    "sources/subagent-structured-verdict-path": {
+      "type": "source",
+      "title": "Subagent structured verdicts live in structured-output/output.json, not the artifact md",
+      "category": "tooling",
+      "status": "insight",
+      "slug": "subagent-structured-verdict-path",
+      "created": "2026-11-25",
+      "updated": "2026-11-25"
     },
     "sources/windows-ci-slow-fsync-record-write": {
       "type": "source",
