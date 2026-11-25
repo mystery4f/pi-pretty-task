@@ -28,7 +28,7 @@ const CreateParameters = Type.Object({
   prompt: Type.Optional(
     Type.String({
       description:
-        "Message sent into the session each time the loop fires; it starts a new turn. Give this or `command`, never both.",
+        "Message sent into the session each time the loop fires; it starts a new turn. It is saved as the loop's prompt file, and every fire reads that file, so editing it changes what the loop says without recreating the loop. Give this or `command`, never both.",
     }),
   ),
   command: Type.Optional(
@@ -170,7 +170,10 @@ export function describeLoop(view: LoopTaskView): string {
   }
   if (task.error !== undefined) lines.push(`error: ${task.error}`);
   if (task.kind === "prompt-loop") {
-    lines.push(`prompt: ${task.prompt}`);
+    // The file, not the record: the record keeps the text the loop was created
+    // with, while the file is what every fire reads (ADR-0024).
+    if (view.promptFile !== undefined) lines.push(`prompt file: ${view.promptFile}`);
+    if (task.promptWarning !== undefined) lines.push(`prompt warning: ${task.promptWarning}`);
   } else {
     if (task.cwd !== undefined) lines.push(`cwd: ${task.cwd}`);
     if (task.wakeOnFailure === false) lines.push("wake on failure: off");
@@ -340,7 +343,11 @@ function loopDetails(
   if (task.kind === "prompt-loop") {
     return {
       ...shared,
+      // The record keeps the seed; promptFile is what every fire actually reads
+      // (ADR-0024), so the two can differ once the file has been edited.
       prompt: task.prompt,
+      promptFile: view.promptFile,
+      promptWarning: task.promptWarning,
       iterationCount: task.iterations.length,
       droppedIterations: task.droppedIterations,
       ...(options.iterations === true ? { iterations: task.iterations } : {}),

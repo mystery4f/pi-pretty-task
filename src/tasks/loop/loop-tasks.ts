@@ -17,8 +17,7 @@
 
 import { resolve } from "node:path";
 
-import type { TaskScope } from "../base/runtime-state.js";
-import { sessionTaskDirectory } from "../base/runtime-state.js";
+import { loopPromptPath, sessionTaskDirectory, type TaskScope } from "../base/runtime-state.js";
 import type {
   CmdLoopTask,
   FireOutcome,
@@ -30,6 +29,7 @@ import type {
 } from "../base/task.js";
 import { FIRE_HISTORY_LIMIT } from "../base/task.js";
 import type { AnyTaskSession, OwnedTaskSession, TaskSessions } from "../base/task-sessions.js";
+import { readPromptText, removePromptText, writePromptText } from "./prompt-file.js";
 import type { Recurrence } from "./schedule.js";
 import {
   parseDurationMs,
@@ -50,6 +50,12 @@ export interface LoopFire {
   readonly fire: number;
   /** The session the fire belongs to, so the iteration can be persisted as it opens. */
   readonly session: OwnedTaskSession;
+  /**
+   * The text this wake carries, read from the loop's prompt file at fire time
+   * (ADR-0024). A snapshot: editing the file affects the next fire, never one
+   * already queued or running.
+   */
+  readonly prompt: string;
   /**
    * This fire used the last of `maxFires`, so the loop is already completed.
    * The wake still belongs to the model even though the loop stopped.
@@ -145,6 +151,11 @@ export interface LoopTaskView {
   readonly task: LoopTask;
   /** Time left before the next fire; absent while paused or finished. */
   readonly untilNextFireMs?: number;
+  /**
+   * Where a prompt loop keeps the text it sends, derived from the id rather
+   * than stored (ADR-0024). Absent for a cmd loop.
+   */
+  readonly promptFile?: string;
 }
 
 /** A transition `pretty_task_loop_update` can apply. A retune travels in `schedule`, not here. */
@@ -444,9 +455,14 @@ export class LoopTasks {
       };
     }
 
+    // The file goes down first: a create that cannot write it fails before the
+    // session records a loop whose prompt would never reach the model (ADR-0024).
+    if (task.kind === "prompt-loop") {
+      await writePromptText(session.directory, task.id, task.prompt);
+    }
     session.tasks.set(task.id, task);
     await this.sessions.persist(session);
-    return this.view(task);
+    return this.view(task, session.directory);
   }
 
   /**
@@ -458,13 +474,13 @@ export class LoopTasks {
     const session = await this.readSession(scope);
     return [...session.tasks.values()]
       .filter((task) => task.kind === "prompt-loop" || task.kind === "cmd-loop")
-      .map((task) => this.view(task));
+      .map((task) => this.view(task, session.directory));
   }
 
   async get(scope: TaskScope, id: string): Promise<LoopTaskView | undefined> {
     const session = await this.readSession(scope);
     const task = this.findLoop(session, id);
-    return task === undefined ? undefined : this.view(task);
+    return task === undefined ? undefined : this.view(task, session.directory);
   }
 
   /**
@@ -651,7 +667,7 @@ export class LoopTasks {
     // on its own never stops a loop, so it never drops a wake.
     const stopped = input.action !== undefined && changed && task.status !== "running";
     if (stopped) await this.onCancel?.(task.id);
-    return { view: this.view(task), outcome };
+    return { view: this.view(task, session.directory), outcome };
   }
 
   /**
@@ -687,7 +703,7 @@ export class LoopTasks {
     await this.sessions.persist(session);
     // Persisted first, so a crash mid-start still leaves a fire whose outcome is owed.
     await this.startCommandFire({ task: loop, at, fire, session, scope: input });
-    return this.view(loop);
+    return this.view(loop, session.directory);
   }
 
   async delete(scope: TaskScope, id: string): Promise<LoopTaskView | undefined> {
@@ -695,9 +711,12 @@ export class LoopTasks {
     const session = await this.sessions.session(scope);
     const task = this.findLoop(session, id);
     if (task === undefined) return undefined;
-    const view = this.view(task);
+    const view = this.view(task, session.directory);
     session.tasks.delete(task.id);
     await this.sessions.persist(session);
+    // The prompt file belongs to the loop: without the record it is a file nobody
+    // can address, so deleting the loop deletes it too (ADR-0024).
+    if (task.kind === "prompt-loop") await removePromptText(session.directory, task.id);
     await this.onCancel?.(task.id);
     return view;
   }
@@ -823,13 +842,18 @@ export class LoopTasks {
         const recurrence = common.recurrence;
 
         if (record.kind === "prompt-loop") {
+          // Every fire reads the file (ADR-0024): editing it is how the user
+          // changes what the loop says, so the text is never cached on the record.
+          const read = await readPromptText(session.directory, record);
+          // The warning describes this read, so a clean one clears it again.
+          record.promptWarning = read.warning;
           const final = record.maxFires !== undefined && record.fires + 1 >= record.maxFires;
           record.fires += 1;
           record.lastFireAt = at;
           // A fire is the loop's own transition, so the panel's sort key follows it
           // even when the resulting turn records no tool calls (ADR-0010).
           record.updatedAt = at;
-          fires.push({ task: record, at, fire: record.fires, session, final });
+          fires.push({ task: record, at, fire: record.fires, session, final, prompt: read.text });
           changed = true;
 
           this.advanceSchedule(record, recurrence, at);
@@ -1042,8 +1066,16 @@ export class LoopTasks {
     task.updatedAt = at;
   }
 
-  private view(task: LoopTask): LoopTaskView {
-    if (task.status !== "running" || task.nextFireAt === undefined) return { task };
-    return { task, untilNextFireMs: Math.max(0, task.nextFireAt - this.now()) };
+  /**
+   * A loop as its callers read it. `directory` is the session's task directory:
+   * the prompt file's address is derived from it, never stored (ADR-0024).
+   */
+  private view(task: LoopTask, directory: string): LoopTaskView {
+    const view: { task: LoopTask; untilNextFireMs?: number; promptFile?: string } = { task };
+    if (task.status === "running" && task.nextFireAt !== undefined) {
+      view.untilNextFireMs = Math.max(0, task.nextFireAt - this.now());
+    }
+    if (task.kind === "prompt-loop") view.promptFile = loopPromptPath(directory, task.id);
+    return view;
   }
 }

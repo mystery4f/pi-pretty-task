@@ -24,6 +24,7 @@ function fireOf(id: string, options: { status?: TaskStatus; final?: boolean } = 
     at: 1_000,
     fire: 1,
     session: session as unknown as OwnedTaskSession,
+    prompt: "review the diff",
     final: options.final ?? false,
   };
   return { fire: fire as LoopFire, task };

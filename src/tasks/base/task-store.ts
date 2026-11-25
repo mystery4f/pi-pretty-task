@@ -181,6 +181,9 @@ function parseTask(value: unknown, legacyKind: boolean): Task | undefined {
   if (kind === "prompt-loop") {
     if (!hasLoopFields(value)) return undefined;
     if (typeof value.prompt !== "string" || value.prompt.trim().length === 0) return undefined;
+    if (value.promptWarning !== undefined && typeof value.promptWarning !== "string") {
+      return undefined;
+    }
     const iterations = parseIterations(value.iterations);
     if (iterations === undefined) return undefined;
     const droppedIterations = value.droppedIterations;
@@ -369,7 +372,7 @@ interface Generation {
 }
 
 /** Write one file in a way a reader never sees half of it. */
-async function writeAtomic(path: string, data: string): Promise<void> {
+export async function writeAtomic(path: string, data: string): Promise<void> {
   const tempPath = `${path}.tmp`;
   const handle = await open(tempPath, "w");
   try {

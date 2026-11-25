@@ -2,9 +2,11 @@
  * The loop wake: one session message per fire, carrying the loop's prompt.
  *
  * The prompt is the message content, not a description of the wake, because pi
- * delivers it as a follow-up that starts a turn. `details` carries the header
- * facts for the renderer, so the transcript shows which loop fired and how
- * often without the model having to parse that from the prompt.
+ * delivers it as a follow-up that starts a turn. The text comes from the pump,
+ * which read it from the loop's prompt file at fire time (ADR-0024), so the
+ * record's seed can differ from what this wake says. `details` carries the
+ * header facts for the renderer, so the transcript shows which loop fired and
+ * how often without the model having to parse that from the prompt.
  *
  * @author mystery4f <40482524+mystery4f@users.noreply.github.com>
  */
@@ -37,7 +39,7 @@ export function sendLoopWake(pi: ExtensionAPI, fire: LoopFire): void {
   pi.sendMessage(
     {
       customType: LOOP_WAKE_CUSTOM_TYPE,
-      content: fire.task.prompt,
+      content: fire.prompt,
       display: true,
       details,
     },
@@ -45,7 +47,7 @@ export function sendLoopWake(pi: ExtensionAPI, fire: LoopFire): void {
   );
 }
 
-/** Draws one wake: a header, then the prompt exactly as the loop stored it. */
+/** Draws one wake: a header, then the prompt exactly as the fire carried it. */
 export const renderLoopWake: MessageRenderer<LoopWakeDetails> = (message, _options, theme) => {
   const details = message.details;
   if (details === undefined) return undefined;

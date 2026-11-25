@@ -197,8 +197,17 @@ export interface LoopBase extends TaskBase {
  */
 export interface PromptLoopTask extends LoopBase {
   readonly kind: "prompt-loop";
-  /** Message injected into the session on every fire. */
+  /**
+   * The text the loop was created (or last rebuilt) with. It is the seed a fire
+   * falls back on when the prompt file is missing, never the text a fire sends
+   * (ADR-0024): the file is what the model receives.
+   */
   readonly prompt: string;
+  /**
+   * Why the last fire could not read the prompt file, cleared once it reads
+   * cleanly again. Kept on the record so the panel can show a stale file.
+   */
+  promptWarning?: string;
   /**
    * The turns this schedule woke, oldest first, each a child record and never a
    * task of its own (ADR-0002). Capped by ITERATION_HISTORY_LIMIT.

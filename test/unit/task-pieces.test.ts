@@ -7,7 +7,7 @@
 
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
@@ -18,6 +18,7 @@ import {
 } from "../../src/tasks/base/format.js";
 import { readOutputTail } from "../../src/tasks/base/output.js";
 import {
+  loopPromptPath,
   processOutputPath,
   RUNTIME_STATE_DIRECTORY,
   sessionTaskDirectory,
@@ -56,6 +57,18 @@ describe("runtime state", () => {
     expect(processOutputPath("/state/session-1", "ab12cd")).toBe(
       join("/state/session-1", "ab12cd.output"),
     );
+  });
+
+  it("names a prompt loop's prompt file after the loop, next to the records", () => {
+    expect(loopPromptPath("/state/session-1", "lp-1a2cf")).toBe(
+      join("/state/session-1", "lp-1a2cf.prompt.md"),
+    );
+  });
+
+  it("keeps a loop id from naming a prompt file outside the session directory", () => {
+    const path = loopPromptPath("/state/session-1", "../escape");
+    expect(dirname(path)).toBe(join("/state/session-1"));
+    expect(path).not.toContain("..");
   });
 });
 
