@@ -1168,6 +1168,33 @@ describe("the loop detail view", () => {
     panel.dispose();
   });
 
+  it("keeps a preview's lines when the file's time is the only thing unknown", async () => {
+    const source = new FakeSource();
+    const path = "/work/.pi/tasks/session/prompts/loop05.md";
+    // A read that worked and a stat that did not: the text is real, the clock is not.
+    source.prompts.set("loop05", { path, lines: ["a real line"] });
+    source.rows = [
+      loopView("loop05", {
+        name: "review loop",
+        prompt: longSeedPrompt(),
+        iterations: [iterationOf(1)],
+      }),
+    ];
+    const { panel, drawn } = await openOn("loops", source);
+    await panel.settle();
+
+    panel.handleInput(ENTER);
+    await panel.settle();
+
+    const screen = drawn();
+    expect(screen).toContain(path);
+    expect(screen).toContain("a real line");
+    // No time is invented, and the lines are not thrown away with it.
+    expect(screen).not.toContain("changed ");
+
+    panel.dispose();
+  });
+
   it("says a blank prompt file is empty instead of drawing nothing", async () => {
     const source = new FakeSource();
     const changedAt = CLOCK + 5_000;
