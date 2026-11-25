@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { sessionTaskDirectory } from "../../src/tasks/base/runtime-state.js";
 import { TaskSessions } from "../../src/tasks/base/task-sessions.js";
 import { TaskStore } from "../../src/tasks/base/task-store.js";
+import type { TurnOutcome } from "../../src/tasks/loop/iteration.js";
 import { type LoopFire, LoopTasks, MAX_LOOPS } from "../../src/tasks/loop/loop-tasks.js";
 import { makeTempDir } from "../support/processes.js";
 
@@ -57,6 +58,14 @@ async function setup() {
       return store.load();
     },
   };
+}
+
+/** Charge a settled turn to its loop, the way `agent_settled` does (ticket #46). */
+function settleTurn(
+  task: Awaited<ReturnType<typeof setup>>,
+  turn: { id: string; fire: number; end: TurnOutcome; error?: string },
+): Promise<void> {
+  return task.loops.completeTurns(task.scope, [turn]);
 }
 
 describe("LoopTasks", () => {
@@ -360,8 +369,7 @@ describe("LoopTasks", () => {
 
     // The turn the fire woke ends with the provider giving up, two seconds in.
     task.advance(2_000);
-    await task.loops.completeIteration({
-      ...task.scope,
+    await settleTurn(task, {
       id: created.task.id,
       fire: 1,
       end: "failed",
@@ -396,24 +404,13 @@ describe("LoopTasks", () => {
     task.advance(10_000);
     await task.loops.pump(task.now);
     task.advance(1_000);
-    await task.loops.completeIteration({
-      ...task.scope,
-      id: created.task.id,
-      fire: 1,
-      end: "failed",
-      error: "fetch failed",
-    });
+    await settleTurn(task, { id: created.task.id, fire: 1, end: "failed", error: "fetch failed" });
 
     task.advance(20_000);
     await task.loops.pump(task.now);
     const firedAt = task.now;
     task.advance(1_000);
-    await task.loops.completeIteration({
-      ...task.scope,
-      id: created.task.id,
-      fire: 2,
-      end: "healthy",
-    });
+    await settleTurn(task, { id: created.task.id, fire: 2, end: "healthy" });
 
     const view = await task.loops.get(task.scope, created.task.id);
     if (view?.task.kind !== "prompt-loop") throw new Error("expected a prompt loop");
@@ -434,13 +431,7 @@ describe("LoopTasks", () => {
     task.advance(10_000);
     await task.loops.pump(task.now);
     task.advance(1_000);
-    await task.loops.completeIteration({
-      ...task.scope,
-      id: created.task.id,
-      fire: 1,
-      end: "failed",
-      error: "fetch failed",
-    });
+    await settleTurn(task, { id: created.task.id, fire: 1, end: "failed", error: "fetch failed" });
     const failed = await task.loops.get(task.scope, created.task.id);
     if (failed?.task.kind !== "prompt-loop") throw new Error("expected a prompt loop");
 
@@ -448,12 +439,7 @@ describe("LoopTasks", () => {
     const secondFireAt = task.now;
     await task.loops.pump(task.now);
     task.advance(1_000);
-    await task.loops.completeIteration({
-      ...task.scope,
-      id: created.task.id,
-      fire: 2,
-      end: "aborted",
-    });
+    await settleTurn(task, { id: created.task.id, fire: 2, end: "aborted" });
 
     const view = await task.loops.get(task.scope, created.task.id);
     if (view?.task.kind !== "prompt-loop") throw new Error("expected a prompt loop");
@@ -476,16 +462,130 @@ describe("LoopTasks", () => {
     task.advance(10_000);
     await task.loops.pump(task.now);
 
-    // A turn that outlived its loop: the late settle must not resurrect it.
+    // A turn that outlived its loop: the late settle must not resurrect it, and
+    // must not throw on the way out either.
     await task.loops.delete(task.scope, created.task.id);
-    await task.loops.completeIteration({
-      ...task.scope,
-      id: created.task.id,
-      fire: 1,
-      end: "failed",
-      error: "fetch failed",
-    });
+    await settleTurn(task, { id: created.task.id, fire: 1, end: "failed", error: "fetch failed" });
     expect(await task.loops.list(task.scope)).toEqual([]);
+  });
+
+  it("leaves the streak alone when nothing was observed about the turn", async () => {
+    const task = await setup();
+    const created = await task.loops.create({
+      ...task.scope,
+      schedule: "10s",
+      prompt: "keep going",
+    });
+    task.advance(10_000);
+    await task.loops.pump(task.now);
+    task.advance(1_000);
+    await settleTurn(task, { id: created.task.id, fire: 1, end: "failed", error: "fetch failed" });
+    const failed = await task.loops.get(task.scope, created.task.id);
+    if (failed?.task.kind !== "prompt-loop") throw new Error("expected a prompt loop");
+
+    task.advance(20_000);
+    const secondFireAt = task.now;
+    await task.loops.pump(task.now);
+    task.advance(1_000);
+    // No assistant message described this turn, so its outcome is unknown and an
+    // unknown outcome is not a successful one.
+    await settleTurn(task, { id: created.task.id, fire: 2, end: "unobserved" });
+
+    const view = await task.loops.get(task.scope, created.task.id);
+    if (view?.task.kind !== "prompt-loop") throw new Error("expected a prompt loop");
+    expect(view.task.consecutiveFailures).toBe(1);
+    expect(view.task.lastError).toBe("fetch failed");
+    expect(view.task.lastFailureAt).toBe(failed.task.lastFailureAt);
+    // The unobserved turn moves nothing at all, the backoff included: the fire that
+    // was already scheduled stays where the pump put it.
+    expect(view.task.nextFireAt).toBe(secondFireAt + 10_000);
+  });
+
+  it("clears the error of an earlier failure when the failed turn reports none", async () => {
+    const task = await setup();
+    const created = await task.loops.create({
+      ...task.scope,
+      schedule: "10s",
+      prompt: "keep going",
+    });
+    task.advance(10_000);
+    await task.loops.pump(task.now);
+    task.advance(1_000);
+    await settleTurn(task, { id: created.task.id, fire: 1, end: "failed", error: "fetch failed" });
+    const failed = await task.loops.get(task.scope, created.task.id);
+    if (failed?.task.kind !== "prompt-loop") throw new Error("expected a prompt loop");
+    expect(failed.task.lastError).toBe("fetch failed");
+
+    task.advance((failed.task.nextFireAt ?? task.now) - task.now);
+    await task.loops.pump(task.now);
+    task.advance(1_000);
+    // A second failure whose message carried nothing: the error and the time must
+    // name the same fire, so the old error cannot stay behind a moved timestamp.
+    await settleTurn(task, { id: created.task.id, fire: 2, end: "failed" });
+
+    const view = await task.loops.get(task.scope, created.task.id);
+    if (view?.task.kind !== "prompt-loop") throw new Error("expected a prompt loop");
+    expect(view.task.consecutiveFailures).toBe(2);
+    expect(view.task.lastFailureAt).toBe(task.now);
+    expect(view.task.lastError).toBeUndefined();
+  });
+
+  it("charges one settled turn to every loop that fired it", async () => {
+    const task = await setup();
+    const first = await task.loops.create({
+      ...task.scope,
+      schedule: "10s",
+      prompt: "review the diff",
+    });
+    const second = await task.loops.create({
+      ...task.scope,
+      schedule: "10s",
+      prompt: "triage the issues",
+    });
+    task.advance(10_000);
+    // Both came due while the agent was busy, so one turn is both their fire.
+    expect(await task.loops.pump(task.now)).toHaveLength(2);
+    const firedAt = task.now;
+    task.advance(2_000);
+    await task.loops.completeTurns(task.scope, [
+      { id: first.task.id, fire: 1, end: "failed", error: "fetch failed" },
+      { id: second.task.id, fire: 1, end: "failed", error: "fetch failed" },
+    ]);
+
+    for (const id of [first.task.id, second.task.id]) {
+      const view = await task.loops.get(task.scope, id);
+      if (view?.task.kind !== "prompt-loop") throw new Error("expected a prompt loop");
+      expect(view.task.consecutiveFailures).toBe(1);
+      expect(view.task.lastError).toBe("fetch failed");
+      expect(view.task.lastFailureAt).toBe(task.now);
+      expect(view.task.nextFireAt).toBe(firedAt + 2_000 + 20_000);
+    }
+
+    // The healthy round clears both streaks, not only the loop the settle named.
+    task.advance(firedAt + 2_000 + 20_000 - task.now);
+    expect(await task.loops.pump(task.now)).toHaveLength(2);
+    const healedAt = task.now;
+    task.advance(1_000);
+    await task.loops.completeTurns(task.scope, [
+      { id: first.task.id, fire: 2, end: "healthy" },
+      { id: second.task.id, fire: 2, end: "healthy" },
+    ]);
+
+    for (const id of [first.task.id, second.task.id]) {
+      const view = await task.loops.get(task.scope, id);
+      if (view?.task.kind !== "prompt-loop") throw new Error("expected a prompt loop");
+      expect(view.task.consecutiveFailures).toBe(0);
+      expect(view.task.lastError).toBeUndefined();
+      expect(view.task.nextFireAt).toBe(healedAt + 10_000);
+    }
+    // One settle, one write: both loops and both closed schedules are on disk.
+    const records = await task.reload();
+    for (const id of [first.task.id, second.task.id]) {
+      expect(records.find((record) => record.id === id)).toMatchObject({
+        consecutiveFailures: 0,
+        nextFireAt: healedAt + 10_000,
+      });
+    }
   });
 
   it("completes after the maximum number of fires", async () => {

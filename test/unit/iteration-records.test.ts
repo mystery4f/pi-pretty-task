@@ -467,36 +467,6 @@ describe("the provider retry of a turn", () => {
  * record that says nothing about that reads exactly like a healthy turn.
  */
 describe("a fire's turn that gave up", () => {
-  it("records the failure on the loop and pushes the next fire back", async () => {
-    const { task, created } = await openTurn();
-    const firedAt = task.now;
-
-    task.advance(2_000);
-    await endAttempt(task.harness, {
-      stopReason: "error",
-      errorMessage: "529 overloaded_error: the provider is busy",
-    });
-    await task.harness.emit({ type: "agent_settled", aborted: false });
-
-    const loop = await loopOf(task.harness, created.id);
-    expect(loop.consecutiveFailures).toBe(1);
-    expect(loop.lastError).toBe("529 overloaded_error: the provider is busy");
-    expect(loop.lastFailureAt).toBe(task.now);
-    // One failure doubles a ten-second schedule: the next fire is twenty seconds
-    // from the failure, so the loop does not spend its fires on a broken provider.
-    expect((loop.nextFireAt ?? 0) - firedAt).toBe(22_000);
-
-    // The record only exists on disk: a reader must see the failure there too.
-    const store = new TaskStore(sessionTaskDirectory(task.turn.cwd, task.turn.sessionId));
-    const stored = (await store.load()).find((record) => record.id === created.id);
-    if (stored?.kind !== "prompt-loop") throw new Error("the loop was not persisted");
-    expect(stored).toMatchObject({
-      consecutiveFailures: 1,
-      lastError: "529 overloaded_error: the provider is busy",
-      lastFailureAt: task.now,
-    });
-  });
-
   it("clears the streak and the error on the next turn that finished", async () => {
     const { task, created } = await openTurn();
     await endAttempt(task.harness, { stopReason: "error", errorMessage: "fetch failed" });
@@ -547,6 +517,7 @@ describe("a fire's turn that gave up", () => {
 
     task.advance(20_000);
     await task.harness.pump(task.now);
+    await endAttempt(task.harness);
     await task.harness.emit({ type: "agent_settled", aborted: false });
 
     const quiet = await loopOf(task.harness, created.id);
