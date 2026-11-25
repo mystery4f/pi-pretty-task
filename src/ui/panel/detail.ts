@@ -220,6 +220,25 @@ export function renderLoopDetail(panel: PanelView, row: PanelTaskView, width: nu
   const task = row.task;
   if (task.kind !== "prompt-loop") return renderList(panel, width);
   const colour = STATUS_COLOUR[task.status];
+  const streak = failureStreak(task);
+  // A prompt loop's fire can fail once the provider gives up on its turn, and the
+  // streak it leaves explains why the next fire is later than the expression says.
+  // The count, the time and the error sit with the schedule facts and never rewrite
+  // them, exactly as a command loop's page draws the same run (ADR-0017, ticket #50).
+  // The message is coloured as the failure it is, not as the loop's own status.
+  // `Failed at`, not `Last failure`: the label column is LABEL_WIDTH wide *with* its
+  // colon and `field` pads the label to exactly that, so a twelve-character label
+  // loses its colon and its value glues onto a chopped word (model.ts:37). The
+  // command loop's `Wake on failure` already ships that clipping; not fixed here.
+  const failureFacts: string[] = [
+    ...(streak > 0 ? field(panel, "Failures", `${String(streak)} in a row`) : []),
+    ...(task.lastFailureAt === undefined
+      ? []
+      : field(panel, "Failed at", updatedText(panel, task.lastFailureAt))),
+    ...(task.lastError === undefined
+      ? []
+      : block(panel, "Last error", theme.fg(STATUS_COLOUR.failed, task.lastError))),
+  ];
   const groups: string[][] = [
     field(panel, "Status", theme.fg(colour, task.status)),
     field(panel, "Kind", task.kind),
@@ -228,12 +247,13 @@ export function renderLoopDetail(panel: PanelView, row: PanelTaskView, width: nu
     field(panel, "Updated", updatedText(panel, task.updatedAt)),
     field(panel, "Schedule", task.schedule),
     field(panel, "Fires", firesText(task)),
-    field(panel, "Next fire", nextFireText(task, row)),
+    field(panel, "Next fire", nextFireText(task, row, streak > 0)),
     field(
       panel,
       "Last fire",
       task.lastFireAt === undefined ? "—" : formatClockTime(task.lastFireAt),
     ),
+    failureFacts,
     task.expiresAt === undefined ? [] : field(panel, "Expires", formatClockTime(task.expiresAt)),
     task.endedAt === undefined ? [] : field(panel, "Ended", formatClockTime(task.endedAt)),
     task.error === undefined ? [] : block(panel, "Error", theme.fg(colour, task.error)),
