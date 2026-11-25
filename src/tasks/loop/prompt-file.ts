@@ -12,9 +12,9 @@
 import { mkdir, readFile, unlink } from "node:fs/promises";
 import { dirname } from "node:path";
 
+import { writeAtomic } from "../base/atomic.js";
 import { loopPromptPath } from "../base/runtime-state.js";
 import type { PromptLoopTask } from "../base/task.js";
-import { writeAtomic } from "../base/task-store.js";
 
 /** What one fire sends, and what the record should say about how it was obtained. */
 export interface PromptRead {
@@ -44,8 +44,15 @@ export async function writePromptText(
  * alive for a moment (ADR-0024 lifecycle).
  */
 export async function removePromptText(directory: string, loopId: string): Promise<void> {
+  const path = loopPromptPath(directory, loopId);
+  // The temp file too: a write that failed before its rename leaves one behind.
+  await removeQuietly(path);
+  await removeQuietly(`${path}.tmp`);
+}
+
+async function removeQuietly(path: string): Promise<void> {
   try {
-    await unlink(loopPromptPath(directory, loopId));
+    await unlink(path);
   } catch {
     // No file yet, or a locked entry on Windows: nothing to do either way.
   }
@@ -60,6 +67,8 @@ export async function removePromptText(directory: string, loopId: string): Promi
 export async function readPromptText(directory: string, task: PromptLoopTask): Promise<PromptRead> {
   const path = loopPromptPath(directory, task.id);
   const read = await readText(path);
+  // A file of nothing but whitespace counts as unreadable: it would deliver an
+  // empty follow-up the user never sees, which is worse than a loud rebuild.
   if (read.text !== undefined && read.text.trim().length > 0) return { text: read.text };
 
   const problem = read.text !== undefined ? "is empty" : (read.problem ?? "could not be read");

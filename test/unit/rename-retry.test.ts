@@ -9,7 +9,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { renameWithRetry } from "../../src/tasks/base/task-store.js";
+import { renameWithRetry } from "../../src/tasks/base/atomic.js";
 
 function failure(code: string): NodeJS.ErrnoException {
   const error: NodeJS.ErrnoException = new Error(`simulated ${code}`);
