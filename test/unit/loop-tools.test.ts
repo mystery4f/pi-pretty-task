@@ -643,4 +643,33 @@ describe("loop tools", () => {
     expect(document.tasks[0]).toMatchObject({ id: "lp0001", kind: "prompt-loop" });
     expect(document.tasks[0]?.nextFireAt).toBeGreaterThan(first);
   });
+  it("names a settled turn's verdict in the iteration listing, not completed (ticket 53)", async () => {
+    const task = await setup();
+    const created = await createLoop(task.harness, {
+      schedule: "10s",
+      prompt: "keep going",
+    });
+
+    // Close the loop's own turn as pi does, then fire the first real wake.
+    await task.harness.emit({ type: "agent_start" });
+    task.advance(10_000);
+    await task.harness.pump(task.now);
+    await task.harness.emit({ type: "agent_settled", aborted: false });
+
+    // The provider gave up on this turn: a failed attempt, then the settle.
+    await task.harness.emit({
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "…" }],
+        stopReason: "error",
+        errorMessage: "529 overloaded_error",
+      },
+    });
+    await task.harness.emit({ type: "agent_settled", aborted: false });
+
+    const listed = await task.harness.call("pretty_task_loop_list", { id: created.id });
+    expect(resultText(listed)).toContain("fire 1 · failed");
+    expect(resultText(listed)).not.toContain("fire 1 · completed");
+  });
 });
