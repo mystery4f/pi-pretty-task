@@ -92,4 +92,47 @@ describe("prompt file", () => {
     expect(resultText(deleted)).toContain(`Deleted loop ${created.id}`);
     await expect(readFile(path, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
   });
+
+  it("replaces the text through an update, and the fire count and iterations survive it", async () => {
+    const task = await setup();
+    const created = await createLoop(task.harness);
+    const path = created.promptFile;
+    if (path === undefined) throw new Error("the created loop has no prompt file");
+
+    // One fire first: the history the update must not cost is already recorded.
+    task.advance(10_000);
+    await task.harness.pump(task.now);
+    const before = detailsOf<LoopDetails & { iterations?: unknown[] }>(
+      await task.harness.call("pretty_task_loop_list", { id: created.id }),
+    );
+    expect(before).toMatchObject({ fires: 1 });
+    expect(before.iterations).toHaveLength(1);
+    // `details` carries the record's own array, so copy it before the next fire grows it.
+    const firstIteration = structuredClone(before.iterations);
+
+    // Refining the wording is the whole point: no delete, no recreate.
+    const updated = await task.harness.call("pretty_task_loop_update", {
+      id: created.id,
+      prompt: "review only the parser module",
+    });
+    expect(resultText(updated)).toContain("prompt text: replaced");
+    expect(await readFile(path, "utf8")).toBe("review only the parser module");
+
+    task.advance(10_000);
+    const fired = await task.harness.pump(task.now);
+    expect(fired).toHaveLength(1);
+    expect(fired[0]?.fire).toBe(2);
+
+    // The wake carries the new text, over the count and the history it kept.
+    expect(task.harness.messages.map((message) => message.content)).toEqual([
+      "review the diff",
+      "review only the parser module",
+    ]);
+    const after = detailsOf<LoopDetails & { iterations?: unknown[] }>(
+      await task.harness.call("pretty_task_loop_list", { id: created.id }),
+    );
+    expect(after).toMatchObject({ fires: 2, promptFile: path });
+    expect(after.iterations).toHaveLength(2);
+    expect(after.iterations?.slice(0, 1)).toEqual(firstIteration);
+  });
 });
