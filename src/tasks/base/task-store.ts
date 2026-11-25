@@ -193,6 +193,10 @@ function parseTask(value: unknown, legacyKind: boolean): Task | undefined {
     ) {
       return undefined;
     }
+    // The last turn the provider gave up on (ticket #46). A record written before
+    // a turn could fail has neither field, so both are optional and checked here.
+    if (value.lastError !== undefined && typeof value.lastError !== "string") return undefined;
+    if (value.lastFailureAt !== undefined && !isFiniteNumber(value.lastFailureAt)) return undefined;
     // SAFETY: the loop fields a prompt loop needs were checked above.
     return { ...value, kind, updatedAt, iterations } as unknown as Task;
   }
