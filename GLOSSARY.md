@@ -56,6 +56,10 @@ _Avoid_: stage, phase, node, stage task
 Llm loop task 的子记录。一次触发对应一条，记录那一轮里实际调用了哪些工具、跑了哪些命令。它不是 Task，不在列表里单独占一行，只在该 Llm loop task 的详情里展开。
 _Avoid_: run, round, execution
 
+**Empty fire**:
+一次 Fire 的 turn 正常结束、却一个工具都没调用：花了一次模型调用，什么也没推动。面板把它当事实印出来（`0 calls`），只有连续两次才标记（`2 empty in a row`）——先读文件再动手的 turn 是合法的，第一次不该被当成卡住。被 abort 或被进程带走的 turn 不算：它没得到干活的机会。
+_Avoid_: idle fire, no-op, quiet run
+
 **Schedule**:
 一次触发的时间规则，两种写法归一成一个「下次触发时刻」函数：间隔简写（`30s`、`10m`、`2h`）与五段 cron 表达式（`0 9 * * 1-5`，本地时区）。六段（含秒）明确拒绝，秒级改用间隔。
 _Avoid_: trigger, timer, recurrence

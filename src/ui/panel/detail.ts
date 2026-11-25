@@ -257,7 +257,9 @@ export function renderLoopDetail(panel: PanelView, row: PanelTaskView, width: nu
     if (top > 0) body.push(theme.fg("dim", `  … ${String(top)} newer above`));
     for (const iteration of visible) {
       const marker = iteration.fire === selected?.fire ? theme.fg("accent", "›") : " ";
-      const text = iterationLine(iteration);
+      // The row's mark depends on the fires before it, so the whole record is
+      // handed over rather than a number the renderer would have to derive.
+      const text = iterationLine(iteration, task.iterations);
       body.push(`${marker} ${truncateToWidth(text, Math.max(1, width - 4), "…", false)}`);
     }
     const below = newestFirst.length - top - visible.length;

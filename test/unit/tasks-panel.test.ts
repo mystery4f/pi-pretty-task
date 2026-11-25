@@ -1075,6 +1075,122 @@ describe("the loop detail view", () => {
     panel.dispose();
   });
 
+  // A fire is a full model call, so a turn that recorded no tool call is a fact a
+  // reader weighs; only a second one in a row says the loop has stalled — the
+  // first may be a turn that read files and thought before acting (ticket #49).
+  it("states one empty fire plainly and marks the second in a row", async () => {
+    const source = new FakeSource();
+    source.rows = [
+      loopView("loop01", {
+        name: "review loop",
+        fires: 3,
+        iterations: [
+          iterationOf(1, [callOf("c1", "bash", "npm test")]),
+          iterationOf(2),
+          iterationOf(3),
+        ],
+      }),
+    ];
+    const { panel, drawn } = await openOn("loops", source);
+    await panel.settle();
+
+    panel.handleInput(ENTER);
+    await panel.settle();
+
+    const rows = drawn().split("\n");
+    const productive = rows.find((line) => line.includes("fire 1"));
+    const first = rows.find((line) => line.includes("fire 2"));
+    const second = rows.find((line) => line.includes("fire 3"));
+    expect(productive).toContain("1 call");
+    expect(productive).not.toContain("empty");
+    expect(first).toContain("0 calls");
+    expect(first).not.toContain("empty");
+    expect(second).toContain("0 calls");
+    expect(second).toContain("2 empty in a row");
+
+    panel.dispose();
+  });
+
+  it("leaves two empty fires unmarked when a productive turn sits between them", async () => {
+    const source = new FakeSource();
+    source.rows = [
+      loopView("loop01", {
+        name: "review loop",
+        fires: 3,
+        iterations: [
+          iterationOf(1),
+          iterationOf(2, [callOf("c1", "read", "src/index.ts")]),
+          iterationOf(3),
+        ],
+      }),
+    ];
+    const { panel, drawn } = await openOn("loops", source);
+    await panel.settle();
+
+    panel.handleInput(ENTER);
+    await panel.settle();
+
+    const rows = drawn().split("\n");
+    for (const fire of [1, 3]) {
+      const row = rows.find((line) => line.includes(`fire ${String(fire)}`));
+      expect(row).toContain("0 calls");
+      expect(row).not.toContain("empty");
+    }
+
+    panel.dispose();
+  });
+
+  it("counts the whole run of empty fires, not just the pair", async () => {
+    const source = new FakeSource();
+    source.rows = [
+      loopView("loop01", {
+        name: "review loop",
+        fires: 4,
+        iterations: [iterationOf(1), iterationOf(2), iterationOf(3), iterationOf(4)],
+      }),
+    ];
+    const { panel, drawn } = await openOn("loops", source);
+    await panel.settle();
+
+    panel.handleInput(ENTER);
+    await panel.settle();
+
+    const rows = drawn().split("\n");
+    expect(rows.find((line) => line.includes("fire 1"))).not.toContain("empty");
+    expect(rows.find((line) => line.includes("fire 2"))).toContain("2 empty in a row");
+    expect(rows.find((line) => line.includes("fire 3"))).toContain("3 empty in a row");
+    expect(rows.find((line) => line.includes("fire 4"))).toContain("4 empty in a row");
+
+    panel.dispose();
+  });
+
+  it("does not count a turn cut short as an empty fire", async () => {
+    const source = new FakeSource();
+    source.rows = [
+      loopView("loop01", {
+        name: "review loop",
+        fires: 3,
+        iterations: [
+          iterationOf(1),
+          iterationOf(2, [], { status: "aborted", endedAt: CLOCK + 12_000 }),
+          iterationOf(3),
+        ],
+      }),
+    ];
+    const { panel, drawn } = await openOn("loops", source);
+    await panel.settle();
+
+    panel.handleInput(ENTER);
+    await panel.settle();
+
+    const rows = drawn().split("\n");
+    // An abort is not evidence of a stall: the turn never got to work.
+    expect(rows.find((line) => line.includes("fire 2"))).not.toContain("empty");
+    expect(rows.find((line) => line.includes("fire 3"))).not.toContain("empty");
+
+    panel.dispose();
+  });
+
   it("opens an iteration with its tool calls in order, commands highlighted and errors kept", async () => {
     const source = new FakeSource();
     const calls = [
