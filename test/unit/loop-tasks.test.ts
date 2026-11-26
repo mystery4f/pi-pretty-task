@@ -5,12 +5,18 @@
  * @author mystery4f <40482524+mystery4f@users.noreply.github.com>
  */
 
+import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+
 import { afterEach, describe, expect, it } from "vitest";
 
-import { sessionTaskDirectory } from "../../src/tasks/base/runtime-state.js";
+import { tempPathFor } from "../../src/tasks/base/atomic.js";
+import { loopPromptPath, sessionTaskDirectory } from "../../src/tasks/base/runtime-state.js";
+import type { PromptLoopTask } from "../../src/tasks/base/task.js";
 import { TaskSessions } from "../../src/tasks/base/task-sessions.js";
 import { TaskStore } from "../../src/tasks/base/task-store.js";
+import type { TurnOutcome } from "../../src/tasks/loop/iteration.js";
 import { type LoopFire, LoopTasks, MAX_LOOPS } from "../../src/tasks/loop/loop-tasks.js";
+import { readPromptPreview } from "../../src/tasks/loop/prompt-file.js";
 import { makeTempDir } from "../support/processes.js";
 
 const directories: Array<{ dispose(): Promise<void> }> = [];
@@ -57,6 +63,14 @@ async function setup() {
       return store.load();
     },
   };
+}
+
+/** Charge a settled turn to its loop, the way `agent_settled` does (ticket #46). */
+function settleTurn(
+  task: Awaited<ReturnType<typeof setup>>,
+  turn: { id: string; fire: number; end: TurnOutcome; error?: string },
+): Promise<void> {
+  return task.loops.completeTurns(task.scope, [turn]);
 }
 
 describe("LoopTasks", () => {
@@ -345,6 +359,238 @@ describe("LoopTasks", () => {
     const view = await task.loops.get(task.scope, created.task.id);
     expect(view?.task.updatedAt).toBe(task.now);
     expect(view?.task.updatedAt).toBeGreaterThan(view?.task.createdAt ?? 0);
+  });
+
+  it("records a failed turn on the loop, with its error and time, and waits longer", async () => {
+    const task = await setup();
+    const created = await task.loops.create({
+      ...task.scope,
+      schedule: "10s",
+      prompt: "keep going",
+    });
+    task.advance(10_000);
+    expect(await task.loops.pump(task.now)).toHaveLength(1);
+    const firedAt = task.now;
+
+    // The turn the fire woke ends with the provider giving up, two seconds in.
+    task.advance(2_000);
+    await settleTurn(task, {
+      id: created.task.id,
+      fire: 1,
+      end: "failed",
+      error: "529 overloaded_error: the provider is busy",
+    });
+
+    const view = await task.loops.get(task.scope, created.task.id);
+    if (view?.task.kind !== "prompt-loop") throw new Error("expected a prompt loop");
+    expect(view.task.consecutiveFailures).toBe(1);
+    expect(view.task.lastError).toBe("529 overloaded_error: the provider is busy");
+    expect(view.task.lastFailureAt).toBe(task.now);
+    // One failure on a ten-second schedule waits twenty seconds from the failure.
+    expect(view.task.nextFireAt).toBe(task.now + 20_000);
+    expect(view.task.lastFireAt).toBe(firedAt);
+
+    // The record only exists on disk: a reader must see the failure there too.
+    const records = await task.reload();
+    expect(records.find((record) => record.id === created.task.id)).toMatchObject({
+      consecutiveFailures: 1,
+      lastError: "529 overloaded_error: the provider is busy",
+      lastFailureAt: task.now,
+    });
+  });
+
+  it("clears the failure streak and its error on a turn that finished", async () => {
+    const task = await setup();
+    const created = await task.loops.create({
+      ...task.scope,
+      schedule: "10s",
+      prompt: "keep going",
+    });
+    task.advance(10_000);
+    await task.loops.pump(task.now);
+    task.advance(1_000);
+    await settleTurn(task, { id: created.task.id, fire: 1, end: "failed", error: "fetch failed" });
+
+    task.advance(20_000);
+    await task.loops.pump(task.now);
+    const firedAt = task.now;
+    task.advance(1_000);
+    await settleTurn(task, { id: created.task.id, fire: 2, end: "healthy" });
+
+    const view = await task.loops.get(task.scope, created.task.id);
+    if (view?.task.kind !== "prompt-loop") throw new Error("expected a prompt loop");
+    expect(view.task.consecutiveFailures).toBe(0);
+    expect(view.task.lastError).toBeUndefined();
+    expect(view.task.lastFailureAt).toBeUndefined();
+    // A healthy fire ends the backoff: the next fire is one interval away.
+    expect(view.task.nextFireAt).toBe(firedAt + 10_000);
+  });
+
+  it("leaves the streak alone when the user aborted the turn", async () => {
+    const task = await setup();
+    const created = await task.loops.create({
+      ...task.scope,
+      schedule: "10s",
+      prompt: "keep going",
+    });
+    task.advance(10_000);
+    await task.loops.pump(task.now);
+    task.advance(1_000);
+    await settleTurn(task, { id: created.task.id, fire: 1, end: "failed", error: "fetch failed" });
+    const failed = await task.loops.get(task.scope, created.task.id);
+    if (failed?.task.kind !== "prompt-loop") throw new Error("expected a prompt loop");
+
+    task.advance(20_000);
+    const secondFireAt = task.now;
+    await task.loops.pump(task.now);
+    task.advance(1_000);
+    await settleTurn(task, { id: created.task.id, fire: 2, end: "aborted" });
+
+    const view = await task.loops.get(task.scope, created.task.id);
+    if (view?.task.kind !== "prompt-loop") throw new Error("expected a prompt loop");
+    // A stop by the user says nothing about the provider: the streak and the
+    // error of the failed fire before it stay exactly as they were.
+    expect(view.task.consecutiveFailures).toBe(1);
+    expect(view.task.lastError).toBe("fetch failed");
+    expect(view.task.lastFailureAt).toBe(failed.task.lastFailureAt);
+    // The aborted fire leaves the schedule where the pump put it: no backoff.
+    expect(view.task.nextFireAt).toBe(secondFireAt + 10_000);
+  });
+
+  it("records nothing against a loop whose fire is no longer in the record", async () => {
+    const task = await setup();
+    const created = await task.loops.create({
+      ...task.scope,
+      schedule: "10s",
+      prompt: "keep going",
+    });
+    task.advance(10_000);
+    await task.loops.pump(task.now);
+
+    // A turn that outlived its loop: the late settle must not resurrect it, and
+    // must not throw on the way out either.
+    await task.loops.delete(task.scope, created.task.id);
+    await settleTurn(task, { id: created.task.id, fire: 1, end: "failed", error: "fetch failed" });
+    expect(await task.loops.list(task.scope)).toEqual([]);
+  });
+
+  it("leaves the streak alone when nothing was observed about the turn", async () => {
+    const task = await setup();
+    const created = await task.loops.create({
+      ...task.scope,
+      schedule: "10s",
+      prompt: "keep going",
+    });
+    task.advance(10_000);
+    await task.loops.pump(task.now);
+    task.advance(1_000);
+    await settleTurn(task, { id: created.task.id, fire: 1, end: "failed", error: "fetch failed" });
+    const failed = await task.loops.get(task.scope, created.task.id);
+    if (failed?.task.kind !== "prompt-loop") throw new Error("expected a prompt loop");
+
+    task.advance(20_000);
+    const secondFireAt = task.now;
+    await task.loops.pump(task.now);
+    task.advance(1_000);
+    // No assistant message described this turn, so its outcome is unknown and an
+    // unknown outcome is not a successful one.
+    await settleTurn(task, { id: created.task.id, fire: 2, end: "unobserved" });
+
+    const view = await task.loops.get(task.scope, created.task.id);
+    if (view?.task.kind !== "prompt-loop") throw new Error("expected a prompt loop");
+    expect(view.task.consecutiveFailures).toBe(1);
+    expect(view.task.lastError).toBe("fetch failed");
+    expect(view.task.lastFailureAt).toBe(failed.task.lastFailureAt);
+    // The unobserved turn moves nothing at all, the backoff included: the fire that
+    // was already scheduled stays where the pump put it.
+    expect(view.task.nextFireAt).toBe(secondFireAt + 10_000);
+  });
+
+  it("clears the error of an earlier failure when the failed turn reports none", async () => {
+    const task = await setup();
+    const created = await task.loops.create({
+      ...task.scope,
+      schedule: "10s",
+      prompt: "keep going",
+    });
+    task.advance(10_000);
+    await task.loops.pump(task.now);
+    task.advance(1_000);
+    await settleTurn(task, { id: created.task.id, fire: 1, end: "failed", error: "fetch failed" });
+    const failed = await task.loops.get(task.scope, created.task.id);
+    if (failed?.task.kind !== "prompt-loop") throw new Error("expected a prompt loop");
+    expect(failed.task.lastError).toBe("fetch failed");
+
+    task.advance((failed.task.nextFireAt ?? task.now) - task.now);
+    await task.loops.pump(task.now);
+    task.advance(1_000);
+    // A second failure whose message carried nothing: the error and the time must
+    // name the same fire, so the old error cannot stay behind a moved timestamp.
+    await settleTurn(task, { id: created.task.id, fire: 2, end: "failed" });
+
+    const view = await task.loops.get(task.scope, created.task.id);
+    if (view?.task.kind !== "prompt-loop") throw new Error("expected a prompt loop");
+    expect(view.task.consecutiveFailures).toBe(2);
+    expect(view.task.lastFailureAt).toBe(task.now);
+    expect(view.task.lastError).toBeUndefined();
+  });
+
+  it("charges one settled turn to every loop that fired it", async () => {
+    const task = await setup();
+    const first = await task.loops.create({
+      ...task.scope,
+      schedule: "10s",
+      prompt: "review the diff",
+    });
+    const second = await task.loops.create({
+      ...task.scope,
+      schedule: "10s",
+      prompt: "triage the issues",
+    });
+    task.advance(10_000);
+    // Both came due while the agent was busy, so one turn is both their fire.
+    expect(await task.loops.pump(task.now)).toHaveLength(2);
+    const firedAt = task.now;
+    task.advance(2_000);
+    await task.loops.completeTurns(task.scope, [
+      { id: first.task.id, fire: 1, end: "failed", error: "fetch failed" },
+      { id: second.task.id, fire: 1, end: "failed", error: "fetch failed" },
+    ]);
+
+    for (const id of [first.task.id, second.task.id]) {
+      const view = await task.loops.get(task.scope, id);
+      if (view?.task.kind !== "prompt-loop") throw new Error("expected a prompt loop");
+      expect(view.task.consecutiveFailures).toBe(1);
+      expect(view.task.lastError).toBe("fetch failed");
+      expect(view.task.lastFailureAt).toBe(task.now);
+      expect(view.task.nextFireAt).toBe(firedAt + 2_000 + 20_000);
+    }
+
+    // The healthy round clears both streaks, not only the loop the settle named.
+    task.advance(firedAt + 2_000 + 20_000 - task.now);
+    expect(await task.loops.pump(task.now)).toHaveLength(2);
+    const healedAt = task.now;
+    task.advance(1_000);
+    await task.loops.completeTurns(task.scope, [
+      { id: first.task.id, fire: 2, end: "healthy" },
+      { id: second.task.id, fire: 2, end: "healthy" },
+    ]);
+
+    for (const id of [first.task.id, second.task.id]) {
+      const view = await task.loops.get(task.scope, id);
+      if (view?.task.kind !== "prompt-loop") throw new Error("expected a prompt loop");
+      expect(view.task.consecutiveFailures).toBe(0);
+      expect(view.task.lastError).toBeUndefined();
+      expect(view.task.nextFireAt).toBe(healedAt + 10_000);
+    }
+    // One settle, one write: both loops and both closed schedules are on disk.
+    const records = await task.reload();
+    for (const id of [first.task.id, second.task.id]) {
+      expect(records.find((record) => record.id === id)).toMatchObject({
+        consecutiveFailures: 0,
+        nextFireAt: healedAt + 10_000,
+      });
+    }
   });
 
   it("completes after the maximum number of fires", async () => {
@@ -672,7 +918,7 @@ describe("LoopTasks", () => {
     });
 
     await expect(task.loops.update({ ...task.scope, id: created.task.id })).rejects.toThrow(
-      /Give an action or a schedule/,
+      /Give an action, a schedule or a prompt/,
     );
   });
 
@@ -728,5 +974,320 @@ describe("LoopTasks", () => {
     await expect(
       task.loops.create({ ...task.scope, schedule: "1h", prompt: "room again" }),
     ).resolves.toBeDefined();
+  });
+});
+
+describe("prompt file", () => {
+  /** The address of one loop's prompt file, derived the way the plugin derives it. */
+  function promptPath(task: Awaited<ReturnType<typeof setup>>, loopId: string): string {
+    return loopPromptPath(sessionTaskDirectory(task.scope.cwd, task.scope.sessionId), loopId);
+  }
+
+  async function createPromptLoop(
+    task: Awaited<ReturnType<typeof setup>>,
+    prompt = "review the diff",
+  ) {
+    return task.loops.create({ ...task.scope, schedule: "10s", prompt });
+  }
+
+  /** The record, once it is known to be the prompt loop the test created. */
+  async function promptLoopOf(
+    task: Awaited<ReturnType<typeof setup>>,
+    loopId: string,
+  ): Promise<PromptLoopTask> {
+    const view = await task.loops.get(task.scope, loopId);
+    if (view?.task.kind !== "prompt-loop")
+      throw new Error("the loop did not load as a prompt loop");
+    return view.task;
+  }
+
+  it("writes the prompt to the derived path when the loop is created", async () => {
+    const task = await setup();
+    const created = await createPromptLoop(task);
+
+    const path = promptPath(task, created.task.id);
+    expect(created.promptFile).toBe(path);
+    expect(await readFile(path, "utf8")).toBe("review the diff");
+    // The record keeps the same text as the seed, not a copy of the file's state.
+    expect((await promptLoopOf(task, created.task.id)).prompt).toBe("review the diff");
+  });
+
+  it("fires the text in the file, so an edited prompt reaches the next fire", async () => {
+    const task = await setup();
+    const created = await createPromptLoop(task);
+    await writeFile(promptPath(task, created.task.id), "refined wording\n", "utf8");
+
+    task.advance(10_000);
+    const fired = await task.loops.pump(task.now);
+
+    expect(fired).toHaveLength(1);
+    expect(fired[0]?.prompt).toBe("refined wording\n");
+    // Reading is not writing: the file stays exactly what the user saved.
+    expect(await readFile(promptPath(task, created.task.id), "utf8")).toBe("refined wording\n");
+  });
+
+  it("rebuilds a missing file from the record and says so on the record", async () => {
+    const task = await setup();
+    const created = await createPromptLoop(task);
+    const path = promptPath(task, created.task.id);
+    await rm(path);
+
+    task.advance(10_000);
+    const fired = await task.loops.pump(task.now);
+
+    expect(fired[0]?.prompt).toBe("review the diff");
+    expect(await readFile(path, "utf8")).toBe("review the diff");
+    expect((await promptLoopOf(task, created.task.id)).promptWarning).toContain("is missing");
+  });
+
+  it("treats a file of whitespace as unreadable, because an empty wake says nothing", async () => {
+    const task = await setup();
+    const created = await createPromptLoop(task);
+    const path = promptPath(task, created.task.id);
+    await writeFile(path, "  \n\t\n", "utf8");
+
+    task.advance(10_000);
+    const fired = await task.loops.pump(task.now);
+
+    expect(fired[0]?.prompt).toBe("review the diff");
+    expect(await readFile(path, "utf8")).toBe("review the diff");
+    expect((await promptLoopOf(task, created.task.id)).promptWarning).toContain("is empty");
+  });
+
+  it("clears the warning once the file reads cleanly again", async () => {
+    const task = await setup();
+    const created = await createPromptLoop(task);
+    const path = promptPath(task, created.task.id);
+    await rm(path);
+    task.advance(10_000);
+    await task.loops.pump(task.now);
+
+    task.advance(10_000);
+    await task.loops.pump(task.now);
+
+    expect((await promptLoopOf(task, created.task.id)).promptWarning).toBeUndefined();
+  });
+
+  it("keeps the schedule when the file cannot be read or rebuilt, and sends a diagnostic", async () => {
+    const task = await setup();
+    const created = await createPromptLoop(task);
+    const path = promptPath(task, created.task.id);
+    // A directory where the file belongs: unreadable, and the rebuild cannot rename over it.
+    await rm(path);
+    await mkdir(path);
+
+    task.advance(10_000);
+    const fired = await task.loops.pump(task.now);
+
+    expect(fired).toHaveLength(1);
+    const text = fired[0]?.prompt ?? "";
+    expect(text).toContain(path);
+    expect(text).toContain("keeps firing on its schedule");
+    const view = await task.loops.get(task.scope, created.task.id);
+    expect(view?.task.status).toBe("running");
+    expect(view?.task.fires).toBe(1);
+    expect(view?.task.nextFireAt).toBe(task.now + 10_000);
+  });
+
+  it("deletes the prompt file with the loop", async () => {
+    const task = await setup();
+    const created = await createPromptLoop(task);
+    const path = promptPath(task, created.task.id);
+
+    await task.loops.delete(task.scope, created.task.id);
+
+    await expect(readFile(path, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("gives a loop that predates the file its prompt file on the first fire", async () => {
+    const task = await setup();
+    const created = await createPromptLoop(task);
+    const path = promptPath(task, created.task.id);
+    await rm(path);
+
+    task.advance(10_000);
+    await task.loops.pump(task.now);
+
+    expect(await readFile(path, "utf8")).toBe("review the diff");
+  });
+
+  it("previews three non-empty lines and the file's own modification time", async () => {
+    const task = await setup();
+    const created = await createPromptLoop(task);
+    const path = promptPath(task, created.task.id);
+    const directory = sessionTaskDirectory(task.scope.cwd, task.scope.sessionId);
+    await writeFile(
+      path,
+      "\n  step one: check the queue  \n\nstep two\nstep three\nstep four that never shows\n",
+      "utf8",
+    );
+
+    const preview = await readPromptPreview(directory, created.task.id);
+
+    // The panel draws these three lines and no more, so the iteration list keeps its room.
+    expect(preview.path).toBe(path);
+    expect(preview.lines).toEqual(["step one: check the queue", "step two", "step three"]);
+    expect(preview.changedAt).toBe((await stat(path)).mtimeMs);
+    // Nothing went wrong, so the page has nothing to warn about.
+    expect(preview.problem).toBeUndefined();
+  });
+
+  it("names the path and previews nothing when the file is gone", async () => {
+    const task = await setup();
+    const created = await createPromptLoop(task);
+    const path = promptPath(task, created.task.id);
+    const directory = sessionTaskDirectory(task.scope.cwd, task.scope.sessionId);
+    await rm(path);
+
+    const preview = await readPromptPreview(directory, created.task.id);
+
+    // No throw and no preview: the reader gets the address, why there is no text,
+    // and the record's own warning when the last fire had to rebuild it.
+    expect(preview.path).toBe(path);
+    expect(preview.lines).toEqual([]);
+    expect(preview.changedAt).toBeUndefined();
+    expect(preview.problem).toBe("is missing");
+  });
+
+  it("keeps the file's time and names it empty when every line is blank", async () => {
+    const task = await setup();
+    const created = await createPromptLoop(task);
+    const path = promptPath(task, created.task.id);
+    const directory = sessionTaskDirectory(task.scope.cwd, task.scope.sessionId);
+    await writeFile(path, "  \n\t\n", "utf8");
+
+    const preview = await readPromptPreview(directory, created.task.id);
+
+    // A blank file is readable, so the panel can still say when it last changed;
+    // "is empty" is why there is nothing between the path and that time.
+    expect(preview.lines).toEqual([]);
+    expect(preview.changedAt).toBe((await stat(path)).mtimeMs);
+    expect(preview.problem).toBe("is empty");
+  });
+
+  it("replaces the text through an update, writing the derived path and not the seed", async () => {
+    const task = await setup();
+    const created = await createPromptLoop(task);
+    const path = promptPath(task, created.task.id);
+    const before = await promptLoopOf(task, created.task.id);
+
+    const updated = await task.loops.update({
+      ...task.scope,
+      id: created.task.id,
+      prompt: "review only the parser module",
+    });
+
+    expect(updated?.outcome).toBe("prompt-updated");
+    expect(updated?.promptWrite).toEqual({ outcome: "written" });
+    expect(await readFile(path, "utf8")).toBe("review only the parser module");
+    // The address is derived from the id, so an update cannot write anywhere else.
+    const directory = sessionTaskDirectory(task.scope.cwd, task.scope.sessionId);
+    expect((await readdir(directory)).filter((name) => name.endsWith(".prompt.md"))).toEqual([
+      `${created.task.id}.prompt.md`,
+    ]);
+    // The record keeps the creation text as its seed; only the file moved.
+    expect((await promptLoopOf(task, created.task.id)).prompt).toBe("review the diff");
+    expect(before.prompt).toBe("review the diff");
+
+    // The replacement is what the next fire sends, and it cost no fire and no iteration.
+    task.advance(10_000);
+    const fired = await task.loops.pump(task.now);
+    expect(fired[0]?.prompt).toBe("review only the parser module");
+    const after = await promptLoopOf(task, created.task.id);
+    expect(after.fires).toBe(1);
+    expect(after.iterations).toEqual([]);
+  });
+
+  it("keeps the old text and reports the failure when the write cannot land", async () => {
+    const task = await setup();
+    const created = await createPromptLoop(task);
+    const path = promptPath(task, created.task.id);
+    // A directory where the atomic write's temp file belongs: the write fails and
+    // the target keeps exactly the text it had.
+    await mkdir(tempPathFor(path));
+
+    const updated = await task.loops.update({
+      ...task.scope,
+      id: created.task.id,
+      prompt: "review only the parser module",
+    });
+
+    expect(updated?.outcome).toBe("prompt-write-failed");
+    expect(updated?.promptWrite).toMatchObject({ outcome: "failed" });
+    expect(await readFile(path, "utf8")).toBe("review the diff");
+    expect((await promptLoopOf(task, created.task.id)).prompt).toBe("review the diff");
+  });
+
+  it("refuses a prompt on a command loop, and an empty prompt on a prompt loop", async () => {
+    const task = await setup();
+    const prompt = await createPromptLoop(task);
+    const command = await task.loops.create({
+      ...task.scope,
+      schedule: "1h",
+      command: "echo hi",
+    });
+
+    await expect(
+      task.loops.update({ ...task.scope, id: command.task.id, prompt: "review the diff" }),
+    ).rejects.toThrow(/runs a command, so it has no prompt file to rewrite/i);
+    await expect(
+      task.loops.update({ ...task.scope, id: prompt.task.id, prompt: "   " }),
+    ).rejects.toThrow(/empty/i);
+    expect(await readFile(promptPath(task, prompt.task.id), "utf8")).toBe("review the diff");
+  });
+
+  it("takes a new prompt together with a retune in one call", async () => {
+    const task = await setup();
+    const created = await createPromptLoop(task);
+
+    const updated = await task.loops.update({
+      ...task.scope,
+      id: created.task.id,
+      schedule: "1h",
+      prompt: "review only the parser module",
+    });
+
+    expect(updated?.outcome).toBe("rescheduled");
+    expect(updated?.promptWrite).toEqual({ outcome: "written" });
+    expect(updated?.view.task.nextFireAt).toBe(task.now + 3_600_000);
+    expect(await readFile(promptPath(task, created.task.id), "utf8")).toBe(
+      "review only the parser module",
+    );
+  });
+
+  it("leaves the text alone when the same call carries an unusable schedule", async () => {
+    const task = await setup();
+    const created = await createPromptLoop(task);
+
+    await expect(
+      task.loops.update({
+        ...task.scope,
+        id: created.task.id,
+        schedule: "every other tuesday",
+        prompt: "review only the parser module",
+      }),
+    ).rejects.toThrow(/Invalid schedule/);
+
+    // Nothing half-applied: the refusal came before the write, not after it.
+    expect(await readFile(promptPath(task, created.task.id), "utf8")).toBe("review the diff");
+    expect((await promptLoopOf(task, created.task.id)).schedule).toBe("10s");
+  });
+
+  it("clears a warning about a rebuilt prompt once the text is replaced", async () => {
+    const task = await setup();
+    const created = await createPromptLoop(task);
+    await rm(promptPath(task, created.task.id));
+    task.advance(10_000);
+    await task.loops.pump(task.now);
+    expect((await promptLoopOf(task, created.task.id)).promptWarning).toContain("is missing");
+
+    await task.loops.update({
+      ...task.scope,
+      id: created.task.id,
+      prompt: "review only the parser module",
+    });
+
+    // The file is healthy now, so the old warning would be a lie the panel repeats.
+    expect((await promptLoopOf(task, created.task.id)).promptWarning).toBeUndefined();
   });
 });

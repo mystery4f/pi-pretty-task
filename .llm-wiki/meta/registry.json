@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "last_updated": "2026-11-24T16:57:20.890Z",
+  "last_updated": "2026-11-25T17:00:48.080Z",
   "pages": {
     "sources/await-state-not-bytes-in-process-tests": {
       "type": "source",
@@ -19,6 +19,33 @@
       "slug": "delete-remote-branch-via-gh-api",
       "created": "2026-11-15",
       "updated": "2026-11-15"
+    },
+    "sources/git-cat-file-full-sha-flake-multipack": {
+      "type": "source",
+      "title": "git cat-file -e rejects a valid full SHA in a multi-pack repo",
+      "category": "bugfix",
+      "status": "insight",
+      "slug": "git-cat-file-full-sha-flake-multipack",
+      "created": "2026-11-25",
+      "updated": "2026-11-25"
+    },
+    "sources/matt-implement-gate-needs-node-modules": {
+      "type": "source",
+      "title": "A typed workflow gate returns null when its worktree lacks node_modules",
+      "category": "devops",
+      "status": "insight",
+      "slug": "matt-implement-gate-needs-node-modules",
+      "created": "2026-11-25",
+      "updated": "2026-11-25"
+    },
+    "sources/matt-implement-sync-ticket-comments": {
+      "type": "source",
+      "title": "matt-implement sync reads merge SHA from a ticket's Comments section",
+      "category": "devops",
+      "status": "insight",
+      "slug": "matt-implement-sync-ticket-comments",
+      "created": "2026-11-25",
+      "updated": "2026-11-25"
     },
     "sources/npm-trusted-publishing-oidc-not-token": {
       "type": "source",
@@ -270,6 +297,23 @@
       "created": "2026-11-24",
       "updated": "2026-11-24"
     },
+    "sources/obs-2026-11-25-pi-auto-retry": {
+      "type": "source",
+      "title": "Observation: pi 扩展拿不到 auto_retry 事件，重试进度只能派生",
+      "tags": [
+        "pi-extension",
+        "api-gap",
+        "retry",
+        "loop"
+      ],
+      "status": "observation",
+      "slug": "obs-2026-11-25-pi-auto-retry",
+      "relevance": "high",
+      "observed_at": "2026-11-25T12:35:33.885Z",
+      "source_context": "pi-pretty-task 实现 ticket #47（重试可见）时子代理发现的 API 缺口",
+      "created": "2026-11-25",
+      "updated": "2026-11-25"
+    },
     "sources/pi-extension-stale-instance-unhandled-rejection": {
       "type": "source",
       "title": "pi 扩展实例失效后的 sendMessage 抛出会杀死进程",
@@ -350,6 +394,15 @@
       "slug": "slow-suite-timings-not-workers",
       "created": "2026-11-15",
       "updated": "2026-11-15"
+    },
+    "sources/subagent-structured-verdict-path": {
+      "type": "source",
+      "title": "Subagent structured verdicts live in structured-output/output.json, not the artifact md",
+      "category": "tooling",
+      "status": "insight",
+      "slug": "subagent-structured-verdict-path",
+      "created": "2026-11-25",
+      "updated": "2026-11-25"
     },
     "sources/windows-ci-slow-fsync-record-write": {
       "type": "source",

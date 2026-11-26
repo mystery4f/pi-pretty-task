@@ -197,8 +197,19 @@ export interface LoopBase extends TaskBase {
  */
 export interface PromptLoopTask extends LoopBase {
   readonly kind: "prompt-loop";
-  /** Message injected into the session on every fire. */
+  /**
+   * The text the loop was created with: the seed a fire writes back when the
+   * prompt file cannot be read, never the text a fire sends (ADR-0024) — the file
+   * is what the model receives.
+   */
   readonly prompt: string;
+  /**
+   * Why the last fire could not read the prompt file, cleared once it reads
+   * cleanly again. Kept on the record so the panel can show a stale file.
+   * Mutable on purpose — the pump rewrites it on every fire, and replacing the
+   * record would race the schedule.
+   */
+  promptWarning?: string;
   /**
    * The turns this schedule woke, oldest first, each a child record and never a
    * task of its own (ADR-0002). Capped by ITERATION_HISTORY_LIMIT.
@@ -206,6 +217,14 @@ export interface PromptLoopTask extends LoopBase {
   iterations: Iteration[];
   /** Iterations the history cap dropped; non-zero means the loop's list is truncated. */
   droppedIterations?: number;
+  /**
+   * What the provider said when it last gave up on a fire's turn (ticket #46).
+   * `error` above is the schedule's own stop reason, so a turn that failed needs
+   * a field of its own; a turn that finished clears it.
+   */
+  lastError?: string;
+  /** Epoch ms of that failed turn, cleared with it. */
+  lastFailureAt?: number;
 }
 
 /**

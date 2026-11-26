@@ -3,6 +3,9 @@
     "syntheses/verify-red-tests-handoff"
   ],
   "sources/delete-remote-branch-via-gh-api": [],
+  "sources/git-cat-file-full-sha-flake-multipack": [],
+  "sources/matt-implement-gate-needs-node-modules": [],
+  "sources/matt-implement-sync-ticket-comments": [],
   "sources/npm-trusted-publishing-oidc-not-token": [],
   "sources/obs-2026-11-14-kill-path-skipped-persist-and-notice-in-pi-pretty-task": [],
   "sources/obs-2026-11-14-loop-wake-backlog-storms-after-a-long-turn": [],
@@ -22,6 +25,7 @@
   "sources/obs-2026-11-21-": [],
   "sources/obs-2026-11-22-gif": [],
   "sources/obs-2026-11-24-pi-lens-test-tsconfig": [],
+  "sources/obs-2026-11-25-pi-auto-retry": [],
   "sources/pi-extension-stale-instance-unhandled-rejection": [],
   "sources/pi-git-install-omits-dev-deps-so-ship-ts-entry": [
     "syntheses/release-1-0-0-publish-support"
@@ -44,6 +48,7 @@
   "sources/slow-suite-timings-not-workers": [
     "sources/await-state-not-bytes-in-process-tests"
   ],
+  "sources/subagent-structured-verdict-path": [],
   "sources/windows-ci-slow-fsync-record-write": [],
   "sources/windows-taskkill-t-needs-force-for-console-node": [
     "sources/slow-suite-timings-not-workers"

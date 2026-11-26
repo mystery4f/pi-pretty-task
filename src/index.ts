@@ -22,7 +22,7 @@ import type { TaskScope } from "./tasks/base/runtime-state.js";
 import { readSettings } from "./tasks/base/settings.js";
 import { TaskSessions } from "./tasks/base/task-sessions.js";
 import { ChainTasks } from "./tasks/chain/chain-tasks.js";
-import { Iterations } from "./tasks/loop/iterations.js";
+import { Iterations, retryBudget } from "./tasks/loop/iterations.js";
 import { type LoopFire, LoopTasks } from "./tasks/loop/loop-tasks.js";
 import { loopTaskTools } from "./tasks/loop/tools.js";
 import { WakeDesk } from "./tasks/loop/wake-desk.js";
@@ -117,11 +117,12 @@ export interface ExtensionController {
 const DEFAULT_PUMP_INTERVAL_MS = 1_000;
 
 /** Recording is bookkeeping: a failure belongs on stderr, never in the session. */
-async function recordSafely(work: Promise<void>): Promise<void> {
+async function recordSafely<T>(work: Promise<T>): Promise<T | undefined> {
   try {
-    await work;
+    return await work;
   } catch (error) {
     process.stderr.write(`pi-pretty-task: iteration record failed: ${String(error)}\n`);
+    return undefined;
   }
 }
 
@@ -534,13 +535,33 @@ export function createExtension(
   pi.on("tool_execution_end", async (event, ctx) => {
     await recordSafely(iterations.recordEnd(scopeOf(ctx), event));
   });
+  // A provider retry has no event of its own: pi 1.5.2 keeps `auto_retry_start` and
+  // `auto_retry_end` to its own listeners, and `ExtensionAPI.on` has no retry event
+  // to subscribe to. So the attempt is counted from the assistant message that
+  // ended with an error, and the attempt after it clears the count (ticket #47).
+  pi.on("message_end", async (event, ctx) => {
+    const message = event.message;
+    await recordSafely(
+      iterations.recordAttempt(scopeOf(ctx), {
+        role: message.role,
+        ...(message.role === "assistant"
+          ? { stopReason: message.stopReason, errorMessage: message.errorMessage }
+          : {}),
+        maxAttempts: retryBudget(pi.getSettings()),
+      }),
+    );
+  });
   // `agent_settled` is the end of the turn: no retry, compaction or queued
   // continuation will run after it, so the iteration can close. The settle runs
   // first, then the wakes this turn was blocking go out — a wake never shares a
   // settle with the turn before it, and its own events open the next run.
   pi.on("agent_settled", async (event, ctx) => {
     await remember(ctx);
-    await recordSafely(iterations.settle(scopeOf(ctx), event.aborted));
+    // The turn's outcome reaches every loop that fired it (ticket #46), so a fire the
+    // provider gave up on is counted before the next wake can fire. One turn can be
+    // several loops' fire, which is why the settle reports one result per loop.
+    const turns = await recordSafely(iterations.settle(scopeOf(ctx), event.aborted));
+    await recordSafely(loops.completeTurns(scopeOf(ctx), turns ?? []));
     await wakes.settled();
   });
   pi.on("session_shutdown", () => {

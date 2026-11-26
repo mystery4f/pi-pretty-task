@@ -6,6 +6,9 @@
 
 - [[sources/await-state-not-bytes-in-process-tests]] — 进程类测试要等状态，不要等字节 *(created: 2026-11-15)*
 - [[sources/delete-remote-branch-via-gh-api]] — 删远端分支走 gh API，git push --delete 会被拦 *(created: 2026-11-15)*
+- [[sources/git-cat-file-full-sha-flake-multipack]] — git cat-file -e rejects a valid full SHA in a multi-pack repo *(created: 2026-11-25)*
+- [[sources/matt-implement-gate-needs-node-modules]] — A typed workflow gate returns null when its worktree lacks node_modules *(created: 2026-11-25)*
+- [[sources/matt-implement-sync-ticket-comments]] — matt-implement sync reads merge SHA from a ticket's Comments section *(created: 2026-11-25)*
 - [[sources/npm-trusted-publishing-oidc-not-token]] — npm 发布改用 trusted publishing（OIDC），放弃绕 2FA 的长期 token *(created: 2026-11-24)*
 - [[sources/obs-2026-11-14-kill-path-skipped-persist-and-notice-in-pi-pretty-task]] — Observation: Kill path skipped persist and notice in pi-pretty-task *(created: 2026-11-14)*
 - [[sources/obs-2026-11-14-loop-wake-backlog-storms-after-a-long-turn]] — Observation: Loop wake backlog storms after a long turn *(created: 2026-11-14)*
@@ -21,6 +24,7 @@
 - [[sources/obs-2026-11-21-]] — Observation: 订阅模式不做「一行一触发」，订阅也不新开页签 *(created: 2026-11-21)*
 - [[sources/obs-2026-11-22-gif]] — Observation: GIF 里"看不见"的新功能属于节奏问题 *(created: 2026-11-22)*
 - [[sources/obs-2026-11-24-pi-lens-test-tsconfig]] — Observation: pi-lens 告警清零：抑制语法与 test tsconfig 项目 *(created: 2026-11-24)*
+- [[sources/obs-2026-11-25-pi-auto-retry]] — Observation: pi 扩展拿不到 auto_retry 事件，重试进度只能派生 *(created: 2026-11-25)*
 - [[sources/pi-extension-stale-instance-unhandled-rejection]] — pi 扩展实例失效后的 sendMessage 抛出会杀死进程 *(created: 2026-11-24)*
 - [[sources/pi-git-install-omits-dev-deps-so-ship-ts-entry]] — pi 的 git 安装不带 devDeps，入口要写 .ts 而不是靠 prepare 构建 *(created: 2026-11-15)*
 - [[sources/pi-pretty-task-full-suite-parallel-flake]] — 全量 integration 套件在 8 worker 下间歇超时，串行才是确定性证据 *(created: 2026-11-24)*
@@ -30,6 +34,7 @@
 - [[sources/pi-pretty-task-session-hub-required]] — 会话 hub 必须由入口注入，默认值会分裂写入权 *(created: 2026-11-16)*
 - [[sources/pi-pretty-task-side-index-to-field]] — 并行索引应当塌回记录上的一个字段 *(created: 2026-11-16)*
 - [[sources/slow-suite-timings-not-workers]] — 慢测试先治写死的时长，再谈并行度 *(created: 2026-11-15)*
+- [[sources/subagent-structured-verdict-path]] — Subagent structured verdicts live in structured-output/output.json, not the artifact md *(created: 2026-11-25)*
 - [[sources/windows-ci-slow-fsync-record-write]] — Windows CI: fsync per state write outran the record wait *(created: 2026-11-16)*
 - [[sources/windows-taskkill-t-needs-force-for-console-node]] — Windows 上 taskkill /T 不加 /F 停不下控制台 node *(created: 2026-11-15)*
 
@@ -43,4 +48,4 @@
 - [[syntheses/verify-red-tests-handoff]] — verify 红测修复交接（5 个 integration 用例） *(created: 2026-11-16)*
 
 ---
-*Last updated: 2026-11-24T16:57:20.890Z* | *Total pages: 34*
+*Last updated: 2026-11-25T17:00:48.080Z* | *Total pages: 39*

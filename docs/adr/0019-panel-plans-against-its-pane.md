@@ -22,7 +22,7 @@ Herdr 分格之后 `/tasks` 的详情页"看不到信息"，实测两个 pane：
 
 `detailRows(height, below)` 把一页可用的行（`height − FRAME_ROWS − 两条框线 − 窗口下方行数`）分成字段与窗口两块，**窗口优先**：先拿 `DETAIL_MIN_OUTPUT_LINES`，最多长到 `DETAIL_OUTPUT_LINES`；字段拿剩下的、上限 `DETAIL_FIELD_RESERVE`。矮 pane 上先让位的是字段——一页 process 详情存在的理由就是看输出。字段按整块丢，用 `… N more fields — a taller pane shows them` 明说，不静默少画。
 
-宽度分两档：≥ `DETAIL_WIDE_MIN_WIDTH` 标签列 `LABEL_WIDTH` 内联、仍超宽才截断；更窄时标签独占一行、值缩进 2 列。`Command` / `CWD` / `Output` / `Prompt` / `Error` 这类长值一律 `wrapTextWithAnsi` 折行，不再右截成省略号——折行让行数变多，正是上面那份预算要处理的事。
+宽度分两档：≥ `DETAIL_WIDE_MIN_WIDTH` 标签列 `LABEL_WIDTH` 内联、仍超宽才截断；更窄时标签独占一行、值缩进 2 列。`Command` / `CWD` / `Output` / `Prompt file` / `Error` 这类长值一律 `wrapTextWithAnsi` 折行，不再右截成省略号——折行让行数变多，正是上面那份预算要处理的事。
 
 子行的状态前置：chain 步骤是 `标记 + 状态 + 名字 + · exit/耗时`，被截时留下的是能解释卡住的那两个字。列表的分页行从窗口里扣（`listWindow`），滚动钳位与渲染读同一个数，否则最后一行永远在折叠线下。
 

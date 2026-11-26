@@ -28,8 +28,10 @@ import type {
   Iteration,
   IterationCall,
   IterationCallStatus,
+  IterationRetry,
   IterationStatus,
 } from "../../tasks/loop/iteration.js";
+import type { PromptPreview } from "../../tasks/loop/prompt-file.js";
 import { STATUS_COLOUR } from "../status-colour.js";
 import { DETAIL_OUTPUT_LINES, type PanelTaskView } from "./model.js";
 
@@ -53,6 +55,29 @@ export function exitText(task: Task): string {
   // rows in its detail (ADR-0015).
   const code = task.kind === "cmd-loop" ? task.lastExitCode : task.exitCode;
   return code === undefined ? "" : `exit ${String(code)}`;
+}
+
+/**
+ * The provider retry as one phrase: `retry 2/4`, and the status the failure named
+ * when it named one. The denominator is every attempt the turn is allowed — pi's
+ * retry budget plus the first try — because `attempt` counts the first try too: a
+ * budget of 3 gives four attempts, and the fourth failure is the one pi gives up
+ * on. A fire that spent those attempts on a busy provider otherwise reads as one
+ * ordinary slow turn (ticket #47).
+ */
+export function retryText(retry: IterationRetry): string {
+  const count = `retry ${String(retry.attempt)}/${String(retry.maxAttempts + 1)}`;
+  return retry.status === undefined ? count : `${count} · ${retry.status}`;
+}
+
+/**
+ * The retry a loop is on right now: only an open turn can be retrying, so a record
+ * left behind by a turn that ended — a process that died mid-turn — is not shown as
+ * in flight. What a finished turn's retry was is read on its own iteration page.
+ */
+export function openRetry(task: PromptLoopTask): IterationRetry | undefined {
+  const newest = task.iterations[task.iterations.length - 1];
+  return newest?.status === "running" ? newest.retry : undefined;
 }
 
 /**
@@ -102,24 +127,36 @@ export function rightText(
   // failure streak sits next to the count, and the wait it pushed out is labelled
   // a backoff so the two read together (ADR-0017).
   const streak = failureStreak(task);
-  const failed = streak === 0 ? "" : ` · ${String(streak)} failed`;
-  const state = `${elapsed} · ${firesText(task)} fires${failed}`;
+  // The streak without its separator, so it can stand alone once the count is gone.
+  const streakText = streak === 0 ? "" : `${String(streak)} failed`;
+  const failed = streakText === "" ? "" : ` · ${streakText}`;
+  // A turn pi is retrying is the loudest thing the row can say about right now: a
+  // fire that spent three attempts on a busy provider is not an ordinary slow one
+  // (ticket #47). Only prompt loops wake a model, so only they can be retrying.
+  const retry = task.kind === "prompt-loop" ? openRetry(task) : undefined;
+  const retrying = retry === undefined ? "" : ` · ${retryText(retry)}`;
+  const state = `${elapsed} · ${firesText(task)} fires${failed}${retrying}`;
   const backingOff = streak > 0 ? " (backoff)" : "";
   const next =
     row.untilNextFireMs === undefined
       ? undefined
       : ` · next ${formatDuration(row.untilNextFireMs)}`;
-  // The state the ticket asks the row to carry is the streak and the backoff, so
-  // the age gives way first, then the word marking the wait a backoff, then the
-  // wait itself. The count is the last number to go, and a row too narrow even for
-  // it drops the numbers instead of crossing the border (ADR-0015, ticket #34).
+  // The state the ticket asks the row to carry is the streak, the retry and the
+  // backoff, so the age gives way first, then the word marking the wait a backoff,
+  // then the wait itself, and then the fire count. The streak outlives the count: a
+  // row that kept `4 fires` and dropped `2 failed` would make a failing loop read as
+  // a working one at the very width a reader is skimming, so it is the last thing to
+  // go — and a row too narrow even for it drops the numbers instead of crossing the
+  // border (ADR-0015, spec story 10, tickets #34 and #50).
   const fires = `${firesText(task)} fires`;
+  const keep = streakText === "" ? fires : streakText;
   const candidates = [
     `${state}${next ?? ""}${backingOff}${age}`,
     `${state}${next ?? ""}${backingOff}`,
     ...(next === undefined ? [] : [`${state}${next}`, state]),
-    `${fires}${failed}`,
-    fires,
+    `${fires}${failed}${retrying}`,
+    `${keep}${retrying}`,
+    keep,
   ];
   return candidates.find((candidate) => visibleWidth(candidate) <= room) ?? "";
 }
@@ -174,11 +211,16 @@ export function firesText(task: LoopBase): string {
   return `${String(task.fires)} / ${String(task.maxFires)}`;
 }
 /**
- * Failed fires in a row on a command loop. Only a fire that ran can fail, so an
- * prompt loop never carries a streak and its rows never claim one (ADR-0017).
+ * Failed fires in a row: a command loop counts a fire that exited non-zero, and a
+ * prompt loop one whose turn the provider gave up on (ticket #46) — the same count
+ * on the same backoff curve, cleared by the same healthy fire (ADR-0017). A process
+ * and a chain have no schedule to fail, so they answer zero.
  */
 export function failureStreak(task: Task): number {
-  return task.kind === "cmd-loop" ? (task.consecutiveFailures ?? 0) : 0;
+  if (task.kind === "cmd-loop" || task.kind === "prompt-loop") {
+    return task.consecutiveFailures ?? 0;
+  }
+  return 0;
 }
 
 /** A raised signal on a command loop: the check has something outstanding (ADR-0018). */
@@ -290,8 +332,38 @@ export function stepColour(status: TaskStatus): ThemeColor {
   }
 }
 
-/** One iteration row: fire number, result, when it ran, and what it cost. */
-export function iterationLine(iteration: Iteration): string {
+/**
+ * A fire whose turn finished cleanly and recorded no tool call: it spent a model
+ * call and moved nothing. A turn cut short — aborted, or interrupted with the
+ * process — is not one: it never got the chance to work (ticket #49).
+ */
+function emptyFire(iteration: Iteration): boolean {
+  return iteration.status === "completed" && iteration.calls.length === 0;
+}
+
+/**
+ * Consecutive fires that made no tool call, counting back from this one through
+ * the record's own order (oldest first). One quiet turn is legitimate — a turn
+ * may read files and think before acting — so a row marks a fire only from the
+ * second one of a run (ticket #49).
+ */
+function emptyFireRun(iterations: readonly Iteration[], iteration: Iteration): number {
+  const end = iterations.findIndex((candidate) => candidate.fire === iteration.fire);
+  if (end < 0) return emptyFire(iteration) ? 1 : 0;
+  let run = 0;
+  for (let index = end; index >= 0; index -= 1) {
+    const earlier = iterations[index];
+    if (earlier === undefined || !emptyFire(earlier)) break;
+    run += 1;
+  }
+  return run;
+}
+
+/**
+ * One iteration row: fire number, result, when it ran, what it cost, and — once a
+ * second fire in a row made no call — the run that says the loop has stalled.
+ */
+export function iterationLine(iteration: Iteration, iterations: readonly Iteration[]): string {
   const parts = [
     `fire ${String(iteration.fire)}`,
     iteration.status,
@@ -300,10 +372,12 @@ export function iterationLine(iteration: Iteration): string {
   if (iteration.endedAt !== undefined) {
     parts.push(formatDuration(iteration.endedAt - iteration.startedAt));
   }
-  parts.push(iteration.calls.length === 1 ? "1 call" : `${String(iteration.calls.length)} calls`);
+  parts.push(callsText(iteration));
   if (iteration.droppedCalls > 0) {
     parts.push(`+${String(iteration.droppedCalls)} earlier calls dropped`);
   }
+  const empty = emptyFireRun(iterations, iteration);
+  if (empty > 1) parts.push(`${String(empty)} empty in a row`);
   return parts.join(" · ");
 }
 
@@ -361,4 +435,31 @@ export function kindWord(kind: TaskKind): "proc" | "llm" | "cmd" | "chn" {
       // The word a reader types to find a chain once the panel gives it a tab (#27).
       return "chn";
   }
+}
+
+/**
+ * What a loop page says under the prompt's path. `lines` is at most the three the
+ * loop layer trimmed; `changed` carries the file's own time in the same clock the
+ * `Updated` row above it uses, so a reader can tell a prompt written a moment ago
+ * from one nobody has touched. `problem` is whatever needs saying alongside them:
+ * the record's own warning first — a fire that fell back to the creation text
+ * leaves behind a file that reads fine again, so the file alone would hide it —
+ * and otherwise the file's own state ("the prompt file is empty").
+ */
+export interface PromptBody {
+  readonly lines: readonly string[];
+  readonly changed?: string;
+  readonly problem?: string;
+}
+
+export function promptBody(preview: PromptPreview, warning: string | undefined): PromptBody {
+  const changed =
+    preview.changedAt === undefined ? undefined : `changed ${formatClockTime(preview.changedAt)}`;
+  const problem =
+    warning ?? (preview.problem === undefined ? undefined : `the prompt file ${preview.problem}`);
+  return {
+    lines: preview.lines,
+    ...(changed === undefined ? {} : { changed }),
+    ...(problem === undefined ? {} : { problem }),
+  };
 }

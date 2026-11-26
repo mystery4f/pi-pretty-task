@@ -26,6 +26,8 @@ import {
   iterationsText,
   missedText,
   nextFireText,
+  promptBody,
+  retryText,
   STEP_MARK,
   singleLine,
   stepColour,
@@ -218,6 +220,25 @@ export function renderLoopDetail(panel: PanelView, row: PanelTaskView, width: nu
   const task = row.task;
   if (task.kind !== "prompt-loop") return renderList(panel, width);
   const colour = STATUS_COLOUR[task.status];
+  const streak = failureStreak(task);
+  // A prompt loop's fire can fail once the provider gives up on its turn, and the
+  // streak it leaves explains why the next fire is later than the expression says.
+  // The count, the time and the error sit with the schedule facts and never rewrite
+  // them, exactly as a command loop's page draws the same run (ADR-0017, ticket #50).
+  // The message is coloured as the failure it is, not as the loop's own status.
+  // `Failed at`, not `Last failure`: the label column is LABEL_WIDTH wide *with* its
+  // colon and `field` pads the label to exactly that, so a twelve-character label
+  // loses its colon and its value glues onto a chopped word (model.ts:37). The
+  // command loop's `Wake on failure` already ships that clipping; not fixed here.
+  const failureFacts: string[] = [
+    ...(streak > 0 ? field(panel, "Failures", `${String(streak)} in a row`) : []),
+    ...(task.lastFailureAt === undefined
+      ? []
+      : field(panel, "Failed at", updatedText(panel, task.lastFailureAt))),
+    ...(task.lastError === undefined
+      ? []
+      : block(panel, "Last error", theme.fg(STATUS_COLOUR.failed, task.lastError))),
+  ];
   const groups: string[][] = [
     field(panel, "Status", theme.fg(colour, task.status)),
     field(panel, "Kind", task.kind),
@@ -226,16 +247,17 @@ export function renderLoopDetail(panel: PanelView, row: PanelTaskView, width: nu
     field(panel, "Updated", updatedText(panel, task.updatedAt)),
     field(panel, "Schedule", task.schedule),
     field(panel, "Fires", firesText(task)),
-    field(panel, "Next fire", nextFireText(task, row)),
+    field(panel, "Next fire", nextFireText(task, row, streak > 0)),
     field(
       panel,
       "Last fire",
       task.lastFireAt === undefined ? "—" : formatClockTime(task.lastFireAt),
     ),
+    failureFacts,
     task.expiresAt === undefined ? [] : field(panel, "Expires", formatClockTime(task.expiresAt)),
     task.endedAt === undefined ? [] : field(panel, "Ended", formatClockTime(task.endedAt)),
     task.error === undefined ? [] : block(panel, "Error", theme.fg(colour, task.error)),
-    block(panel, "Prompt", task.prompt),
+    promptBlock(panel, task.promptWarning),
   ];
 
   const notice = panel.notice === undefined ? 0 : 1;
@@ -257,7 +279,9 @@ export function renderLoopDetail(panel: PanelView, row: PanelTaskView, width: nu
     if (top > 0) body.push(theme.fg("dim", `  … ${String(top)} newer above`));
     for (const iteration of visible) {
       const marker = iteration.fire === selected?.fire ? theme.fg("accent", "›") : " ";
-      const text = iterationLine(iteration);
+      // The row's mark depends on the fires before it, so the whole record is
+      // handed over rather than a number the renderer would have to derive.
+      const text = iterationLine(iteration, task.iterations);
       body.push(`${marker} ${truncateToWidth(text, Math.max(1, width - 4), "…", false)}`);
     }
     const below = newestFirst.length - top - visible.length;
@@ -385,6 +409,11 @@ export function renderIterationDetail(panel: PanelView, width: number): string[]
   const groups: string[][] = [
     field(panel, "Status", theme.fg(ITERATION_COLOUR[iteration.status], iteration.status)),
     field(panel, "Started", formatClockTime(iteration.startedAt)),
+    // What the turn spent on a provider that was failing, whether it is still
+    // doing so or has since finished (ticket #47).
+    iteration.retry === undefined
+      ? []
+      : field(panel, "Retry", theme.fg("warning", retryText(iteration.retry))),
     iteration.endedAt === undefined
       ? []
       : field(panel, "Took", formatDuration(iteration.endedAt - iteration.startedAt)),
@@ -571,6 +600,32 @@ function wrapValue(panel: PanelView, value: string, indent: number): string[] {
   const lines = wrapTextWithAnsi(value, room);
   const lead = " ".repeat(indent);
   return (lines.length === 0 ? [""] : lines).map((line) => `${lead}${line}`);
+}
+
+/**
+ * The prompt's own block: the file's address, three lines of it and when it last
+ * changed — plus whatever the record has to say about it. The prompt is a file,
+ * and the whole of it is never drawn here: the iteration list below is what a
+ * reader opens this page for (ticket #48).
+ */
+function promptBlock(panel: PanelView, warning: string | undefined): string[] {
+  const preview = panel.promptPreview;
+  if (preview === undefined) return [];
+  const theme = panel.theme;
+  const body = promptBody(preview, warning);
+  // The labelled value above continues at LABEL_WIDTH on a wide pane, so its own
+  // sublines continue there too; a narrow pane starts both at 2 (ADR-0019).
+  const indent = panel.renderWidth >= DETAIL_WIDE_MIN_WIDTH ? LABEL_WIDTH : 2;
+  const sub = (text: string, colour: "dim" | "warning"): string[] =>
+    wrapValue(panel, text, indent).map((line) => theme.fg(colour, line));
+  return [
+    ...block(panel, "Prompt file", preview.path),
+    // The warning sits right under the path it is about; a fired loop that had to
+    // rebuild the file carries it even now that the file reads fine again.
+    ...(body.problem === undefined ? [] : sub(body.problem, "warning")),
+    ...body.lines.flatMap((line) => sub(line, "dim")),
+    ...(body.changed === undefined ? [] : sub(body.changed, "dim")),
+  ];
 }
 
 export function sessionField(panel: PanelView, row: PanelTaskView): string[] {

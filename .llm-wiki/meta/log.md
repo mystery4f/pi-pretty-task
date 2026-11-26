@@ -101,3 +101,18 @@
 ## [2026-11-24T16:57:20.846Z] retro
 - slug: "npm-trusted-publishing-oidc-not-token", title: "npm 发布改用 trusted publishing（OIDC），放弃绕 2FA 的长期 token", category: "ci"
 
+## [2026-11-25T12:35:33.893Z] observe
+- slug: "obs-2026-11-25-pi-auto-retry", title: "pi 扩展拿不到 auto_retry 事件，重试进度只能派生", relevance: "high"
+
+## [2026-11-25T17:00:27.413Z] retro
+- slug: "matt-implement-sync-ticket-comments", title: "matt-implement sync reads merge SHA from a ticket's Comments section", category: "devops"
+
+## [2026-11-25T17:00:32.930Z] retro
+- slug: "matt-implement-gate-needs-node-modules", title: "A typed workflow gate returns null when its worktree lacks node_modules", category: "devops"
+
+## [2026-11-25T17:00:40.250Z] retro
+- slug: "git-cat-file-full-sha-flake-multipack", title: "git cat-file -e rejects a valid full SHA in a multi-pack repo", category: "bugfix"
+
+## [2026-11-25T17:00:48.062Z] retro
+- slug: "subagent-structured-verdict-path", title: "Subagent structured verdicts live in structured-output/output.json, not the artifact md", category: "tooling"
+

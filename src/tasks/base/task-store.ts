@@ -9,13 +9,15 @@
  * @author mystery4f <40482524+mystery4f@users.noreply.github.com>
  */
 
-import { mkdir, open, readFile, rename } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import type {
   Iteration,
   IterationCall,
   IterationCallStatus,
+  IterationRetry,
   IterationStatus,
 } from "../loop/iteration.js";
+import { writeAtomic } from "./atomic.js";
 import { previousTaskRecordPath, taskRecordPath } from "./runtime-state.js";
 import type {
   ChainTask,
@@ -181,6 +183,9 @@ function parseTask(value: unknown, legacyKind: boolean): Task | undefined {
   if (kind === "prompt-loop") {
     if (!hasLoopFields(value)) return undefined;
     if (typeof value.prompt !== "string" || value.prompt.trim().length === 0) return undefined;
+    if (value.promptWarning !== undefined && typeof value.promptWarning !== "string") {
+      return undefined;
+    }
     const iterations = parseIterations(value.iterations);
     if (iterations === undefined) return undefined;
     const droppedIterations = value.droppedIterations;
@@ -192,6 +197,10 @@ function parseTask(value: unknown, legacyKind: boolean): Task | undefined {
     ) {
       return undefined;
     }
+    // The last turn the provider gave up on (ticket #46). A record written before
+    // a turn could fail has neither field, so both are optional and checked here.
+    if (value.lastError !== undefined && typeof value.lastError !== "string") return undefined;
+    if (value.lastFailureAt !== undefined && !isFiniteNumber(value.lastFailureAt)) return undefined;
     // SAFETY: the loop fields a prompt loop needs were checked above.
     return { ...value, kind, updatedAt, iterations } as unknown as Task;
   }
@@ -303,8 +312,12 @@ function parseIteration(value: unknown): Iteration | undefined {
     if (call === undefined) return undefined;
     calls.push(call);
   }
-  // SAFETY: the iteration's own fields and every call were parsed above.
-  return { ...value, calls } as unknown as Iteration;
+  // The retry is written only while a turn is open, so its absence is the normal
+  // read: a record the process stopped writing still has a valid turn record.
+  const retry = value.retry === undefined ? undefined : parseIterationRetry(value.retry);
+  if (value.retry !== undefined && retry === undefined) return undefined;
+  // SAFETY: the iteration's own fields, its retry and every call were parsed above.
+  return { ...value, calls, ...(retry === undefined ? {} : { retry }) } as unknown as Iteration;
 }
 
 function parseIterationCall(value: unknown): IterationCall | undefined {
@@ -319,6 +332,24 @@ function parseIterationCall(value: unknown): IterationCall | undefined {
   if (!ITERATION_CALL_STATUSES.some((status) => status === value.status)) return undefined;
   // SAFETY: every field and the status of an IterationCall was checked above.
   return value as unknown as IterationCall;
+}
+
+/**
+ * The provider retry a turn was on. Attempt counts are whole numbers from one:
+ * `0/3` is corruption rather than an older generation, because no writer could
+ * produce it. The status is whatever the provider named, so it stays free text.
+ */
+function parseIterationRetry(value: unknown): IterationRetry | undefined {
+  if (!isObject(value)) return undefined;
+  if (typeof value.attempt !== "number" || !Number.isInteger(value.attempt)) return undefined;
+  if (value.attempt < 1) return undefined;
+  if (typeof value.maxAttempts !== "number" || !Number.isInteger(value.maxAttempts)) {
+    return undefined;
+  }
+  if (value.maxAttempts < 1) return undefined;
+  if (value.status !== undefined && typeof value.status !== "string") return undefined;
+  // SAFETY: both counts and the optional status were checked above.
+  return value as unknown as IterationRetry;
 }
 
 /**
@@ -368,28 +399,6 @@ interface Generation {
   readonly records: Task[];
 }
 
-/** Write one file in a way a reader never sees half of it. */
-async function writeAtomic(path: string, data: string): Promise<void> {
-  const tempPath = `${path}.tmp`;
-  const handle = await open(tempPath, "w");
-  try {
-    await handle.writeFile(data, "utf8");
-  } finally {
-    await handle.close();
-  }
-  // Atomicity, not durability: rename is what stops a reader seeing half a file,
-  // and that is the only promise this record needs. A power cut may lose the
-  // newest generation, which the loader already treats as "no record" and
-  // rebuilds — while an explicit flush costs a real FlushFileBuffers per write,
-  // slow enough on a scanned Windows volume to make the newest generation look
-  // lost while it is still queued behind the last one.
-  await renameWithRetry(tempPath, path);
-}
-
-/** How often a busy directory entry is retried before the write gives up. */
-const RENAME_ATTEMPTS = 10;
-/** Long enough for a scan or a polling reader to let go, short enough to be invisible. */
-const RENAME_DELAY_MS = 10;
 /**
  * How many times a whole generation is written before the store lets it go. A
  * finished task writes once, so a write that gives up leaves the file behind
@@ -404,49 +413,6 @@ function pause(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
-}
-
-export interface RenameRetryOptions {
-  readonly attempts?: number;
-  readonly delayMs?: number;
-  /** Seams for the retry's own test; production uses the real rename and timer. */
-  readonly renameImpl?: typeof rename;
-  readonly sleep?: (ms: number) => Promise<void>;
-}
-
-/**
- * Rename a file into place, waiting out a Windows share that is still open.
- *
- * POSIX renames over a file another process is reading without complaint; Windows
- * refuses with `EPERM` or `EBUSY` until every handle on that file closes — a
- * reader polling the record, a virus scanner, another pi session. Without a retry
- * the writer sees a generation that never lands, which is how `task-persistence`
- * timed out on the Windows runner. The delay is short because the holder is
- * usually a read that started microseconds ago.
- *
- * Exported for the retry's own test; no caller outside this module needs it.
- */
-export async function renameWithRetry(
-  from: string,
-  to: string,
-  options: RenameRetryOptions = {},
-): Promise<void> {
-  const attempts = options.attempts ?? RENAME_ATTEMPTS;
-  const delayMs = options.delayMs ?? RENAME_DELAY_MS;
-  const renameImpl = options.renameImpl ?? rename;
-  const sleep =
-    options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
-  for (let attempt = 1; ; attempt += 1) {
-    try {
-      await renameImpl(from, to);
-      return;
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
-      const busy = code === "EPERM" || code === "EACCES" || code === "EBUSY";
-      if (!busy || attempt >= attempts) throw error;
-      await sleep(delayMs);
-    }
-  }
 }
 
 /** Everything a caller may tune about the store; production uses the defaults. */
@@ -687,7 +653,9 @@ export class TaskStore {
     for (let attempt = 1; ; attempt += 1) {
       try {
         // Both generation files land here, so the directory exists before the
-        // first one is written — this is the only place that creates it.
+        // first one is written. A prompt loop's prompt file is written into the
+        // same directory and creates it too (prompt-file.ts), so creation is
+        // shared: `mkdir` is recursive and either writer may arrive first.
         await this.ensureDirectory();
         if (this.lastGeneration !== undefined && this.lastGeneration !== generation) {
           await writeAtomic(previousTaskRecordPath(this.directory), this.lastGeneration);

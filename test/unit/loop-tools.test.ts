@@ -8,7 +8,12 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { sessionTaskDirectory, taskRecordPath } from "../../src/tasks/base/runtime-state.js";
+import { tempPathFor } from "../../src/tasks/base/atomic.js";
+import {
+  loopPromptPath,
+  sessionTaskDirectory,
+  taskRecordPath,
+} from "../../src/tasks/base/runtime-state.js";
 import {
   createHarness,
   type Harness,
@@ -24,6 +29,8 @@ interface LoopDetails {
   status: string;
   schedule: string;
   prompt: string;
+  promptFile?: string;
+  promptWarning?: string;
   fires: number;
   maxFires?: number;
   nextFireAt?: number;
@@ -31,6 +38,7 @@ interface LoopDetails {
   endedAt?: number;
   untilNextFireMs?: number;
   outcome?: string;
+  promptWrite?: { outcome: string; error?: string };
   iterations?: Array<{ fire: number; status: string }>;
   error?: string;
 }
@@ -91,16 +99,23 @@ describe("loop tools", () => {
       maxFires: 3,
     });
 
+    const promptFile = loopPromptPath(
+      sessionTaskDirectory(task.turn.cwd, task.turn.sessionId),
+      created.id,
+    );
     expect(created).toMatchObject({
       kind: "prompt-loop",
       status: "running",
       schedule: "10s",
       prompt: "review the diff",
+      promptFile,
       fires: 0,
       maxFires: 3,
       nextFireAt: task.now + 10_000,
       untilNextFireMs: 10_000,
     });
+    // The seed the record keeps and the file the fires read start out the same.
+    expect(await readFile(promptFile, "utf8")).toBe("review the diff");
 
     const listed = await task.harness.call("pretty_task_loop_list", {});
     const text = resultText(listed);
@@ -109,10 +124,12 @@ describe("loop tools", () => {
     expect(text).toContain("(in 10.0s)");
     expect(text).toContain("fires: 0 / 3");
     expect(text).toContain("status: running");
-    expect(text).toContain("prompt: review the diff");
+    // The list names the file the fires read, not a copy of the text (ADR-0024).
+    expect(text).toContain(`prompt file: ${promptFile}`);
 
     const one = await task.harness.call("pretty_task_loop_list", { id: created.id });
     expect(detailsOf(one).id).toBe(created.id);
+    expect(detailsOf(one).promptFile).toBe(promptFile);
   });
 
   it("rejects a bad schedule with a clear example", async () => {
@@ -418,18 +435,135 @@ describe("loop tools", () => {
     expect(await task.harness.pump(task.now)).toHaveLength(1);
   });
 
-  it("asks for an action or a schedule when pretty_task_loop_update gets neither", async () => {
+  it("asks for an action, a schedule or a prompt when pretty_task_loop_update gets none", async () => {
     const task = await setup();
     const created = await createLoop(task.harness, { schedule: "10s", prompt: "keep going" });
 
     const result = await task.harness.call("pretty_task_loop_update", { id: created.id });
-    expect(resultText(result)).toContain("Give an action or a schedule");
+    expect(resultText(result)).toContain("Give an action, a schedule or a prompt");
     expect(detailsOf(result).outcome).toBeUndefined();
-    expect(detailsOf(result).error).toContain("Give an action or a schedule");
+    expect(detailsOf(result).error).toContain("Give an action, a schedule or a prompt");
 
     // The loop is untouched by the refusal, not merely unchanged in the reply.
     const listed = detailsOf(await task.harness.call("pretty_task_loop_list", { id: created.id }));
     expect(listed).toMatchObject({ schedule: "10s", status: "running" });
+  });
+
+  it("replaces a loop's prompt through pretty_task_loop_update and names the file it wrote", async () => {
+    const task = await setup();
+    const created = await createLoop(task.harness, { schedule: "10s", prompt: "keep going" });
+    task.advance(10_000);
+    await task.harness.pump(task.now);
+    const before = detailsOf(await task.harness.call("pretty_task_loop_list", { id: created.id }));
+    expect(before).toMatchObject({ fires: 1 });
+    expect(before.iterations).toHaveLength(1);
+
+    const path = loopPromptPath(
+      sessionTaskDirectory(task.turn.cwd, task.turn.sessionId),
+      created.id,
+    );
+    const updated = await task.harness.call("pretty_task_loop_update", {
+      id: created.id,
+      prompt: "review only the parser module",
+    });
+
+    const said = resultText(updated);
+    expect(said).toContain("Rewrote the prompt of loop");
+    expect(said).toContain("its next fire is");
+    expect(said).toContain("prompt text: replaced");
+    // The reply names the one file it wrote, and keeps the seed and the file apart.
+    expect(said).toContain(path);
+    expect(detailsOf(updated)).toMatchObject({
+      outcome: "prompt-updated",
+      promptWrite: { outcome: "written" },
+      promptFile: path,
+      prompt: "keep going",
+      fires: before.fires,
+      lastFireAt: before.lastFireAt,
+      nextFireAt: before.nextFireAt,
+    });
+    expect(await readFile(path, "utf8")).toBe("review only the parser module");
+
+    // The history the update promised to keep is still there, and the next fire
+    // sends the new wording.
+    const listed = detailsOf(await task.harness.call("pretty_task_loop_list", { id: created.id }));
+    expect(listed.iterations).toEqual(before.iterations);
+    task.advance(10_000);
+    expect(await task.harness.pump(task.now)).toHaveLength(1);
+    expect(task.harness.messages.at(-1)?.content).toBe("review only the parser module");
+  });
+
+  // A paused or finished loop cannot act on the new text, so the reply must not
+  // promise a fire that will never happen ("its next fire is none" would be dead
+  // information dressed up as news).
+  it("does not promise a fire when the rewritten loop is paused or finished", async () => {
+    const task = await setup();
+    const paused = await createLoop(task.harness, { schedule: "10s", prompt: "keep going" });
+    await task.harness.call("pretty_task_loop_update", { id: paused.id, action: "pause" });
+    const pausedSaid = resultText(
+      await task.harness.call("pretty_task_loop_update", { id: paused.id, prompt: "paused text" }),
+    );
+    expect(pausedSaid).toContain("Rewrote the prompt of loop");
+    expect(pausedSaid).toContain("stays paused until resumed");
+    expect(pausedSaid).not.toContain("its next fire is");
+
+    const finished = await createLoop(task.harness, { schedule: "10s", prompt: "keep going" });
+    await task.harness.call("pretty_task_loop_update", { id: finished.id, action: "complete" });
+    const finishedSaid = resultText(
+      await task.harness.call("pretty_task_loop_update", {
+        id: finished.id,
+        prompt: "finished text",
+      }),
+    );
+    expect(finishedSaid).toContain("Rewrote the prompt of loop");
+    expect(finishedSaid).toContain("will not fire again");
+    expect(finishedSaid).not.toContain("its next fire is");
+
+    // Both files did change; only the promise of a fire was wrong.
+    const directory = sessionTaskDirectory(task.turn.cwd, task.turn.sessionId);
+    expect(await readFile(loopPromptPath(directory, paused.id), "utf8")).toBe("paused text");
+    expect(await readFile(loopPromptPath(directory, finished.id), "utf8")).toBe("finished text");
+  });
+
+  it("reports a prompt that could not be written through the result instead of throwing", async () => {
+    const task = await setup();
+    const created = await createLoop(task.harness, { schedule: "10s", prompt: "keep going" });
+    const path = loopPromptPath(
+      sessionTaskDirectory(task.turn.cwd, task.turn.sessionId),
+      created.id,
+    );
+    // A directory where the atomic write's temp file belongs: the write cannot land.
+    await mkdir(tempPathFor(path));
+
+    const updated = await task.harness.call("pretty_task_loop_update", {
+      id: created.id,
+      prompt: "review only the parser module",
+    });
+
+    const said = resultText(updated);
+    expect(said).toContain("Could not replace the prompt");
+    expect(said).toContain("not replaced");
+    expect(detailsOf(updated).outcome).toBe("prompt-write-failed");
+    expect(detailsOf(updated).promptWrite).toMatchObject({ outcome: "failed" });
+    expect(detailsOf(updated).promptWrite?.error).toBeTruthy();
+    // The old text is what the next fire sends, because it is what the file holds.
+    expect(await readFile(path, "utf8")).toBe("keep going");
+    task.advance(10_000);
+    expect(await task.harness.pump(task.now)).toHaveLength(1);
+    expect(task.harness.messages.at(-1)?.content).toBe("keep going");
+  });
+
+  it("refuses a prompt on a command loop through the tool result", async () => {
+    const task = await setup();
+    const created = await createLoop(task.harness, { schedule: "10s", command: "echo hi" });
+
+    const result = await task.harness.call("pretty_task_loop_update", {
+      id: created.id,
+      prompt: "keep going",
+    });
+
+    expect(detailsOf(result).outcome).toBeUndefined();
+    expect(detailsOf(result).error).toMatch(/runs a command, so it has no prompt file to rewrite/);
   });
 
   it("reloads a loop after a restart and keeps its fire count", async () => {

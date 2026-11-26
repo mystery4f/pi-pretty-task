@@ -284,6 +284,26 @@ describe("the task record file", () => {
     expect(await new TaskStore(directory).load()).toEqual([first]);
   });
 
+  it("falls back when a prompt loop's warning is not text", async () => {
+    const directory = await stateDirectory();
+    const loop = loopRecord({ status: "running" });
+    const store = new TaskStore(directory);
+    await store.save([loop]);
+    await store.save([loop, processTask()]);
+
+    // A warning is one line of text or nothing at all; anything else is a file
+    // this version cannot trust, so the previous generation stands in (ADR-0010).
+    const path = taskRecordPath(directory);
+    const document = JSON.parse(await readFile(path, "utf8")) as {
+      version: number;
+      tasks: Array<Record<string, unknown>>;
+    };
+    document.tasks[0] = { ...document.tasks[0], promptWarning: 42 };
+    await writeFile(path, JSON.stringify(document), "utf8");
+
+    expect(await new TaskStore(directory).load()).toEqual([loop]);
+  });
+
   it("has no history when both generations are unusable, instead of throwing", async () => {
     const directory = await stateDirectory();
     const store = new TaskStore(directory);
@@ -344,6 +364,21 @@ describe("the task record file", () => {
     expect(loaded).toEqual([loop]);
   });
 
+  it("round-trips the warning a prompt loop carries between fires", async () => {
+    const directory = await stateDirectory();
+    const loop = loopRecord({
+      status: "running",
+      promptWarning:
+        "The prompt file is missing; this fire used the creation prompt and rewrote the file.",
+    });
+    delete loop.endedAt;
+    await new TaskStore(directory).save([loop]);
+
+    // The warning is what tells a human the last fire ran on the seed, so it has
+    // to survive the restart that follows (ADR-0024).
+    expect(await new TaskStore(directory).load()).toEqual([loop]);
+  });
+
   it("interrupts the iteration a restart left running, and the calls inside it", async () => {
     const directory = await stateDirectory();
     const loop = loopRecord({
@@ -384,6 +419,106 @@ describe("the task record file", () => {
       endedAt: 1_700_000_009_000,
       durationMs: 8_800,
     });
+  });
+
+  it("round-trips the provider retry a turn was on", async () => {
+    const directory = await stateDirectory();
+    const loop = loopRecord({
+      status: "running",
+      iterations: [
+        {
+          fire: 1,
+          startedAt: 1_700_000_000_100,
+          status: "running",
+          droppedCalls: 0,
+          calls: [],
+          retry: { attempt: 2, maxAttempts: 3, status: "529" },
+        },
+      ],
+    });
+    delete loop.endedAt;
+    await new TaskStore(directory).save([loop]);
+
+    const loaded = await new TaskStore(directory, { now: () => 1_700_000_000_500 }).load();
+
+    const [record] = loaded;
+    if (record?.kind !== "prompt-loop") throw new Error("the loop record did not load");
+    expect(record.iterations?.[0]?.retry).toEqual({ attempt: 2, maxAttempts: 3, status: "529" });
+  });
+
+  it("refuses a retry field this record could not have written", async () => {
+    const directory = await stateDirectory();
+    const broken = JSON.parse(JSON.stringify(loopRecord({ status: "running" }))) as Record<
+      string,
+      unknown
+    >;
+    delete broken.endedAt;
+    // An attempt count is a whole number from one: `0/3` is corruption rather than
+    // an older generation, so the whole document is refused.
+    broken.iterations = [
+      {
+        fire: 1,
+        startedAt: 1_700_000_000_100,
+        status: "running",
+        droppedCalls: 0,
+        calls: [],
+        retry: { attempt: 0, maxAttempts: 3 },
+      },
+    ];
+    await writeFile(
+      taskRecordPath(directory),
+      JSON.stringify({ version: 5, tasks: [broken] }),
+      "utf8",
+    );
+
+    expect(await new TaskStore(directory).load()).toEqual([]);
+  });
+
+  it("round-trips the failed turn a prompt loop last had", async () => {
+    const directory = await stateDirectory();
+    const loop = loopRecord({
+      status: "running",
+      consecutiveFailures: 2,
+      lastError: "529 overloaded_error: the provider is busy",
+      lastFailureAt: 1_700_000_000_400,
+    });
+    delete loop.endedAt;
+    await new TaskStore(directory).save([loop]);
+
+    const loaded = await new TaskStore(directory).load();
+
+    const [record] = loaded;
+    if (record?.kind !== "prompt-loop") throw new Error("the loop record did not load");
+    expect(record.consecutiveFailures).toBe(2);
+    expect(record.lastError).toBe("529 overloaded_error: the provider is busy");
+    expect(record.lastFailureAt).toBe(1_700_000_000_400);
+  });
+
+  it("refuses a failure field this record could not have written", async () => {
+    const directory = await stateDirectory();
+    const brokenError = JSON.parse(JSON.stringify(loopRecord())) as Record<string, unknown>;
+    delete brokenError.endedAt;
+    // The error is what the provider said, so a number here is corruption rather
+    // than an older generation, and the whole document is refused (ticket #46).
+    brokenError.lastError = 529;
+    await writeFile(
+      taskRecordPath(directory),
+      JSON.stringify({ version: 5, tasks: [brokenError] }),
+      "utf8",
+    );
+
+    expect(await new TaskStore(directory).load()).toEqual([]);
+
+    const brokenTime = JSON.parse(JSON.stringify(loopRecord())) as Record<string, unknown>;
+    delete brokenTime.endedAt;
+    brokenTime.lastFailureAt = "yesterday";
+    await writeFile(
+      taskRecordPath(directory),
+      JSON.stringify({ version: 5, tasks: [brokenTime] }),
+      "utf8",
+    );
+
+    expect(await new TaskStore(directory).load()).toEqual([]);
   });
 
   it("round-trips a command loop, its fire history and its child process", async () => {

@@ -40,7 +40,7 @@ Requires pi and Node >= 22.19. A local checkout works too: `pi install ./path/to
   ![A task opened: npm run dev under way, its output tail refreshing once a second](https://raw.githubusercontent.com/mystery4f/pi-pretty-task/main/docs/preview-tail.png)
 
 - **Chain** — a command queued behind another task or chain instead of started now. A step is recorded as `waiting` and starts only after the step ahead ends with exit 0; a failing step leaves the ones behind it `skipped`.
-- **Loop / Iteration** — wake the LLM on a schedule with a preset prompt (`30s`/`10m`/`2h`, or five-field cron such as `0 9 * * 1-5`), and record every tool call of the turn that follows, so "what did that loop actually run?" has an answer. Wakes wait for an idle agent instead of interrupting a turn.
+- **Loop / Iteration** — wake the LLM on a schedule with a preset prompt (`30s`/`10m`/`2h`, or five-field cron such as `0 9 * * 1-5`), and record every tool call of the turn that follows, so "what did that loop actually run?" has an answer. A fire that made no tool call prints its `0 calls` as a fact, and two in a row are marked — a turn that read files and thought before acting is not a stall on its first occurrence. A turn pi is retrying after a provider error says so — `retry 2/4 · 529` on the loop row, and a Retry field on the iteration page — so four failed attempts are not mistaken for one slow one. When the provider finally gives up, that fire is counted: the loop keeps the error, the time and a run of consecutive failures, its row counts the run (`2 failed` beside the fire count) and its page prints the error the provider gave up with, and its next wake is pushed back instead of hammering a provider that is down — while a turn you stopped yourself counts for nothing. Wakes wait for an idle agent instead of interrupting a turn.
 
   ![A loop fire opened: the twelve tool calls that one wake-up made](https://raw.githubusercontent.com/mystery4f/pi-pretty-task/main/docs/preview-iteration.png)
 
@@ -75,6 +75,7 @@ pretty_task_bg_kill   id: "bg-4xq81"
 pretty_task_loop_create schedule: "10m", prompt: "Check the deploy and report drift."
 pretty_task_loop_create schedule: "0 9 * * 1-5", command: "npm run nightly"
 pretty_task_loop_update id: "lp-9f3kd", action: "pause"
+pretty_task_loop_update id: "lp-9f3kd", prompt: "Check the deploy, and report only drift."
 pretty_task_loop_list   id: "lp-9f3kd"
 ```
 
@@ -92,6 +93,7 @@ A prompt loop is a clock: every fire delivers a message into the session and sta
 
 - Keep the work in a progress file, one item per line with an acceptance check on each. "`npm run test:unit` exits 0" can be finished; "improve the code" cannot.
 - Put a closing contract in the loop's prompt: tick the item that finished, and when nothing is left call `pretty_task_loop_update id=<id> action=complete`.
+- Fine-tune the wording without touching the schedule: every fire reads the loop's prompt file (the path `pretty_task_loop_list` prints, and the loop's page in `/tasks` shows along with its first three lines and when the file last changed), so an edit takes effect on the next fire and deleting the loop deletes the file. The same change goes through `pretty_task_loop_update id=<id> prompt="…"` when the agent is the one refining the wording: the loop keeps its id, fire count and iteration history, the text given at create time stays the seed the file falls back to, and a write that cannot land leaves the old text in place and says so in the reply.
 - Always pass `maxFires`. It is the only stop that does not depend on the model's own judgement.
 
 The bundled `pretty-task-unattended` skill carries the whole recipe — the file shape, the exact contract text, and what to read the next morning. Ask for it in plain words ("run this unattended overnight") and it fills in the calls.

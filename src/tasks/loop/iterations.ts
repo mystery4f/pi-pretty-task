@@ -15,8 +15,10 @@
  * - `tool_execution_end` pairs by tool call id across every iteration, so a late
  *   result still lands on the call that produced it.
  *
- * Every write is persisted with the loop record, because the record only exists
- * on disk: a reader sees an iteration only after it has been written out.
+ * Opening, binding and recording an iteration is written out at once, because the
+ * record only exists on disk: a reader sees an iteration only after it is written.
+ * Closing one is not written here — a settle closes iterations and their loops'
+ * schedules together, so the caller writes that one record once (ticket #46).
  *
  * @author mystery4f <40482524+mystery4f@users.noreply.github.com>
  */
@@ -30,8 +32,35 @@ import {
   ITERATION_CALL_LIMIT,
   ITERATION_HISTORY_LIMIT,
   type Iteration,
+  type TurnEnd,
+  type TurnOutcome,
 } from "./iteration.js";
-import type { LoopFire } from "./loop-tasks.js";
+import type { IterationResult, LoopFire } from "./loop-tasks.js";
+
+/** The turn in flight as its own message described it, before the settle. */
+interface TurnVerdict {
+  /** The session whose run produced the message; a settle of another run is not it. */
+  readonly directory: string;
+  readonly end: TurnEnd;
+  readonly error?: string;
+}
+
+/**
+ * What one assistant message says about its turn (ticket #46): an error stop is
+ * the provider giving up, and every other stop is a turn that ran.
+ *
+ * The spec names two signals for a fire the provider gave up on —
+ * `auto_retry_end` with `success: false`, and a final `stopReason === "error"` —
+ * and pi 1.5.2 makes them one: it emits the error message first and then the
+ * retry's end, but it does not forward `auto_retry_end` to extensions, so the
+ * final message's stop reason is the only observable and covers both cases.
+ */
+function turnVerdict(attempt: ProviderAttemptEvent): { end: TurnEnd; error?: string } {
+  if (attempt.stopReason !== "error") return { end: "healthy" };
+  return attempt.errorMessage === undefined
+    ? { end: "failed" }
+    : { end: "failed", error: attempt.errorMessage };
+}
 
 /** The start event's fields the recorder needs; pi passes the same ones. */
 export interface ToolCallStartEvent {
@@ -47,6 +76,57 @@ export interface ToolCallEndEvent {
   readonly result: unknown;
   readonly isError: boolean;
   readonly durationMs?: number;
+}
+
+/**
+ * What one provider attempt of the turn in flight looks like from the outside:
+ * the assistant message it ended, and the retry budget the settings allow.
+ *
+ * pi 1.5.2 forwards no retry event to extensions — `auto_retry_start` and
+ * `auto_retry_end` reach public listeners only, and `ExtensionAPI.on` has no
+ * retry event to subscribe to — so the attempt is counted from the message that
+ * carries the failure (`stopReason === "error"`). The attempt after a failure
+ * ends a message too, which is what clears the count.
+ */
+export interface ProviderAttemptEvent {
+  readonly role: string;
+  readonly stopReason?: string;
+  /** What the provider said; carries the status code when it gave one. */
+  readonly errorMessage?: string;
+  /** Retries the settings allow; 0 when pi is not retrying, so nothing is counted. */
+  readonly maxAttempts: number;
+}
+
+/**
+ * Retries pi makes after a failed attempt when the settings do not say. pi's
+ * `SETTINGS_DEFAULTS` is not exported from the package root, so its default of
+ * three is restated here once instead of being spread over the call sites.
+ */
+export const DEFAULT_RETRY_BUDGET = 3;
+
+/** The retry settings an attempt counter reads; the rest of `Settings` is not its business. */
+export interface RetrySettingsLike {
+  readonly enabled?: boolean;
+  readonly maxRetries?: number;
+}
+
+/**
+ * Retries pi is configured to make after a failure. Zero — retries disabled, or a
+ * budget of zero — means the first failure is final, so no attempt is counted:
+ * `retry 1/1` would promise a retry that is never coming.
+ */
+export function retryBudget(settings: { readonly retry?: RetrySettingsLike } | undefined): number {
+  const retry = settings?.retry;
+  if (retry?.enabled === false) return 0;
+  const maxRetries = retry?.maxRetries;
+  if (maxRetries === undefined) return DEFAULT_RETRY_BUDGET;
+  return Number.isInteger(maxRetries) && maxRetries >= 1 ? maxRetries : 0;
+}
+
+/** The provider status a failure message named, when it named one: `529`. */
+function providerStatus(errorMessage: string | undefined): string | undefined {
+  if (errorMessage === undefined) return undefined;
+  return /\b([45]\d\d)\b/.exec(errorMessage)?.[1];
 }
 
 export interface IterationsOptions {
@@ -73,6 +153,13 @@ export class Iterations {
   private readonly now: () => number;
   private readonly callLimit: number;
   private readonly historyLimit: number;
+  /**
+   * The last word of the turn in flight, waiting for its settle (ticket #46).
+   * The assistant message is the only place a turn's outcome is visible, and
+   * `settle` is the only event that says the turn is over, so the two facts meet
+   * here rather than in the loop record.
+   */
+  private turn: TurnVerdict | undefined;
 
   constructor(options: IterationsOptions) {
     this.sessions = options.sessions;
@@ -179,31 +266,89 @@ export class Iterations {
   }
 
   /**
+   * Count one provider attempt of the turn in flight against the iteration that
+   * opened it (ticket #47). A failed attempt has no event of its own — see
+   * `ProviderAttemptEvent` — so it arrives as the assistant message that ended
+   * with `stopReason: "error"`, and the attempt after it is what clears the
+   * count while the turn is still open.
+   *
+   * Nothing is counted when the budget is zero: pi gives up at the first failure
+   * then, so there is no retry to show.
+   */
+  async recordAttempt(scope: TaskScope, attempt: ProviderAttemptEvent): Promise<void> {
+    if (attempt.role !== "assistant") return;
+    const session = await this.sessions.session(scope);
+    // The assistant message is the turn's own last word (ticket #46): an error
+    // stop is the provider giving up, any other stop is a turn that ran. A later
+    // assistant message replaces it, so what is held here is final.
+    this.turn = { directory: session.directory, ...turnVerdict(attempt) };
+    const iteration = this.newestOpenIteration(session);
+    if (iteration === undefined) return;
+
+    if (attempt.stopReason === "error" && attempt.maxAttempts >= 1) {
+      const status = providerStatus(attempt.errorMessage);
+      iteration.retry = {
+        attempt: (iteration.retry?.attempt ?? 0) + 1,
+        maxAttempts: attempt.maxAttempts,
+        ...(status === undefined ? {} : { status }),
+      };
+      await this.sessions.persist(session);
+      return;
+    }
+
+    // The attempt after a failure reached the provider: the turn is retrying no
+    // more, but it is still open, so only the retry goes — `settle` ends it.
+    if (iteration.retry === undefined) return;
+    iteration.retry = undefined;
+    await this.sessions.persist(session);
+  }
+
+  /**
    * Close every bound iteration still open in the session, because one run
    * settles at a time and a bound fire's turn is that run. Calls still running
    * at that point cannot end any more: `aborted` when the run was aborted,
    * `interrupted` otherwise. Pending iterations stay pending: their wake has not
    * produced a turn yet, so this settle is not theirs.
+   *
+   * One turn can be several loops' fire — every loop that came due while the agent
+   * was busy is bound and delivered before the turn starts — so the caller gets one
+   * result per loop that had an iteration closed here, read from that loop's newest
+   * one. A loop with two iterations in the same turn is still one fire to charge.
    */
-  async settle(scope: TaskScope, aborted: boolean): Promise<void> {
+  async settle(scope: TaskScope, aborted: boolean): Promise<IterationResult[]> {
     const session = await this.sessions.session(scope);
+    const verdict = this.takeTurn(session.directory);
     const at = this.now();
-    let changed = false;
+    // A run that settled without a bound fire belongs to the user, and a stop by
+    // the user is not a failed fire (ticket #46). A run nothing was observed about
+    // says nothing either way: it is neither a failure nor the healthy round that
+    // clears one.
+    const end: TurnOutcome = aborted ? "aborted" : (verdict?.end ?? "unobserved");
+    const newest = new Map<string, { task: PromptLoopTask; iteration: Iteration }>();
     for (const task of session.tasks.values()) {
       if (task.kind !== "prompt-loop") continue;
       let closed = false;
       for (const iteration of task.iterations) {
         if (iteration.bound !== true || iteration.status !== "running") continue;
         closeIteration(iteration, at, aborted ? "aborted" : "completed");
+        const seen = newest.get(task.id);
+        if (seen === undefined || iteration.startedAt >= seen.iteration.startedAt) {
+          newest.set(task.id, { task, iteration });
+        }
         closed = true;
       }
       if (!closed) continue;
       // The turn the loop woke has settled, which is the loop's own change: its
       // row moves on that, not only on the fire that started the turn (ADR-0010).
       task.updatedAt = at;
-      changed = true;
     }
-    if (changed) await this.sessions.persist(session);
+    if (newest.size === 0) return [];
+    return [...newest.values()].map(({ task, iteration }) => ({
+      id: task.id,
+      fire: iteration.fire,
+      end,
+      ...(end === "failed" && verdict?.error !== undefined ? { error: verdict.error } : {}),
+    }));
   }
 
   /** Drop the oldest iterations until the history cap holds. */
@@ -234,6 +379,17 @@ export class Iterations {
     return newest;
   }
 
+  /**
+   * Take the verdict waiting for this session's settle. A verdict from another
+   * session belongs to a turn that has not settled yet, so it stays where it is.
+   */
+  private takeTurn(directory: string): TurnVerdict | undefined {
+    const verdict = this.turn;
+    if (verdict === undefined || verdict.directory !== directory) return undefined;
+    this.turn = undefined;
+    return verdict;
+  }
+
   private resolve(session: TaskSession, taskId: string, fire: number): Iteration | undefined {
     const task = session.tasks.get(taskId);
     if (task?.kind !== "prompt-loop") return undefined;
@@ -244,6 +400,10 @@ export class Iterations {
 function closeIteration(iteration: Iteration, at: number, status: "completed" | "aborted"): void {
   iteration.endedAt = at;
   iteration.status = status;
+  // This is the turn-ended point ticket #46 shares: nothing is retried once the
+  // turn is over, whatever it finally did. #46 decides from its own field
+  // whether the turn ended because pi gave up; this one describes flight only.
+  iteration.retry = undefined;
   for (const call of iteration.calls) {
     if (call.status !== "running") continue;
     call.endedAt = at;

@@ -19,7 +19,9 @@ import type {
   PromptLoopTask,
 } from "../../src/tasks/base/task.js";
 import type { Iteration, IterationCall } from "../../src/tasks/loop/iteration.js";
+import type { PromptPreview } from "../../src/tasks/loop/prompt-file.js";
 import { block, detailRows } from "../../src/ui/panel/detail.js";
+import { LABEL_WIDTH } from "../../src/ui/panel/model.js";
 import {
   DEFAULT_PANEL_FILTER,
   DEFAULT_RENDER_ROWS,
@@ -36,6 +38,7 @@ import {
   TasksPanel,
 } from "../../src/ui/panel/tasks-panel.js";
 import type { PanelView } from "../../src/ui/panel/view.js";
+import { STATUS_COLOUR } from "../../src/ui/status-colour.js";
 import { plainTheme } from "../support/extension-harness.js";
 
 const UP = "\u001b[A";
@@ -220,6 +223,15 @@ class FakeSource implements PanelSource {
     return this.otherRows;
   }
 
+  /** Prompt files by loop id, as the loop's own store hands them over. */
+  readonly prompts = new Map<string, PromptPreview>();
+  readonly prompted: string[] = [];
+
+  async prompt(id: string): Promise<PromptPreview | undefined> {
+    this.prompted.push(id);
+    return this.prompts.get(id);
+  }
+
   async tail(id: string, sessionId?: string): Promise<OutputTail | undefined> {
     this.tailed.push(id);
     this.tailedFrom.push(sessionId);
@@ -363,6 +375,11 @@ function numberedOutput(count: number): string[] {
     { length: count },
     (_, index) => `output-${String(index + 1).padStart(2, "0")}`,
   );
+}
+
+/** A creation prompt long enough that drawing it would push the iterations off the page. */
+function longSeedPrompt(): string {
+  return Array.from({ length: 40 }, (_, index) => `seed line ${index + 1}`).join("\n");
 }
 
 function tailOf(lines: string[]): OutputTail {
@@ -1005,6 +1022,75 @@ describe("loop tasks in the list", () => {
     panel.dispose();
   });
 
+  it("counts a prompt loop's failed fires beside the count, and drops it once one is healthy", async () => {
+    const source = new FakeSource();
+    source.rows = [
+      loopView(
+        "loop01",
+        {
+          name: "review loop",
+          fires: 4,
+          consecutiveFailures: 2,
+          lastError: "529 overloaded_error",
+          lastFailureAt: CLOCK,
+        },
+        12_000,
+        4_000,
+      ),
+    ];
+    const { panel, drawn } = await openOn("loops", source);
+    await panel.settle();
+
+    const row = (): string => {
+      const line = drawn()
+        .split("\n")
+        .find((candidate) => candidate.includes("review loop"));
+      if (line === undefined) throw new Error("the loop row must render");
+      return line;
+    };
+    // A prompt loop's fire fails once the provider gives up on its turn, so its row
+    // counts the run the way a command loop's does (ticket #46, ADR-0017).
+    expect(row()).toContain("2 failed");
+    expect(row()).toContain("4 fires");
+
+    // The next turn finished: a healthy fire is the round that clears the streak, and
+    // the row stops saying anything about failures.
+    source.rows = [
+      loopView("loop01", { name: "review loop", fires: 5, consecutiveFailures: 0 }, 12_000, 10_000),
+    ];
+    // The store is read again the way the panel's own tick reads it.
+    await panel.refresh();
+    expect(row()).toContain("5 fires");
+    expect(row()).not.toContain("failed");
+
+    panel.dispose();
+  });
+
+  it("gives up a prompt loop's fire count before its failure streak", async () => {
+    const source = new FakeSource();
+    source.rows = [
+      loopView("loop01", { name: "review loop", fires: 4, consecutiveFailures: 2 }, 12_000, 4_000),
+    ];
+    const { panel } = await openOn("loops", source, () => 13_000, plainTheme());
+    await panel.settle();
+
+    const rowAt = (width: number): string => {
+      const line = panel.render(width).find((candidate) => candidate.includes("review loop"));
+      if (line === undefined) throw new Error("the loop row must render");
+      return line;
+    };
+    // The count is the cheap half of the state and the streak is the load-bearing one:
+    // a row that kept `4 fires` and dropped `2 failed` would show a failing loop as a
+    // working one at the width a reader is skimming (spec story 10, ticket #50).
+    const widths = [100, 96, 92, 88, 84, 80, 76, 72, 68, 64];
+    const rows = widths.map((width) => rowAt(width));
+    for (const row of rows) if (row.includes("fires")) expect(row).toContain("failed");
+    // And the property is not vacuous here: on some of them the streak stands alone.
+    expect(rows.some((row) => row.includes("failed") && !row.includes("fires"))).toBe(true);
+
+    panel.dispose();
+  });
+
   it("opens a loop without asking the source for an output tail", async () => {
     const source = new FakeSource();
     source.rows = [loopView("loop01", { name: "review loop" })];
@@ -1052,11 +1138,50 @@ describe("the loop detail view", () => {
     expect(screen).toContain("prompt-loop");
     expect(screen).toContain("10s");
     expect(screen).toContain("5 / 10");
-    expect(screen).toContain("review the diff and report");
+    expect(screen).not.toContain("review the diff and report");
     expect(screen).toContain(formatClockTime(lastFireAt + 10_000));
     expect(screen).toContain("in 4.0s");
     expect(screen).toContain("3 kept · 2 older dropped");
     expect(screen.indexOf("fire 5")).toBeLessThan(screen.indexOf("fire 3"));
+
+    panel.dispose();
+  });
+
+  it("previews the prompt file's path, three lines and time, so the iterations stay on screen", async () => {
+    const source = new FakeSource();
+    const changedAt = CLOCK + 5_000;
+    const path = "/work/.pi/tasks/session/prompts/loop01.md";
+    source.prompts.set("loop01", {
+      path,
+      lines: ["review the diff", "then run the tests", "and report the failures"],
+      changedAt,
+    });
+    source.rows = [
+      loopView("loop01", {
+        name: "review loop",
+        prompt: longSeedPrompt(),
+        iterations: [iterationOf(1), iterationOf(2), iterationOf(3)],
+      }),
+    ];
+    const { panel, drawn } = await openOn("loops", source);
+    await panel.settle();
+
+    panel.handleInput(ENTER);
+    await panel.settle();
+
+    const screen = drawn();
+    // The path and the file's facts are read through the loop's own layer, once.
+    expect(source.prompted).toEqual(["loop01"]);
+    expect(screen).toContain(path);
+    for (const line of ["review the diff", "then run the tests", "and report the failures"]) {
+      expect(screen).toContain(line);
+    }
+    // The file's own time, in the same clock the `Updated` row above it uses.
+    expect(screen).toContain(`changed ${formatClockTime(changedAt)}`);
+    // The creation prompt is no longer the prompt, and it never eats the page.
+    expect(screen).not.toContain("seed line 40");
+    // The list the page is opened for survives the prompt block.
+    expect(screen).toContain("fire 3");
 
     panel.dispose();
   });
@@ -1071,6 +1196,456 @@ describe("the loop detail view", () => {
     await panel.settle();
 
     expect(drawn()).toContain("iterations · none kept · 40 older dropped");
+
+    panel.dispose();
+  });
+
+  it("keeps the preview and says the edit was lost when the file was rebuilt", async () => {
+    const source = new FakeSource();
+    const changedAt = CLOCK + 5_000;
+    const path = "/work/.pi/tasks/session/prompts/loop03.md";
+    source.prompts.set("loop03", {
+      path,
+      lines: ["a fresh edit", "and a second line"],
+      changedAt,
+    });
+    source.rows = [
+      loopView("loop03", {
+        name: "review loop",
+        prompt: longSeedPrompt(),
+        promptWarning:
+          "The prompt file is missing; this fire used the creation prompt and rewrote the file.",
+        iterations: [iterationOf(1)],
+      }),
+    ];
+    const { panel, drawn } = await openOn("loops", source);
+    await panel.settle();
+
+    panel.handleInput(ENTER);
+    await panel.settle();
+
+    const screen = drawn();
+    // The file reads fine again, so the preview and its clock are both real facts.
+    expect(screen).toContain(path);
+    expect(screen).toContain(`changed ${formatClockTime(changedAt)}`);
+    expect(screen).toContain("a fresh edit");
+    // But the fire that rebuilt it used the creation text, and the page says so:
+    // a healthy-looking file must not hide the edit the fallback overwrote.
+    expect(screen).toContain(
+      "The prompt file is missing; this fire used the creation prompt and rewrote the file.",
+    );
+
+    panel.dispose();
+  });
+
+  it("keeps a preview's lines when the file's time is the only thing unknown", async () => {
+    const source = new FakeSource();
+    const path = "/work/.pi/tasks/session/prompts/loop05.md";
+    // A read that worked and a stat that did not: the text is real, the clock is not.
+    source.prompts.set("loop05", { path, lines: ["a real line"] });
+    source.rows = [
+      loopView("loop05", {
+        name: "review loop",
+        prompt: longSeedPrompt(),
+        iterations: [iterationOf(1)],
+      }),
+    ];
+    const { panel, drawn } = await openOn("loops", source);
+    await panel.settle();
+
+    panel.handleInput(ENTER);
+    await panel.settle();
+
+    const screen = drawn();
+    expect(screen).toContain(path);
+    expect(screen).toContain("a real line");
+    // No time is invented, and the lines are not thrown away with it.
+    expect(screen).not.toContain("changed ");
+
+    panel.dispose();
+  });
+
+  it("says a blank prompt file is empty instead of drawing nothing", async () => {
+    const source = new FakeSource();
+    const changedAt = CLOCK + 5_000;
+    const path = "/work/.pi/tasks/session/prompts/loop04.md";
+    source.prompts.set("loop04", { path, lines: [], changedAt, problem: "is empty" });
+    source.rows = [
+      loopView("loop04", {
+        name: "review loop",
+        prompt: longSeedPrompt(),
+        iterations: [iterationOf(1)],
+      }),
+    ];
+    const { panel, drawn } = await openOn("loops", source);
+    await panel.settle();
+
+    panel.handleInput(ENTER);
+    await panel.settle();
+
+    const screen = drawn();
+    // Nothing between the path and the time reads as a lost prompt, not an empty one.
+    expect(screen).toContain(path);
+    expect(screen).toContain(`changed ${formatClockTime(changedAt)}`);
+    expect(screen).toContain("the prompt file is empty");
+
+    panel.dispose();
+  });
+
+  it("keeps the prompt's path and says the record's warning when the file is gone", async () => {
+    const source = new FakeSource();
+    const path = "/work/.pi/tasks/session/prompts/loop02.md";
+    source.prompts.set("loop02", { path, lines: [], problem: "is missing" });
+    source.rows = [
+      loopView("loop02", {
+        name: "review loop",
+        prompt: longSeedPrompt(),
+        promptWarning: "The prompt file is missing; this fire used the creation prompt",
+        iterations: [iterationOf(1)],
+      }),
+    ];
+    const { panel, drawn } = await openOn("loops", source);
+    await panel.settle();
+
+    panel.handleInput(ENTER);
+    await panel.settle();
+
+    const screen = drawn();
+    // The address is still a fact even when the text is not, and the record says why.
+    expect(screen).toContain(path);
+    expect(screen).toContain("The prompt file is missing; this fire used the creation prompt");
+    // The record's warning already says it, so the file's own state is not repeated.
+    expect(screen).not.toContain("the prompt file");
+    // No time is invented for a file that could not be read.
+    expect(screen).not.toContain("changed ");
+    expect(screen).not.toContain("seed line 1");
+
+    panel.dispose();
+  });
+
+  it("re-reads the prompt when a fire's page sends the reader back to its loop", async () => {
+    const source = new FakeSource();
+    const path = "/work/.pi/tasks/session/prompts/loop01.md";
+    source.prompts.set("loop01", { path, lines: ["review the diff"], changedAt: CLOCK });
+    source.rows = [
+      loopView("loop01", {
+        name: "review loop",
+        prompt: longSeedPrompt(),
+        iterations: [iterationOf(1)],
+      }),
+      view("bg-a1b2c", { name: "review loop #1", parentId: "loop01", fire: 1 }),
+    ];
+    const { panel, drawn } = await openOn("loops", source);
+    await panel.settle();
+    panel.handleInput(ENTER);
+    await panel.settle();
+    expect(source.prompted).toEqual(["loop01"]);
+
+    // The fire it started is a page of its own, and a process has no prompt: the
+    // block goes away with the loop's own page.
+    panel.openProcessPage("bg-a1b2c", 1);
+    await panel.settle();
+    expect(drawn()).not.toContain("review the diff");
+
+    panel.handleInput(LEFT);
+    await panel.settle();
+
+    // `←` reads the prompt again instead of waiting for the next tick, so the loop
+    // page is whole the moment it is drawn rather than blank under its path.
+    expect(source.prompted).toEqual(["loop01", "loop01"]);
+    expect(drawn()).toContain(path);
+    expect(drawn()).toContain("review the diff");
+
+    panel.dispose();
+  });
+
+  // A fire is a full model call, so a turn that recorded no tool call is a fact a
+  // reader weighs; only a second one in a row says the loop has stalled — the
+  // first may be a turn that read files and thought before acting (ticket #49).
+  it("states one empty fire plainly and marks the second in a row", async () => {
+    const source = new FakeSource();
+    source.rows = [
+      loopView("loop01", {
+        name: "review loop",
+        fires: 3,
+        iterations: [
+          iterationOf(1, [callOf("c1", "bash", "npm test")]),
+          iterationOf(2),
+          iterationOf(3),
+        ],
+      }),
+    ];
+    const { panel, drawn } = await openOn("loops", source);
+    await panel.settle();
+
+    panel.handleInput(ENTER);
+    await panel.settle();
+
+    const rows = drawn().split("\n");
+    const productive = rows.find((line) => line.includes("fire 1"));
+    const first = rows.find((line) => line.includes("fire 2"));
+    const second = rows.find((line) => line.includes("fire 3"));
+    expect(productive).toContain("1 call");
+    expect(productive).not.toContain("empty");
+    expect(first).toContain("0 calls");
+    expect(first).not.toContain("empty");
+    expect(second).toContain("0 calls");
+    expect(second).toContain("2 empty in a row");
+
+    panel.dispose();
+  });
+
+  it("leaves two empty fires unmarked when a productive turn sits between them", async () => {
+    const source = new FakeSource();
+    source.rows = [
+      loopView("loop01", {
+        name: "review loop",
+        fires: 3,
+        iterations: [
+          iterationOf(1),
+          iterationOf(2, [callOf("c1", "read", "src/index.ts")]),
+          iterationOf(3),
+        ],
+      }),
+    ];
+    const { panel, drawn } = await openOn("loops", source);
+    await panel.settle();
+
+    panel.handleInput(ENTER);
+    await panel.settle();
+
+    const rows = drawn().split("\n");
+    for (const fire of [1, 3]) {
+      const row = rows.find((line) => line.includes(`fire ${String(fire)}`));
+      expect(row).toContain("0 calls");
+      expect(row).not.toContain("empty");
+    }
+
+    panel.dispose();
+  });
+
+  it("counts the whole run of empty fires, not just the pair", async () => {
+    const source = new FakeSource();
+    source.rows = [
+      loopView("loop01", {
+        name: "review loop",
+        fires: 4,
+        iterations: [iterationOf(1), iterationOf(2), iterationOf(3), iterationOf(4)],
+      }),
+    ];
+    const { panel, drawn } = await openOn("loops", source);
+    await panel.settle();
+
+    panel.handleInput(ENTER);
+    await panel.settle();
+
+    const rows = drawn().split("\n");
+    expect(rows.find((line) => line.includes("fire 1"))).not.toContain("empty");
+    expect(rows.find((line) => line.includes("fire 2"))).toContain("2 empty in a row");
+    expect(rows.find((line) => line.includes("fire 3"))).toContain("3 empty in a row");
+    expect(rows.find((line) => line.includes("fire 4"))).toContain("4 empty in a row");
+
+    panel.dispose();
+  });
+
+  it("does not count a turn cut short as an empty fire", async () => {
+    const source = new FakeSource();
+    source.rows = [
+      loopView("loop01", {
+        name: "review loop",
+        fires: 3,
+        iterations: [
+          iterationOf(1),
+          iterationOf(2, [], { status: "aborted", endedAt: CLOCK + 12_000 }),
+          iterationOf(3),
+        ],
+      }),
+    ];
+    const { panel, drawn } = await openOn("loops", source);
+    await panel.settle();
+
+    panel.handleInput(ENTER);
+    await panel.settle();
+
+    const rows = drawn().split("\n");
+    // An abort is not evidence of a stall: the turn never got to work.
+    expect(rows.find((line) => line.includes("fire 2"))).not.toContain("empty");
+    expect(rows.find((line) => line.includes("fire 3"))).not.toContain("empty");
+
+    panel.dispose();
+  });
+
+  it("prints the provider retry a fire is on, with the status the failure carried", async () => {
+    const source = new FakeSource();
+    source.rows = [
+      loopView("loop01", {
+        name: "review loop",
+        fires: 1,
+        iterations: [
+          iterationOf(1, [], {
+            status: "running",
+            retry: { attempt: 2, maxAttempts: 3, status: "529" },
+          }),
+        ],
+      }),
+    ];
+    const { panel, drawn } = await openOn("loops", source);
+    await panel.settle();
+
+    // A fire that spent four attempts on a busy provider otherwise reads as one
+    // slow turn (ticket #47).
+    expect(drawn()).toContain("retry 2/4 · 529");
+    // The retry gives way on a narrow row rather than crossing the border.
+    expectFits(panel, 70);
+    panel.dispose();
+  });
+
+  it("counts a retry's denominator as the attempts pi allows, not its retries", async () => {
+    const source = new FakeSource();
+    source.rows = [
+      loopView("loop01", {
+        name: "first failure",
+        fires: 1,
+        iterations: [
+          iterationOf(1, [], {
+            status: "running",
+            retry: { attempt: 1, maxAttempts: 3, status: "529" },
+          }),
+        ],
+      }),
+      loopView("loop02", {
+        name: "last failure",
+        fires: 1,
+        iterations: [
+          iterationOf(1, [], {
+            status: "running",
+            // `attempt` counts every failed attempt, the first try included, while
+            // `maxAttempts` is pi's retry budget: budget 3 plus the first try is
+            // four attempts, and the fourth failure is the one pi gives up on.
+            retry: { attempt: 4, maxAttempts: 3, status: "529" },
+          }),
+        ],
+      }),
+    ];
+    const { panel, drawn } = await openOn("loops", source);
+    await panel.settle();
+
+    const rows = drawn().split("\n");
+    expect(rows.find((line) => line.includes("first failure"))).toContain("retry 1/4 · 529");
+    // The frame pi gave up on must not read beyond the denominator.
+    expect(rows.find((line) => line.includes("last failure"))).toContain("retry 4/4 · 529");
+
+    panel.dispose();
+  });
+
+  it("prints no retry once the turn it belonged to has settled", async () => {
+    const source = new FakeSource();
+    source.rows = [
+      loopView("loop01", {
+        name: "review loop",
+        fires: 1,
+        // A record that kept the field after its turn ended — a process that died
+        // mid-turn — must not read as a retry in flight now.
+        iterations: [iterationOf(1, [], { retry: { attempt: 3, maxAttempts: 3, status: "529" } })],
+      }),
+    ];
+    const { panel, drawn } = await openOn("loops", source);
+    await panel.settle();
+
+    expect(drawn()).not.toContain("retry");
+
+    panel.dispose();
+  });
+
+  it("names the retry a finished iteration was on, in its own page", async () => {
+    const source = new FakeSource();
+    source.rows = [
+      loopView("loop01", {
+        name: "review loop",
+        fires: 1,
+        iterations: [
+          iterationOf(1, [callOf("c1", "bash", "npm test")], {
+            retry: { attempt: 2, maxAttempts: 3, status: "529" },
+          }),
+        ],
+      }),
+    ];
+    const { panel, drawn } = await openOn("loops", source);
+    await panel.settle();
+    panel.handleInput(ENTER);
+    await panel.settle();
+    panel.handleInput(ENTER);
+    await panel.settle();
+
+    const screen = drawn();
+    expect(screen).toContain("Retry");
+    expect(screen).toContain("retry 2/4 · 529");
+
+    panel.dispose();
+  });
+
+  it("names the failure streak, the time and the error the provider gave up with", async () => {
+    const source = new FakeSource();
+    const lastFailureAt = CLOCK + 20_000;
+    source.rows = [
+      loopView(
+        "loop01",
+        {
+          name: "review loop",
+          fires: 4,
+          consecutiveFailures: 2,
+          lastError: "529 overloaded_error: the provider is busy",
+          lastFailureAt,
+          nextFireAt: lastFailureAt + 40_000,
+        },
+        12_000,
+        40_000,
+      ),
+    ];
+    const { theme, painted } = recordingTheme();
+    const { panel, drawn } = await openOn("loops", source, () => 13_000, theme);
+    await panel.settle();
+    panel.handleInput(ENTER);
+    await panel.settle();
+
+    const screen = drawn();
+    expect(screen).toContain("Failures:");
+    expect(screen).toContain("2 in a row");
+    // Wide page: the label column is twelve columns *with* its colon (model.ts:37),
+    // so a longer label is chopped and its value glued on. This one is whole and the
+    // value starts after the column, not on top of a lost colon.
+    const failedAt = screen.split("\n").find((line) => line.includes("Failed at"));
+    if (failedAt === undefined) throw new Error("the failed-at field must render");
+    expect(failedAt).toMatch(/Failed at: +\d\d:\d\d:\d\d/);
+    expect(screen).toContain("Last error:");
+    expect(screen).toContain("529 overloaded_error: the provider is busy");
+    // A failed turn is a failure like a command's, so its message takes the colour
+    // the status already uses for one rather than the page's ordinary accent.
+    expect(painted).toContainEqual({
+      colour: STATUS_COLOUR.failed,
+      text: "529 overloaded_error: the provider is busy",
+    });
+    // The wait the streak pushed out says why it is longer than the expression.
+    expect(screen).toContain("backoff");
+
+    panel.dispose();
+  });
+
+  it("says nothing about failures on a loop whose fires finished", async () => {
+    const source = new FakeSource();
+    source.rows = [loopView("loop01", { name: "review loop", fires: 3 }, 12_000, 10_000)];
+    const { theme, painted } = recordingTheme();
+    const { panel, drawn } = await openOn("loops", source, () => 13_000, theme);
+    await panel.settle();
+    panel.handleInput(ENTER);
+    await panel.settle();
+
+    const screen = drawn();
+    expect(screen).not.toContain("Failures:");
+    expect(screen).not.toContain("Last error");
+    expect(screen).not.toContain("backoff");
+    // A healthy loop paints no error at all, so nothing wears the failure colour.
+    expect(painted.filter((entry) => entry.colour === STATUS_COLOUR.failed)).toEqual([]);
 
     panel.dispose();
   });
@@ -2635,6 +3210,77 @@ describe("the frame never draws past the terminal", () => {
 
     const text = expectFits(panel, NARROW).join("\n");
     expect(text).toContain("calls");
+
+    panel.dispose();
+  });
+
+  it("wraps a prompt preview's long line and keeps the block's own column", async () => {
+    const source = new FakeSource();
+    const path = "/work/.pi/tasks/session/prompts/loop01.md";
+    const long =
+      "review the diff of every changed file, run the full suite under the release profile, then report";
+    source.prompts.set("loop01", { path, lines: [long], changedAt: CLOCK });
+    source.rows = [
+      loopView("loop01", {
+        name: "review loop",
+        prompt: longSeedPrompt(),
+        iterations: [iterationOf(1)],
+      }),
+    ];
+    // A pane taller than a real one, so the field budget keeps the prompt block: this
+    // case is about the width a preview line wraps in, not about what a short pane drops.
+    const { panel } = openPanel(source, () => 13_000, plainTheme(), 80);
+    await panel.settle();
+    panel.handleInput(tabKey("loops"));
+    await panel.settle();
+    panel.handleInput(ENTER);
+    await panel.settle();
+
+    // A wide pane continues the preview at the labelled value's own column, and the
+    // whole line is on the page: wrapped, never cut with an ellipsis (ADR-0019).
+    const wide = expectFits(panel, NARROW).join("\n");
+    expect(wide).toContain(`${" ".repeat(LABEL_WIDTH)}review the diff`);
+    expect(wide).toContain("then report");
+
+    // A narrow pane keeps the same promise at the page's own 2-column indent.
+    const narrow = expectFits(panel, 50).join("\n");
+    expect(narrow).toContain("  review the diff");
+    expect(narrow).toContain("then report");
+
+    panel.dispose();
+  });
+
+  it("wraps the error a loop's fire died with instead of cutting it", async () => {
+    const source = new FakeSource();
+    const error =
+      "529 overloaded_error: the provider is busy, retried three times, then gave up on the turn";
+    source.rows = [
+      loopView("loop01", {
+        name: "review loop",
+        fires: 4,
+        consecutiveFailures: 2,
+        lastError: error,
+        lastFailureAt: CLOCK,
+        iterations: [iterationOf(4)],
+      }),
+    ];
+    // Taller than a real pane, so the field budget keeps the block this case is
+    // about; the point is the column the error wraps in, not what a short pane drops.
+    const { panel } = openPanel(source, () => 13_000, plainTheme(), 80);
+    await panel.settle();
+    panel.handleInput(tabKey("loops"));
+    await panel.settle();
+    panel.handleInput(ENTER);
+    await panel.settle();
+
+    // A long provider message is wrapped under its label's column, never cut: the
+    // part that explains the failure is usually its tail (ADR-0019, ticket #50).
+    const narrow = expectFits(panel, 50).join("\n");
+    expect(narrow).toContain("Last error:");
+    // Read back with the borders and the wrapped lines joined: the whole message is
+    // on the page, in order, which a cut one could not be.
+    const page = narrow.split("│").join(" ").replace(/\s+/g, " ");
+    expect(page).toContain(error);
 
     panel.dispose();
   });

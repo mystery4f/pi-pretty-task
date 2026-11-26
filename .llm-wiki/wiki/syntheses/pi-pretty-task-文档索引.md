@@ -47,6 +47,7 @@ updated: 2026-11-21
 | [0021 通知用 steer，唤醒用 followUp](../../docs/adr/0021-task-notice-steers.md) | 实测 `bg-kqtt9` 的通知在「轮末投递」与「用户输入」之间被吞（同会话另外两条正常）；规则按「报告还是派活」分：`notifyTaskFinished` 与 `notifyLoopSignal` 都改 `deliverAs: "steer"`，只有携带 prompt 的 Loop 唤醒保持 `followUp` |
 | [0022 默认用 bash，bash.exe 跟着用户的 git 找](../../docs/adr/0022-bash-by-default-and-where-git-lives.md) | 两平台默认都改为 bash；Windows 的 `bash.exe` 依次问 Git Bash 启动环境（`EXEPATH`/`$SHELL`）、`where git` 旁边的 `bin\bash.exe`、注册表 `InstallPath`、常规安装目录、PATH，只用 `bin\bash.exe`；找不到仍报错不兜底；`powershell` 工具改跑 pi 自带操作、不再借策略 shell |
 | [0023 发布走 OIDC，不留长期 token](../../docs/adr/0023-publish-through-oidc-not-a-token.md) | v1.0.8 发布先 404 再 403（`bypass 2fa` 被拒）；npm 自 2026-08 收账户变更、2027-01 收直接 `publish` 的绕 2FA token，2026-09-03 后新建的 trusted publisher 默认只给 staged；改为 `id-token: write` + Node 24（npm ≥ 11.5.1）+ 去掉 `NODE_AUTH_TOKEN`，删仓库 secret，npm 侧按 repo/workflow 名配 trusted publisher 并勾选允许直接 publish |
+| [0024 Loop 的提示词落盘，路径由 id 派生](../../docs/adr/0024-loop-prompt-lands-on-disk.md) | 提示词从记录里的冻结字符串改为 `.pi/tasks/<session>/<loop-id>.prompt.md`：地址只由 loop id 派生、任何工具都不收路径参数（AI 侧没有路径权力）、插件只在创建、显式改写与重建三处写、每发读一次、读失败重建后照常触发；记录上的 `prompt` 降为 seed 兼重建源 |
 
 ## 工具链与代码风格
 

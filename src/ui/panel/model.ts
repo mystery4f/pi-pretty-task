@@ -12,6 +12,7 @@ import type { Terminal, TUI } from "@earendil-works/pi-tui";
 import { elapsedOf } from "../../tasks/base/format.js";
 import type { OutputTail } from "../../tasks/base/output.js";
 import type { Task } from "../../tasks/base/task.js";
+import type { PromptPreview } from "../../tasks/loop/prompt-file.js";
 
 /** Output lines the detail view shows at once. */
 /** Output lines a tall panel's detail window shows at once. */
@@ -178,6 +179,12 @@ export interface PanelSource {
    * its session. Missing when the panel cannot see them; `o` then says so.
    */
   others?(): Promise<readonly PanelTaskView[]>;
+  /**
+   * A prompt loop's file as its page shows it: the path, a few lines and when it
+   * last changed. Missing when the panel cannot read prompt files at all; the
+   * loop's own layer answers, so the panel never joins a path or opens a file.
+   */
+  prompt?(id: string, sessionId?: string): Promise<PromptPreview | undefined>;
   /**
    * Trailing output for one process task; an absent file is an empty tail, not an
    * error. The session names whose store to read, for a row shown by `o`.
