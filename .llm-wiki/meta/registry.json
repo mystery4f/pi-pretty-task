@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "last_updated": "2026-11-26T11:43:57.778Z",
+  "last_updated": "2026-11-26T11:47:54.831Z",
   "pages": {
     "sources/await-state-not-bytes-in-process-tests": {
       "type": "source",
@@ -331,15 +331,6 @@
       "slug": "pi-git-install-omits-dev-deps-so-ship-ts-entry",
       "created": "2026-11-15",
       "updated": "2026-11-15"
-    },
-    "sources/pi-matt-implement-flow-script-gotchas": {
-      "type": "source",
-      "title": "pi-matt-implement-flow 脚本层的七个坑（自己重写时的清单）",
-      "category": "architecture",
-      "status": "insight",
-      "slug": "pi-matt-implement-flow-script-gotchas",
-      "created": "2026-11-26",
-      "updated": "2026-11-26"
     },
     "sources/pi-pretty-task-full-suite-parallel-flake": {
       "type": "source",

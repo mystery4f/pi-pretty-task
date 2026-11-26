@@ -3,15 +3,9 @@
     "syntheses/verify-red-tests-handoff"
   ],
   "sources/delete-remote-branch-via-gh-api": [],
-  "sources/git-cat-file-full-sha-flake-multipack": [
-    "sources/pi-matt-implement-flow-script-gotchas"
-  ],
-  "sources/matt-implement-gate-needs-node-modules": [
-    "sources/pi-matt-implement-flow-script-gotchas"
-  ],
-  "sources/matt-implement-sync-ticket-comments": [
-    "sources/pi-matt-implement-flow-script-gotchas"
-  ],
+  "sources/git-cat-file-full-sha-flake-multipack": [],
+  "sources/matt-implement-gate-needs-node-modules": [],
+  "sources/matt-implement-sync-ticket-comments": [],
   "sources/npm-trusted-publishing-oidc-not-token": [],
   "sources/obs-2026-11-14-kill-path-skipped-persist-and-notice-in-pi-pretty-task": [],
   "sources/obs-2026-11-14-loop-wake-backlog-storms-after-a-long-turn": [],
@@ -36,7 +30,6 @@
   "sources/pi-git-install-omits-dev-deps-so-ship-ts-entry": [
     "syntheses/release-1-0-0-publish-support"
   ],
-  "sources/pi-matt-implement-flow-script-gotchas": [],
   "sources/pi-pretty-task-full-suite-parallel-flake": [],
   "sources/pi-pretty-task-one-projection-and-formula": [
     "sources/pi-pretty-task-side-index-to-field"
@@ -55,9 +48,7 @@
   "sources/slow-suite-timings-not-workers": [
     "sources/await-state-not-bytes-in-process-tests"
   ],
-  "sources/subagent-structured-verdict-path": [
-    "sources/pi-matt-implement-flow-script-gotchas"
-  ],
+  "sources/subagent-structured-verdict-path": [],
   "sources/windows-ci-slow-fsync-record-write": [],
   "sources/windows-taskkill-t-needs-force-for-console-node": [
     "sources/slow-suite-timings-not-workers"
