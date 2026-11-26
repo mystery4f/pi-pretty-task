@@ -1,5 +1,9 @@
 # Wiki Update Log
 
+## 2026-11-26
+
+- **retro**: {"category":"architecture","slug":"pi-matt-implement-flow-script-gotchas","title":"pi-matt-implement-flow 脚本层的七个坑（自己重写时的清单）"}
+
 ## 2026-11-25
 
 - **retro**: {"category":"tooling","slug":"subagent-structured-verdict-path","title":"Subagent structured verdicts live in structured-output/output.json, not the artifact md"}

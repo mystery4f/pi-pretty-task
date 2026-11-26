@@ -25,6 +25,7 @@
 - [Observation: pi 扩展拿不到 auto_retry 事件，重试进度只能派生](obs-2026-11-25-pi-auto-retry.md)
 - [pi 扩展实例失效后的 sendMessage 抛出会杀死进程](pi-extension-stale-instance-unhandled-rejection.md)
 - [pi 的 git 安装不带 devDeps，入口要写 .ts 而不是靠 prepare 构建](pi-git-install-omits-dev-deps-so-ship-ts-entry.md)
+- [pi-matt-implement-flow 脚本层的七个坑（自己重写时的清单）](pi-matt-implement-flow-script-gotchas.md)
 - [全量 integration 套件在 8 worker 下间歇超时，串行才是确定性证据](pi-pretty-task-full-suite-parallel-flake.md)
 - [一个形状一处投影，一个式子一处实现](pi-pretty-task-one-projection-and-formula.md)
 - [面板：键盘说意图，渲染方拿只读视图](pi-pretty-task-panel-intents-and-view.md)
