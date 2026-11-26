@@ -12,6 +12,7 @@
 import {
   createBashTool,
   createPowerShellTool,
+  type EventBus,
   type ExtensionAPI,
   type ExtensionUIContext,
 } from "@earendil-works/pi-coding-agent";
@@ -187,6 +188,20 @@ export function createExtension(
       `session notice failed: ${error instanceof Error ? error.message : String(error)}`,
     );
   };
+
+  /**
+   * The shared bus, guarded by the same fact: `pi.events.emit` from an invalidated
+   * instance throws, and a task's ending is exactly the announcement that lands
+   * late — the process outlives the instance that started it. The record on disk is
+   * the truth either way, so the event is dropped rather than narrated.
+   */
+  const events: EventBus = {
+    emit: (channel, payload) => {
+      if (!live) return;
+      pi.events.emit(channel, payload);
+    },
+    on: (channel, handler) => pi.events.on(channel, handler),
+  };
   const now = options.now ?? Date.now;
   // Retention is housekeeping, not a task: a sweep that cannot judge or remove
   // one session keeps it, says why, and leaves the session start to finish.
@@ -230,7 +245,7 @@ export function createExtension(
       await recordSafely(iterations.open(fire));
       // Published once the iteration is on disk, so a listener that loads the
       // loop finds the fire it was told about (issue #23).
-      publishLoopFired(pi.events, {
+      publishLoopFired(events, {
         kind: "prompt-loop",
         id: fire.task.id,
         name: fire.task.name,
@@ -258,7 +273,7 @@ export function createExtension(
       });
       // The child record is on disk — `start` persisted it — so the fire is
       // announced with the task a listener can load (issue #23).
-      publishLoopFired(pi.events, {
+      publishLoopFired(events, {
         kind: "cmd-loop",
         id: fire.task.id,
         name: fire.task.name,
@@ -305,7 +320,7 @@ export function createExtension(
       // Published first, and only here: the store awaited the write before
       // calling this, so a listener reading the record finds the ending (issue
       // #23). A fire's child task is a task too, and ends the same way.
-      publishTaskFinished(pi.events, view);
+      publishTaskFinished(events, view);
       if (view.task.parentId === undefined) {
         void notifyTaskFinished(sendNotice, view).catch(reportNoticeFailure);
       } else if (view.task.fire === undefined) {

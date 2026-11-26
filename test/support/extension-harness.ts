@@ -206,6 +206,12 @@ export interface CustomOptions {
 
 let callCounter = 0;
 
+/**
+ * pi's refusal once a session is replaced or reloaded, in the words it uses; the
+ * harness throws the same one from every `pi.*` call a stale instance still makes.
+ */
+const STALE_REFUSAL = "This extension ctx is stale after session replacement or reload.";
+
 /** What pi accepts for a command: everything but the name and source info it fills in. */
 type CommandDefinition = Parameters<ExtensionAPI["registerCommand"]>[1];
 
@@ -299,6 +305,23 @@ export function createHarness(defaultTurn: Turn, options: HarnessOptions = {}): 
   // production and the tests observe the real emit/on contract.
   const events = createEventBus();
 
+  /**
+   * The bus as pi hands it to an extension: the object a test subscribes to, seen
+   * through the same stale refusal every other `pi.*` call meets after a reload.
+   * Without this the harness would let an invalidated instance publish in silence,
+   * which is not what production does.
+   */
+  const apiEvents: EventBus = {
+    emit(channel, data) {
+      if (stale) throw new Error(STALE_REFUSAL);
+      events.emit(channel, data);
+    },
+    on(channel, handler) {
+      if (stale) throw new Error(STALE_REFUSAL);
+      return events.on(channel, handler);
+    },
+  };
+
   const fakeTui = { requestRender: () => undefined } as unknown as TUI;
   const ui = {
     custom<T>(
@@ -346,8 +369,8 @@ export function createHarness(defaultTurn: Turn, options: HarnessOptions = {}): 
     }) as unknown as ExtensionCommandContext;
 
   const api = {
-    // The bus pi hands every extension: same object the harness exposes.
-    events,
+    // The stale-aware wrapper; `harness.events` stays the raw bus a test listens on.
+    events: apiEvents,
     registerCommand(name: string, definition: CommandDefinition): void {
       commands.set(name, definition);
     },
@@ -383,7 +406,7 @@ export function createHarness(defaultTurn: Turn, options: HarnessOptions = {}): 
       options?: SentMessage["options"],
     ): void {
       if (stale) {
-        throw new Error("This extension ctx is stale after session replacement or reload.");
+        throw new Error(STALE_REFUSAL);
       }
       messages.push({
         customType: message.customType,

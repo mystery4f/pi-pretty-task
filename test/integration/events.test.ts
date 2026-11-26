@@ -12,8 +12,10 @@
  */
 
 import { readFileSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import type { EventBus } from "@earendil-works/pi-coding-agent";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   LOOP_FIRED_EVENT,
@@ -206,6 +208,46 @@ describe("task-finished event", () => {
     expect(wire).not.toContain("secret-output-marker");
     expect(wire).not.toContain(task.directory.path);
     expect(wire).not.toContain("PI_PRETTY_TASK");
+  });
+
+  it("publishes nothing from an instance whose session is gone", async () => {
+    const task = await setup({ realClock: true });
+    // The gate holds the ending on the far side of the shutdown, so the instance
+    // that started the process is invalidated before it can announce anything.
+    const gate = join(task.directory.path, "gate");
+    const command = await writeScript(
+      task.directory.path,
+      "late-event.js",
+      'const fs = require("node:fs");\n' +
+        "const timer = setInterval(() => {\n" +
+        `  if (!fs.existsSync(${JSON.stringify(gate)})) return;\n` +
+        "  clearInterval(timer);\n" +
+        '  console.log("gate opened");\n' +
+        "}, 25);\n",
+    );
+    const started = await task.harness.call("pretty_task_bg_run", { name: "late", command });
+    const details = started.details as TaskDetails;
+    if (details.pid !== undefined) spawned.push(details.pid);
+
+    // A refused emit used to be narrated on stderr; nothing should reach it.
+    const refused = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      await task.harness.shutdownSession(task.turn);
+      await writeFile(gate, "");
+      // The record still ends — the store writes it — while the event has nowhere
+      // to go, and a stale emit would have thrown on the way out.
+      await waitFor(
+        "the ending on disk",
+        () =>
+          tasksOnDisk(task.recordPath).find((entry) => entry.id === details.id)?.status ===
+          "completed",
+      );
+      const written = refused.mock.calls.map((call) => String(call[0])).join("");
+      expect(written).not.toContain("event failed");
+      expect(task.finished).toHaveLength(0);
+    } finally {
+      refused.mockRestore();
+    }
   });
 });
 

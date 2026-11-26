@@ -7,10 +7,12 @@
  * @author mystery4f <40482524+mystery4f@users.noreply.github.com>
  */
 
+import { readFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { TASK_FINISHED_EVENT } from "../../src/tasks/base/events.js";
+import { sessionTaskDirectory, taskRecordPath } from "../../src/tasks/base/runtime-state.js";
+import type { Task } from "../../src/tasks/base/task.js";
 import {
   type FinishedTaskDetails,
   finishedTaskMessage,
@@ -43,6 +45,17 @@ async function runToEnd(harness: Harness, command: string, name: string): Promis
     return (status.details as TaskDetails).status !== "running";
   });
   return details;
+}
+
+/**
+ * The task's record as it stands on disk. An instance invalidated by a reload is
+ * never told about an ending, so the file is how a test waits for one.
+ */
+function taskOnDisk(turn: { cwd: string; sessionId: string }, id: string): Task | undefined {
+  const record = JSON.parse(
+    readFileSync(taskRecordPath(sessionTaskDirectory(turn.cwd, turn.sessionId)), "utf8"),
+  ) as { tasks?: Task[] };
+  return record.tasks?.find((entry) => entry.id === id);
 }
 
 /** The one notice the extension sent, once it arrives. */
@@ -192,11 +205,6 @@ describe("notice after the session is gone", () => {
     const turn = { cwd: dir.path, sessionId: "session-notice-gone" };
     const harness = createHarness(turn);
 
-    // The finish event is published just before the notice, so awaiting it puts
-    // the assertion after the attempt instead of in the middle of it.
-    const announced = new Promise<void>((resolve) => {
-      harness.events.on(TASK_FINISHED_EVENT, () => resolve());
-    });
     const started = await harness.call("pretty_task_bg_run", { name: "late ending", command });
     const details = started.details as TaskDetails;
     if (details.pid !== undefined) spawned.push(details.pid);
@@ -205,7 +213,10 @@ describe("notice after the session is gone", () => {
     await harness.shutdownSession(turn);
     await writeFile(gate, "");
 
-    await announced;
+    // The record carries the ending even though the instance that wrote it no
+    // longer owns a session; waiting on it puts the assertion after the attempt
+    // instead of in the middle of it.
+    await waitFor("the ending on disk", () => taskOnDisk(turn, details.id)?.status === "completed");
     // The notice is decided one microtask later; give that turn the room to throw.
     await new Promise((resolve) => setTimeout(resolve, 200));
 
