@@ -1475,6 +1475,117 @@ describe("the loop detail view", () => {
     panel.dispose();
   });
 
+  // The row's `2 failed` is the loop's own count (ticket #46); the turn that
+  // produced it is closed `completed`, because the turn did close. Saying the
+  // same turn is `completed` on its own line contradicts the row (ticket #53),
+  // so the page reads the end the settle recorded instead of the lifecycle word.
+  it("reads a turn the provider gave up on as failed, not completed", async () => {
+    const source = new FakeSource();
+    source.rows = [
+      loopView("loop01", {
+        name: "review loop",
+        fires: 1,
+        consecutiveFailures: 2,
+        iterations: [iterationOf(1, [], { end: "failed" })],
+      }),
+    ];
+    const { panel, drawn } = await openOn("loops", source);
+    await panel.settle();
+
+    panel.handleInput(ENTER);
+    await panel.settle();
+
+    const fire = drawn()
+      .split("\n")
+      .find((line) => line.includes("fire 1"));
+    expect(fire).toContain("failed");
+    expect(fire).not.toContain("completed");
+
+    panel.dispose();
+  });
+
+  it("does not count a turn the provider gave up on as an empty fire", async () => {
+    const source = new FakeSource();
+    source.rows = [
+      loopView("loop01", {
+        name: "review loop",
+        fires: 2,
+        consecutiveFailures: 2,
+        iterations: [iterationOf(1, [], { end: "failed" }), iterationOf(2, [], { end: "failed" })],
+      }),
+    ];
+    const { panel, drawn } = await openOn("loops", source);
+    await panel.settle();
+
+    panel.handleInput(ENTER);
+    await panel.settle();
+
+    // The turn made no call because the provider never let it work: marking it
+    // as a stall would blame the loop for the provider's failure (ticket #53).
+    const rows = drawn().split("\n");
+    for (const fire of [1, 2]) {
+      const line = rows.find((row) => row.includes(`fire ${String(fire)}`));
+      expect(line).toContain("0 calls");
+      expect(line).not.toContain("empty");
+    }
+
+    panel.dispose();
+  });
+  it("does not count a turn the provider never answered as an empty fire", async () => {
+    const source = new FakeSource();
+    source.rows = [
+      loopView("loop01", {
+        name: "review loop",
+        fires: 2,
+        iterations: [
+          iterationOf(1, [], { end: "unobserved" }),
+          iterationOf(2, [], { end: "unobserved" }),
+        ],
+      }),
+    ];
+    const { panel, drawn } = await openOn("loops", source);
+    await panel.settle();
+
+    panel.handleInput(ENTER);
+    await panel.settle();
+
+    // The turn made no call because the provider went silent: an empty fire is a
+    // clean turn that chose not to act, and this one never got the choice (ticket 53).
+    const rows = drawn().split("\n");
+    for (const fire of [1, 2]) {
+      const line = rows.find((row) => row.includes(`fire ${String(fire)}`));
+      expect(line).toContain("0 calls");
+      expect(line).not.toContain("empty");
+    }
+
+    panel.dispose();
+  });
+
+  it("prints the failed end of a turn on its own page, where it printed completed", async () => {
+    const source = new FakeSource();
+    source.rows = [
+      loopView("loop01", {
+        name: "review loop",
+        fires: 1,
+        consecutiveFailures: 1,
+        iterations: [iterationOf(1, [], { end: "failed", endedAt: CLOCK + 12_000 })],
+      }),
+    ];
+    const { panel, drawn } = await openOn("loops", source, () => 13_000, plainTheme());
+    await panel.settle();
+    panel.handleInput(ENTER);
+    await panel.settle();
+    panel.handleInput(ENTER);
+    await panel.settle();
+
+    const text = drawn();
+    expect(text).toContain("Status");
+    expect(text).toContain("failed");
+    expect(text).not.toContain("completed");
+
+    panel.dispose();
+  });
+
   it("prints the provider retry a fire is on, with the status the failure carried", async () => {
     const source = new FakeSource();
     source.rows = [

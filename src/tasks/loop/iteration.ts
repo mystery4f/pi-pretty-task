@@ -95,6 +95,15 @@ export interface Iteration {
   endedAt?: number;
   status: IterationStatus;
   /**
+   * How the turn ended, recorded by the settle that closed it (ticket #53): the
+   * same verdict the loop's schedule charges. Absent while the turn is open, on
+   * a record the process died on before it settled (interrupted), and on a record
+   * written before the field existed — so a settled turn that really ended clean
+   * always carries it, and a view that shows a settled turn reads this rather
+   * than inferring a verdict from the calls it made.
+   */
+  end?: TurnOutcome;
+  /**
    * The wake reached pi, so this turn is real and its tool calls are its own. A
    * fire that never woke the model keeps this false and records no calls.
    */
@@ -108,6 +117,19 @@ export interface Iteration {
    * set while `status` is `running`.
    */
   retry?: IterationRetry;
+}
+
+/**
+ * How a view of one turn reads it (ticket #53). The lifecycle says what the
+ * record did — a turn that closed is `completed` — while {@link Iteration.end}
+ * says what the turn's verdict was, so a failed turn reads `failed` everywhere
+ * instead of only in the loop's own failure count.
+ */
+export type IterationVerdict = IterationStatus | "failed";
+
+/** The word every view prints for this iteration; see {@link IterationVerdict}. */
+export function iterationVerdict(iteration: Iteration): IterationVerdict {
+  return iteration.end === "failed" ? "failed" : iteration.status;
 }
 
 /** Argument names that identify a call, in the order they are tried. */

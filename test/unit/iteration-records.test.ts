@@ -36,6 +36,8 @@ interface IterationDetails {
   droppedCalls: number;
   /** The provider retry the turn was on, when it was retrying (ticket #47). */
   retry?: { attempt: number; maxAttempts: number; status?: string };
+  /** How the turn ended, as the settle judged it (ticket #53). */
+  end?: string;
 }
 
 interface LoopDetails {
@@ -523,6 +525,41 @@ describe("a fire's turn that gave up", () => {
     const quiet = await loopOf(task.harness, created.id);
     expect(quiet.consecutiveFailures).toBe(0);
     expect(quiet.lastError).toBeUndefined();
+  });
+
+  it("records the failed end of the turn on the iteration, on disk", async () => {
+    const { task, created } = await openTurn();
+    await endAttempt(task.harness, { stopReason: "error", errorMessage: "fetch failed" });
+    await task.harness.emit({ type: "agent_settled", aborted: false });
+
+    const [failed] = await iterationsOf(task.harness, created.id);
+    // The lifecycle word stays `completed` — the turn did close — so the end is
+    // the only thing that tells a turn the provider gave up on from a clean one
+    // (ticket #53). A reader must not have to infer it from the call count.
+    expect(failed).toMatchObject({ status: "completed", calls: [] });
+    expect(failed?.end).toBe("failed");
+
+    // The same field has to survive the store: the page renders a reloaded record.
+    const store = new TaskStore(sessionTaskDirectory(task.turn.cwd, task.turn.sessionId));
+    const loop = (await store.load()).find((record) => record.id === created.id);
+    if (loop?.kind !== "prompt-loop") throw new Error("the loop was not persisted");
+    expect(loop.iterations?.[0]?.end).toBe("failed");
+  });
+
+  it("records the healthy end of a clean turn and the unobserved end of a silent one", async () => {
+    const { task, created } = await openTurn();
+    await endAttempt(task.harness);
+    await task.harness.emit({ type: "agent_settled", aborted: false });
+
+    task.advance(10_000);
+    await task.harness.pump(task.now);
+    // No assistant message: pi settled this turn without the model ever speaking,
+    // which the schedule must read as neither a success nor a failure.
+    await task.harness.emit({ type: "agent_settled", aborted: false });
+
+    const iterations = await iterationsOf(task.harness, created.id);
+    expect(iterations.find((iteration) => iteration.fire === 1)?.end).toBe("healthy");
+    expect(iterations.find((iteration) => iteration.fire === 2)?.end).toBe("unobserved");
   });
 });
 describe("the retry budget", () => {

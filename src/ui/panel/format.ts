@@ -24,12 +24,13 @@ import type {
   TaskKind,
   TaskStatus,
 } from "../../tasks/base/task.js";
-import type {
-  Iteration,
-  IterationCall,
-  IterationCallStatus,
-  IterationRetry,
-  IterationStatus,
+import {
+  type Iteration,
+  type IterationCall,
+  type IterationCallStatus,
+  type IterationRetry,
+  type IterationVerdict,
+  iterationVerdict,
 } from "../../tasks/loop/iteration.js";
 import type { PromptPreview } from "../../tasks/loop/prompt-file.js";
 import { STATUS_COLOUR } from "../status-colour.js";
@@ -185,13 +186,15 @@ export function messageOf(error: unknown): string {
 /** Tools whose subject is a command line, so the panel can make them stand out. */
 const COMMAND_TOOLS: ReadonlySet<string> = new Set(["bash", "pretty_task_bg_run"]);
 
-/** Iteration states, read from the one task-status palette. */
+// How a turn reads, from the one task-status palette; see {@link IterationVerdict}.
 export const ITERATION_COLOUR = {
   running: STATUS_COLOUR.running,
   completed: STATUS_COLOUR.completed,
   aborted: STATUS_COLOUR.killed,
   interrupted: STATUS_COLOUR.interrupted,
-} satisfies Record<IterationStatus, ThemeColor>;
+  /** A turn the provider gave up on: closed, but its verdict is not a clean one. */
+  failed: STATUS_COLOUR.failed,
+} satisfies Record<IterationVerdict, ThemeColor>;
 
 /** Tool-call states, read from the same palette. */
 export const CALL_COLOUR = {
@@ -335,10 +338,16 @@ export function stepColour(status: TaskStatus): ThemeColor {
 /**
  * A fire whose turn finished cleanly and recorded no tool call: it spent a model
  * call and moved nothing. A turn cut short — aborted, or interrupted with the
- * process — is not one: it never got the chance to work (ticket #49).
+ * process — is not one: it never got the chance to work (ticket #49), and neither
+ * is a turn the provider gave up on (ticket #53), nor one it never heard back
+ * from (unobserved): both stopped working before they could succeed.
  */
 function emptyFire(iteration: Iteration): boolean {
-  return iteration.status === "completed" && iteration.calls.length === 0;
+  return (
+    iteration.status === "completed" &&
+    iteration.calls.length === 0 &&
+    (iteration.end === undefined || iteration.end === "healthy")
+  );
 }
 
 /**
@@ -366,7 +375,7 @@ function emptyFireRun(iterations: readonly Iteration[], iteration: Iteration): n
 export function iterationLine(iteration: Iteration, iterations: readonly Iteration[]): string {
   const parts = [
     `fire ${String(iteration.fire)}`,
-    iteration.status,
+    iterationVerdict(iteration),
     formatClockTime(iteration.startedAt),
   ];
   if (iteration.endedAt !== undefined) {

@@ -53,7 +53,7 @@ Chain task 队列里的一格，本身就是一个普通 Process task，`parentI
 _Avoid_: stage, phase, node, stage task
 
 **Iteration**:
-Llm loop task 的子记录。一次触发对应一条，记录那一轮里实际调用了哪些工具、跑了哪些命令。它不是 Task，不在列表里单独占一行，只在该 Llm loop task 的详情里展开。
+Llm loop task 的子记录。一次触发对应一条，记录那一轮里实际调用了哪些工具、跑了哪些命令。它不是 Task，不在列表里单独占一行，只在该 Llm loop task 的详情里展开。turn 关闭时把它的结局（`end`：`healthy`、`failed`、`aborted`、`unobserved`）一起写进记录，行、Iteration 页和工具文本都读这一个字段，不从「有没有调工具」反推——所以 provider 放弃的那一轮不会一边是 `completed` 一边是 `failed`。
 _Avoid_: run, round, execution
 
 **Retry**:
@@ -61,7 +61,7 @@ _Avoid_: run, round, execution
 _Avoid_: rerun, try, throttle
 
 **Empty fire**:
-一次 Fire 的 turn 已经关闭（`completed`）、却一个工具都没调用：花了一次模型调用，什么也没推动。面板把它当事实印出来（`0 calls`），只有连续两次才标记（`2 empty in a row`）——先读文件再动手的 turn 是合法的，第一次不该被当成卡住。代码只知道这一轮关了、没调工具，读不出「正常」：provider 放弃的那一轮也以 `completed` 关闭。被 abort 或被进程带走的 turn 不算：它没得到干活的机会。
+一次 Fire 的 turn 已经关闭、结局是 `healthy`、却一个工具都没调用：花了一次模型调用，什么也没推动。面板把它当事实印出来（`0 calls`），只有连续两次才标记（`2 empty in a row`）——先读文件再动手的 turn 是合法的，第一次不该被当成卡住。provider 放弃的那一轮（`end` 是 `failed`）和 provider 一声没吭、turn 静默关闭的那一轮（`end` 是 `unobserved`，见 Iteration）都不是空转，被 abort 或被进程带走的 turn 也不算：它们都没得到干活的机会。
 _Avoid_: idle fire, no-op, quiet run
 
 **Schedule**:

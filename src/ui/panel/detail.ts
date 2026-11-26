@@ -8,7 +8,7 @@
 
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { formatBytes, formatClockTime, formatDuration } from "../../tasks/base/format.js";
-import type { IterationCall } from "../../tasks/loop/iteration.js";
+import { type IterationCall, iterationVerdict } from "../../tasks/loop/iteration.js";
 import { STATUS_COLOUR } from "../status-colour.js";
 import {
   CALL_COLOUR,
@@ -407,7 +407,13 @@ export function renderIterationDetail(panel: PanelView, width: number): string[]
   if (iteration === undefined) return renderLoopDetail(panel, row, width);
 
   const groups: string[][] = [
-    field(panel, "Status", theme.fg(ITERATION_COLOUR[iteration.status], iteration.status)),
+    // The word is the turn's verdict, not its lifecycle: a turn the provider gave
+    // up on closed `completed` and reads `failed` here (ticket #53).
+    field(
+      panel,
+      "Status",
+      theme.fg(ITERATION_COLOUR[iterationVerdict(iteration)], iterationVerdict(iteration)),
+    ),
     field(panel, "Started", formatClockTime(iteration.startedAt)),
     // What the turn spent on a provider that was failing, whether it is still
     // doing so or has since finished (ticket #47).
@@ -467,7 +473,7 @@ export function renderIterationDetail(panel: PanelView, width: number): string[]
   if (panel.notice !== undefined) body.push(theme.fg("warning", `  ${panel.notice}`));
   return panel.frame(
     `fire ${String(iteration.fire)}`,
-    `${task.name} · ${task.id} · ${iteration.status}`,
+    `${task.name} · ${task.id} · ${iterationVerdict(iteration)}`,
     body,
     "↑/↓ scroll · ← loop · k stop · alt+q close",
     width,

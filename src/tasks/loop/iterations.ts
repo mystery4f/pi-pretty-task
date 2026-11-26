@@ -330,7 +330,7 @@ export class Iterations {
       let closed = false;
       for (const iteration of task.iterations) {
         if (iteration.bound !== true || iteration.status !== "running") continue;
-        closeIteration(iteration, at, aborted ? "aborted" : "completed");
+        closeIteration(iteration, at, end);
         const seen = newest.get(task.id);
         if (seen === undefined || iteration.startedAt >= seen.iteration.startedAt) {
           newest.set(task.id, { task, iteration });
@@ -397,9 +397,16 @@ export class Iterations {
   }
 }
 
-function closeIteration(iteration: Iteration, at: number, status: "completed" | "aborted"): void {
+/**
+ * Close one iteration at the settle. The lifecycle word follows the end it was
+ * given, and the end is recorded on the record itself (ticket #53): a failed
+ * turn still `completed`s — the turn did close — so the end is the only thing a
+ * view can read to avoid calling that turn a clean one.
+ */
+function closeIteration(iteration: Iteration, at: number, end: TurnOutcome): void {
   iteration.endedAt = at;
-  iteration.status = status;
+  iteration.status = end === "aborted" ? "aborted" : "completed";
+  iteration.end = end;
   // This is the turn-ended point ticket #46 shares: nothing is retried once the
   // turn is over, whatever it finally did. #46 decides from its own field
   // whether the turn ended because pi gave up; this one describes flight only.
@@ -407,7 +414,7 @@ function closeIteration(iteration: Iteration, at: number, status: "completed" | 
   for (const call of iteration.calls) {
     if (call.status !== "running") continue;
     call.endedAt = at;
-    call.status = status === "aborted" ? "aborted" : "interrupted";
+    call.status = end === "aborted" ? "aborted" : "interrupted";
     call.durationMs = Math.max(0, at - call.startedAt);
   }
 }

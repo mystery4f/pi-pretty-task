@@ -521,6 +521,94 @@ describe("the task record file", () => {
     expect(await new TaskStore(directory).load()).toEqual([]);
   });
 
+  it("round-trips the end a settled turn recorded", async () => {
+    const directory = await stateDirectory();
+    const loop = loopRecord({
+      status: "running",
+      iterations: [
+        {
+          fire: 1,
+          startedAt: 1_700_000_000_100,
+          endedAt: 1_700_000_000_200,
+          status: "completed",
+          end: "failed",
+          droppedCalls: 0,
+          calls: [],
+        },
+      ],
+    });
+    delete loop.endedAt;
+    await new TaskStore(directory).save([loop]);
+
+    const [record] = await new TaskStore(directory).load();
+
+    if (record?.kind !== "prompt-loop") throw new Error("the loop record did not load");
+    // The end is what a page reads instead of inferring a verdict from the call
+    // count (ticket #53), so it has to survive the store like the retry does.
+    expect(record.iterations?.[0]).toMatchObject({ fire: 1, end: "failed" });
+  });
+
+  it("loads an iteration written before the end was recorded", async () => {
+    const directory = await stateDirectory();
+    const older = JSON.parse(JSON.stringify(loopRecord({ status: "running" }))) as Record<
+      string,
+      unknown
+    >;
+    delete older.endedAt;
+    older.iterations = [
+      {
+        fire: 1,
+        startedAt: 1_700_000_000_100,
+        endedAt: 1_700_000_000_200,
+        status: "completed",
+        droppedCalls: 0,
+        calls: [],
+      },
+    ];
+    await writeFile(
+      taskRecordPath(directory),
+      JSON.stringify({ version: 5, tasks: [older] }),
+      "utf8",
+    );
+
+    const [record] = await new TaskStore(directory).load();
+
+    if (record?.kind !== "prompt-loop") throw new Error("the loop record did not load");
+    // The field was added beside the status, not in place of it, so its absence is
+    // an older generation and must not refuse the record.
+    expect(record.iterations?.[0]?.status).toBe("completed");
+    expect(record.iterations?.[0]?.end).toBeUndefined();
+  });
+
+  it("refuses an end word this record could not have written", async () => {
+    const directory = await stateDirectory();
+    const broken = JSON.parse(JSON.stringify(loopRecord({ status: "running" }))) as Record<
+      string,
+      unknown
+    >;
+    delete broken.endedAt;
+    // `success` is a fire's outcome, not a turn's end: a word outside the
+    // vocabulary is corruption rather than an older generation (ticket #53).
+    broken.iterations = [
+      {
+        fire: 1,
+        startedAt: 1_700_000_000_100,
+        endedAt: 1_700_000_000_200,
+        status: "completed",
+        end: "success",
+        droppedCalls: 0,
+        calls: [],
+      },
+    ];
+    await writeFile(
+      taskRecordPath(directory),
+      JSON.stringify({ version: 5, tasks: [broken] }),
+      "utf8",
+    );
+
+    expect(await new TaskStore(directory).load()).toEqual([]);
+  });
+
   it("round-trips a command loop, its fire history and its child process", async () => {
     const directory = await stateDirectory();
     // The child is an ordinary process record that points at its loop and its fire.

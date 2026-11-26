@@ -18,6 +18,7 @@ import { Type } from "typebox";
 import { fireLabel, formatBytes, formatDuration } from "../base/format.js";
 import type { TaskScope } from "../base/runtime-state.js";
 import type { CmdLoopTask, FireRecord, PromptLoopTask } from "../base/task.js";
+import { iterationVerdict } from "./iteration.js";
 import {
   LoopInputError,
   type LoopTasks,
@@ -295,7 +296,7 @@ export function describeIterations(task: PromptLoopTask): string {
     .map((iteration) => {
       const head = [
         `fire ${String(iteration.fire)}`,
-        iteration.status,
+        iterationVerdict(iteration),
         new Date(iteration.startedAt).toISOString(),
         iteration.endedAt === undefined
           ? undefined
