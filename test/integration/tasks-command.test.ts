@@ -17,7 +17,9 @@ import {
   SUMMARY_KEY,
   statusLineText,
   TASKS_COMMAND,
+  TASKS_HINT,
   TASKS_SHORTCUT,
+  TASKS_SHORTCUT_LABEL,
 } from "../../src/ui/tasks-command.js";
 import {
   createHarness,
@@ -143,8 +145,10 @@ describe("status line", () => {
   });
 
   it("names the shortcut, which is registered and opens the same panel", async () => {
-    expect(statusLineText([])).toContain("Shift↓");
-    expect(statusLineText([])).toBe(" · /tasks or Shift↓");
+    // Derived from the one string the status line and the docs both quote: a hint
+    // rewritten here would pass while the panel's own door moved.
+    expect(statusLineText([])).toContain(TASKS_SHORTCUT_LABEL);
+    expect(statusLineText([])).toBe(` · ${TASKS_HINT}`);
 
     const dir = await makeTempDir();
     cleanup.push(dir.dispose);

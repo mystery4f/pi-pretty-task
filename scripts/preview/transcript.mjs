@@ -94,27 +94,50 @@ function span(text, width) {
   return THEME.bg("customMessageBg", text + " ".repeat(width - used));
 }
 
+/** One notice, painted inside the host's panel. */
+export function renderMessageCard(card) {
+  const component = card.render(
+    {
+      role: "custom",
+      customType: card.type,
+      content: card.content,
+      display: true,
+      details: card.details,
+      timestamp: CLOCK,
+    },
+    OPTIONS,
+    THEME,
+  );
+  if (component === undefined) throw new Error(`the ${card.type} card drew nothing`);
+  const body = component.render(WIDTH - 2).map((line) => ` ${line}`);
+  // Box(1, 1): one padded row above and below, one column on each side.
+  const lines = [span("", WIDTH)];
+  for (const line of body) lines.push(span(line, WIDTH));
+  lines.push(span("", WIDTH));
+  return lines;
+}
+
+/** The notice registered under one custom type, as the transcript draws it. */
+export function renderNotice(type) {
+  const card = CARDS.find((candidate) => candidate.type === type);
+  if (card === undefined) throw new Error(`no fixture notice for ${type}`);
+  return renderMessageCard(card);
+}
+
+/**
+ * The same notice, with details the caller supplies: the animation quotes a captured
+ * record, so the id, the exit code and the tail in the image are the record's own.
+ */
+export function renderNoticeOf(type, details) {
+  const card = CARDS.find((candidate) => candidate.type === type);
+  if (card === undefined) throw new Error(`no fixture notice for ${type}`);
+  return renderMessageCard({ ...card, details });
+}
+
 export function renderMessageCards() {
   const lines = [];
   for (const card of CARDS) {
-    const component = card.render(
-      {
-        role: "custom",
-        customType: card.type,
-        content: card.content,
-        display: true,
-        details: card.details,
-        timestamp: CLOCK,
-      },
-      OPTIONS,
-      THEME,
-    );
-    if (component === undefined) throw new Error(`the ${card.type} card drew nothing`);
-    const body = component.render(WIDTH - 2).map((line) => ` ${line}`);
-    // Box(1, 1): one padded row above and below, one column on each side.
-    lines.push(span("", WIDTH));
-    for (const line of body) lines.push(span(line, WIDTH));
-    lines.push(span("", WIDTH));
+    for (const line of renderMessageCard(card)) lines.push(line);
     lines.push("");
   }
   lines.pop();

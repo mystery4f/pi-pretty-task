@@ -7,22 +7,27 @@
  * frames whose label contains that word. Every image the README carries has a
  * frame here, so a page can be checked before a screenshot is spent on it.
  *
+ * The animation's frames are `TOUR`'s, in `TOUR`'s order: this file filters that list
+ * (`--only <label>`), it never keeps an order of its own. A page the gif shows and this
+ * dump does not is a bug, and `scripts/preview/gif-check.mjs` is what says so.
+ *
  *   npm run preview:dump
  *   node scripts/preview/dump.mjs --only chain
  */
 
 import { renderDetachCards } from "./card.mjs";
 import {
+  captureTour,
+  lastLines,
   renderChain,
   renderCommandLoop,
-  renderDetach,
   renderFailed,
   renderIteration,
   renderList,
   renderSearch,
   renderTail,
-  renderWalk,
 } from "./render.mjs";
+import { TOUR } from "./storyboard.mjs";
 import { renderMessageCards, renderStatusLine } from "./transcript.mjs";
 
 const only = process.argv.indexOf("--only");
@@ -32,21 +37,20 @@ const needle = only === -1 ? undefined : process.argv[only + 1];
 const plain = (line) => line.replace(/\u001b\[[0-9;]*m/g, "").trimEnd();
 
 const frames = [
-  { label: "list", lines: await renderList() },
-  { label: "tail", lines: await renderTail() },
-  { label: "iteration", lines: await renderIteration() },
-  { label: "chain", lines: await renderChain() },
-  { label: "cmd-loop", lines: await renderCommandLoop() },
-  { label: "failed", lines: await renderFailed() },
-  { label: "search", lines: await renderSearch() },
+  { label: "list", lines: lastLines(await renderList()) },
+  { label: "tail", lines: lastLines(await renderTail()) },
+  { label: "iteration", lines: lastLines(await renderIteration()) },
+  { label: "chain", lines: lastLines(await renderChain()) },
+  { label: "cmd-loop", lines: lastLines(await renderCommandLoop()) },
+  { label: "failed", lines: lastLines(await renderFailed()) },
+  { label: "search", lines: lastLines(await renderSearch()) },
   // The three transcript surfaces: entries and messages, reached without keystrokes.
   { label: "detach-card", lines: renderDetachCards() },
   { label: "cards", lines: renderMessageCards() },
   { label: "status", lines: await renderStatusLine() },
-  // The animation, in the same order the GIF uses: the takeover first, which also
-  // leaves its task among the rows the walk moves through.
-  ...(await renderDetach()),
-  ...(await renderWalk()),
+  // The animation's frames, in `TOUR`'s order: this file filters that list, it never
+  // keeps one of its own, so a page the gif shows is always a page the dump prints.
+  ...(await captureTour(TOUR)),
 ];
 
 for (const frame of frames) {

@@ -33,17 +33,37 @@ import {
   TasksPanel,
 } from "./panel/tasks-panel.js";
 
-/** Command name the user types, without the leading slash. */
+/**
+ * The panel's door has two forms, and they are different kinds of thing:
+ *
+ * - `TASKS_SHORTCUT` is a **key**: pi binds it, the panel can be opened without
+ *   typing, and it may appear in a key list (the status line, the README's keys, the
+ *   animation's key trail).
+ * - `TASKS_COMMAND` is **text**: it has to be typed after a slash, it is not a key,
+ *   and it never belongs in a key list.
+ *
+ * Both open the same panel. The status line, the README and the animation's legend
+ * quote `TASKS_HINT` instead of writing the door again — three copies of one string
+ * is how a hint and a shortcut drift apart.
+ */
+
+/** Command name the user types, without the leading slash: the door's typing form. */
 export const TASKS_COMMAND = "tasks";
 
-/** The one shortcut that opens the panel without typing, shown in the status line. */
+/** The door's pressable form, in pi's keybinding syntax — what a shortcut is bound to. */
 export const TASKS_SHORTCUT = "shift+down";
+
+/** The pressable form as a person writes it. A key you press, never text you type. */
+export const TASKS_SHORTCUT_LABEL = "Shift↓";
+
+/** The typing form as a person writes it: a command, not a key. */
+export const TASKS_COMMAND_LABEL = `/${TASKS_COMMAND}`;
 
 /**
  * How the status line names the way back in. A terminal that never delivers the
  * shortcut still prints the command, so the hint is never the only door.
  */
-export const TASKS_HINT = "/tasks or Shift↓";
+export const TASKS_HINT = `${TASKS_COMMAND_LABEL} or ${TASKS_SHORTCUT_LABEL}`;
 
 /** Widget slot this package owns; one line above the editor, replaced in place. */
 export const SUMMARY_KEY = "pi-pretty-task";
@@ -296,6 +316,6 @@ export async function publishStatus(
     ui.setWidget(SUMMARY_KEY, tasks.length === 0 ? undefined : [statusLineText(tasks)]);
   } catch {
     // The count is a courtesy: a store that cannot list still gets the way back in.
-    ui.setWidget(SUMMARY_KEY, [`/${TASKS_COMMAND} or Shift↓`]);
+    ui.setWidget(SUMMARY_KEY, [TASKS_HINT]);
   }
 }

@@ -9,7 +9,7 @@ Background processes and scheduled agent wake-ups for [pi](https://github.com/ea
 
 A build that takes six minutes. A watcher that runs all afternoon. A loop that wakes the model every ten minutes. They all land in the same list — readable, searchable, stoppable — and the output is still on disk when the turn is over.
 
-![Letting a command in front go: the panel hints at ctrl+shift+b, the key is pressed, and the same command arrives in the list above the others — then a walk through processes, loops, chains and a search for the dev server](https://raw.githubusercontent.com/mystery4f/pi-pretty-task/main/docs/preview.gif)
+![A command is typed in an ordinary session and it runs in the foreground; ctrl+shift+b moves it to the background, and the card it leaves behind stays in the transcript — then /tasks, and the panel opens on every status, one task's output, following the log, back to the list, the task ends, f narrows to failed until the failed filter keeps the reason, and / search keeps the query; then the notice a finished task leaves, one line above the editor while the panel is closed, and a wait: true call answering with its output](https://raw.githubusercontent.com/mystery4f/pi-pretty-task/main/docs/preview.gif)
 
 ## Install
 
@@ -33,7 +33,7 @@ Requires pi and Node >= 22.19. A local checkout works too: `pi install ./path/to
 | Wake the agent on a schedule — interval or cron | `pretty_task_loop_create` |
 | Fire that wake once more, now, without moving the schedule | `pretty_task_loop_fire` |
 | Find out what that wake-up actually did | `pretty_task_loop_list` with an id |
-| Just look at everything | `/tasks`, or `shift+down` |
+| Just look at everything | `/tasks` or `Shift↓` — the same door the status line prints |
 
 ## One panel, three records
 
@@ -63,9 +63,11 @@ Deliberately not here: subagent/delegate/fusion tools, monitors-with-shell, work
 
 ## The panel
 
-Opens with `/tasks` or `shift+down`, and has three tabs — processes, loops, chains — plus five filters (`all`, `running`, `failed`, `done`, `signal`). It opens on `all`, so a session whose work has all ended still shows its rows; `f` narrows. One summary line above the editor stays after it closes; the footer row is shared with every other extension, so the count lives where it can be read.
+Opens with `/tasks` or `Shift↓`, and has three tabs — processes, loops, chains — plus five filters (`all`, `running`, `failed`, `done`, `signal`). It opens on `all`, so a session whose work has all ended still shows its rows; `f` narrows. One summary line above the editor stays after it closes; the footer row is shared with every other extension, so the count lives where it can be read.
 
-List keys: `↑/↓` select, `Enter` open, `←` back, `k` stop, `a` stop all, `f` cycle filter (`all`/`running`/`failed`/`done`/`signal`), `o` toggle other sessions' records, `R` rerun, `c` show the output path, `/` search, `x` close from the list, `alt+q` close from anywhere (the first press leaves search mode).
+List keys: `↑/↓` select, `Enter` open, `k` stop, `a` stop all, `f` cycle filter (`all`/`running`/`failed`/`done`/`signal`), `o` toggle other sessions' records, `R` rerun, `c` show the output path, `/` search, `x` close from the list, `1/2/3` pick a tab, `alt+q` close from anywhere (the first press leaves search mode).
+
+Detail keys: `↑/↓` scroll, `r` follow the log, `←` back to the list, `k` stop the one that is open, `R` rerun, `c` show the output path, `1/2/3` pick a tab, `alt+q` close.
 
 ```text
 ↑/↓ · Enter logs · k stop · f filter · o others · 1/2/3 tabs · / search · R rerun · a stop all · alt+q close

@@ -21,6 +21,7 @@ import type {
 import type { Iteration, IterationCall } from "../../src/tasks/loop/iteration.js";
 import type { PromptPreview } from "../../src/tasks/loop/prompt-file.js";
 import { block, detailRows } from "../../src/ui/panel/detail.js";
+import { LIST_KEYS, PROCESS_KEYS } from "../../src/ui/panel/keys.js";
 import { LABEL_WIDTH } from "../../src/ui/panel/model.js";
 import {
   DEFAULT_PANEL_FILTER,
@@ -3531,5 +3532,130 @@ describe("a pane too narrow and too short for the full page", () => {
     expect(text).not.toContain("…");
     expect(text).toContain("--watch");
     expect(text).toContain("node build.js");
+  });
+});
+
+/**
+ * Every key a footer row prints, exercised for real.
+ *
+ * A footer is a promise: `f filter` on the row means the key does something from the
+ * page that draws it. Printing a key that page ignores is the bug this catches, and
+ * comparing a whole state snapshot means "did something" is not limited to what the
+ * frame happens to show — a plain theme paints no selection, and `c` answers in the
+ * notice line rather than in the rows.
+ */
+describe("the keys the footers print", () => {
+  /** One ` · ` segment per key; `↑/↓` and `1/2/3` are two and three keys, not two words. */
+  function footerKeys(row: string): string[] {
+    return row
+      .split(" · ")
+      .map((segment) => segment.split(" ")[0] ?? "")
+      .flatMap((token) => token.split("/"))
+      .filter((token) => token.length > 0);
+  }
+
+  const listKeys = footerKeys(LIST_KEYS[0] ?? "");
+  const detailKeys = footerKeys(PROCESS_KEYS[0] ?? "");
+  /**
+   * A footer prints glyphs; the terminal sends sequences. Feeding the glyph back in
+   * tests nothing — `↑` is one character the panel never sees — so each printed key is
+   * translated to what a terminal actually delivers.
+   */
+  const PRESS: Record<string, string> = {
+    "↑": UP,
+    "↓": DOWN,
+    "←": LEFT,
+    Enter: ENTER,
+    "alt+q": "\u001bq",
+  };
+  const press = (key: string): string => PRESS[key] ?? key;
+  /** A tail long enough that one scroll step moves the window. */
+  const LONG_TAIL: OutputTail = {
+    text: Array.from({ length: 60 }, (_, index) => `line ${String(index + 1)}`).join("\n"),
+    lines: 60,
+    truncated: true,
+  };
+
+  function listSource(): FakeSource {
+    const source = new FakeSource();
+    source.rows = [view("run1"), view("done1", { status: "completed", exitCode: 0 }), view("run2")];
+    source.tails.set("run1", LONG_TAIL);
+    source.tails.set("done1", LONG_TAIL);
+    return source;
+  }
+
+  /** Everything a key could have moved: the page, the mode, and what the store was asked. */
+  function snapshot(panel: TasksPanel, source: FakeSource, done: ReturnType<typeof vi.fn>): string {
+    return JSON.stringify({
+      mode: panel.mode,
+      tab: panel.tab,
+      filter: panel.filter,
+      showOthers: panel.showOthers,
+      selectedId: panel.selectedId,
+      listTop: panel.listTop,
+      searching: panel.searching,
+      query: panel.query,
+      notice: panel.notice,
+      scrollBack: panel.scrollBack,
+      following: panel.following,
+      detailId: panel.detailId,
+      stopped: source.stopped,
+      reran: source.reran,
+      tailed: source.tailed,
+      done: done.mock.calls.length,
+      frame: panel.render(WIDTH).join("\n"),
+    });
+  }
+
+  it("answers every key the list footer prints", async () => {
+    // `↑` clamps on the first row and `R` only reruns a finished one, so those two
+    // need the cursor moved first; the rest answer from the row the panel opens on.
+    const startOn: Record<string, readonly string[]> = { "↑": [DOWN], R: [DOWN], "1": ["2"] };
+    for (const key of listKeys) {
+      const source = listSource();
+      const opened = openPanel(source);
+      await opened.panel.settle();
+      for (const step of startOn[key] ?? []) opened.panel.handleInput(step);
+      await opened.panel.settle();
+
+      const before = snapshot(opened.panel, source, opened.done);
+      opened.panel.handleInput(press(key));
+      await opened.panel.settle();
+
+      expect(snapshot(opened.panel, source, opened.done), `the list ignores ${key}`).not.toBe(
+        before,
+      );
+      opened.panel.dispose();
+    }
+  });
+
+  it("answers every key the detail footer prints", async () => {
+    // `k` needs something still running to stop; `R` needs something finished to
+    // rerun. Same page, two rows, which is why the opener is per key.
+    const openRow: Record<string, string> = { R: "done1", k: "run1" };
+    const detailStartOn: Record<string, readonly string[]> = { "↓": [UP] };
+    for (const key of detailKeys) {
+      const source = listSource();
+      const opened = openPanel(source);
+      await opened.panel.settle();
+      // Opened the way a reader opens it — Enter on the row — so the tail is read and
+      // the page starts on its newest line; assigning `mode` alone leaves it empty.
+      opened.panel.selectedId = openRow[key] ?? "run1";
+      opened.panel.handleInput(ENTER);
+      await opened.panel.settle();
+      // A detail opens on its newest line, where `↓` correctly has nowhere to go;
+      // scrolling back first is what gives it somewhere to return to.
+      for (const step of detailStartOn[key] ?? []) opened.panel.handleInput(step);
+      await opened.panel.settle();
+
+      const before = snapshot(opened.panel, source, opened.done);
+      opened.panel.handleInput(press(key));
+      await opened.panel.settle();
+
+      expect(snapshot(opened.panel, source, opened.done), `the detail ignores ${key}`).not.toBe(
+        before,
+      );
+      opened.panel.dispose();
+    }
   });
 });

@@ -17,17 +17,19 @@ import { chromium } from "playwright-core";
 import { terminalPage } from "./page.mjs";
 import { renderDetachCards } from "./card.mjs";
 import {
+  PANEL_COLUMNS,
+  captureTour,
+  lastLines,
   renderChain,
   renderCommandLoop,
-  renderDetach,
   renderFailed,
   renderIteration,
   renderList,
   renderSearch,
   renderTail,
-  renderWalk,
 } from "./render.mjs";
 import { launchBrowser, screenshot, writeGif } from "./shoot.mjs";
+import { LEGEND, TOUR } from "./storyboard.mjs";
 import { renderMessageCards, renderStatusLine } from "./transcript.mjs";
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
@@ -36,12 +38,25 @@ const SCRATCH = `${ROOT}.tmp/preview/`;
 const TITLE = "pi — /tasks — ~/work/storefront";
 const TRANSCRIPT_TITLE = "pi — transcript — ~/work/storefront";
 const EDITOR_TITLE = "pi — above the editor";
+/**
+ * The tour happens where the capture happened, so its titles name that directory: a
+ * still may keep the sample path it always had (its bytes must not move), an animation
+ * frame must not claim a directory the record never ran in.
+ */
+const TOUR_HOME = "~/pi-pretty-task";
+const TOUR_TITLE = `pi — /tasks — ${TOUR_HOME}`;
+const tourTitle = (frame) => (frame.title ?? TOUR_TITLE).replace("~/work/storefront", TOUR_HOME);
 
 const kb = (path) => Math.round(statSync(path).size / 102.4) / 10;
 
-function writePage(name, { lines, rows, title = TITLE }) {
+/**
+ * One page, written to the scratch directory. Everything the page can draw is passed
+ * straight through: a still passes nothing extra, an animation frame passes the strip
+ * it wants (editor or legend) and the keys pressed so far.
+ */
+function writePage(name, page) {
   const path = `${SCRATCH}${name}.html`;
-  writeFileSync(path, terminalPage({ lines, rows, title }));
+  writeFileSync(path, terminalPage({ title: TITLE, ...page }));
   return path;
 }
 
@@ -49,21 +64,25 @@ async function main() {
   mkdirSync(SCRATCH, { recursive: true });
   mkdirSync(DOCS, { recursive: true });
 
-  const list = await renderList();
-  const iteration = await renderIteration();
-  const tail = await renderTail();
+  const list = lastLines(await renderList());
+  const iteration = lastLines(await renderIteration());
+  const tail = lastLines(await renderTail());
   // One image per class of page: the list is not the only thing the panel can show,
   // and a reader deciding whether to install it needs to see a chain and a loop too.
-  const chain = await renderChain();
-  const commandLoop = await renderCommandLoop();
-  const failed = await renderFailed();
-  const search = await renderSearch();
-  // The takeover goes first in the animation so the detached task is already one of
-  // the rows the rest of the walk moves through.
-  const detach = await renderDetach();
-  const walk = [...detach, ...(await renderWalk())];
-  // Every animation frame is padded to the tallest one, so the window keeps its size.
-  const rows = Math.max(...walk.map((frame) => frame.lines.length));
+  const chain = lastLines(await renderChain());
+  const commandLoop = lastLines(await renderCommandLoop());
+  const failed = lastLines(await renderFailed());
+  const search = lastLines(await renderSearch());
+  // The animation plays `TOUR`, in that order and with that timing: the two frames of
+  // the takeover come first, so the detached task is already one of the rows the rest
+  // of the walk moves through. Every frame is one a renderer already captured.
+  const walk = await captureTour(TOUR);
+  // Every animation frame is padded to the same height so the window keeps its size.
+  // One spare row: a `<pre>` whose text ends with a newline renders one line box fewer
+  // than it has blank rows, and the one frame that fills the height exactly would then
+  // be 19 px taller than the rest — the encoder sizes the canvas from the first frame,
+  // so that frame would be clipped.
+  const rows = Math.max(...walk.map((frame) => frame.lines.length)) + 1;
   // The card is a transcript entry, so it gets its own image: the panel shots can
   // never show it, and it is the only surface a detached command leaves behind.
   const cards = renderDetachCards();
@@ -92,7 +111,10 @@ async function main() {
     { label: "status", lines: status, out: "preview-status.png", title: EDITOR_TITLE },
   ];
   const chosen = shots.filter((shot) => only === undefined || only === shot.label || only === shot.out);
-  if (chosen.length === 0) {
+  // `--only preview.gif` names the animation and therefore no image at all, which is
+  // the documented way to re-render just the clip: only a name that matches nothing
+  // anywhere is an error.
+  if (chosen.length === 0 && !writeGifWanted) {
     throw new Error(`no image named ${only}: one of ${shots.map((shot) => shot.label).join(", ")}, preview.gif`);
   }
   const wrote = [];
@@ -109,20 +131,44 @@ async function main() {
 
     if (writeGifWanted) {
       const frames = [];
+      // The keys pressed so far, in order: every frame carries the whole sequence, so a
+      // reader can see where they are without rewinding. A frame with no key adds nothing.
+      const pressed = [];
       for (const [index, frame] of walk.entries()) {
+        const step = TOUR[index];
+        // The badge is the key `TOUR` says reaches this frame; if the renderer pressed
+        // a different one, the image would teach a key nobody pressed.
+        if (step === undefined || frame.badge !== step.key) {
+          throw new Error(`frame ${frame.label} answers to ${JSON.stringify(frame.badge)}, TOUR says ${JSON.stringify(step?.key)}`);
+        }
+        if (frame.badge !== "") pressed.push(frame.badge);
         const name = `walk-${String(index).padStart(2, "0")}`;
         const png = `${SCRATCH}${name}.png`;
-        await screenshot(browser, { htmlPath: writePage(name, { lines: frame.lines, rows }), outPath: png, scale: 1 });
+        await screenshot(browser, {
+          htmlPath: writePage(name, {
+            lines: frame.lines,
+            rows,
+            title: tourTitle(frame),
+            // A session frame carries the editor it happened in; a panel frame carries the
+            // legend. Both are three rows, so the canvas stays one size either way.
+            ...(frame.editor === undefined ? { legend: LEGEND } : { editor: frame.editor }),
+            columns: PANEL_COLUMNS,
+            badge: frame.badge,
+            hud: pressed,
+          }),
+          outPath: png,
+          scale: 1,
+        });
         frames.push({ label: frame.label, data: readFileSync(png) });
         // `PREVIEW_FRAMES=1` keeps them: one frame is far easier to look at as a PNG
         // than inside a looping GIF.
         if (process.env.PREVIEW_FRAMES !== "1") rmSync(png);
       }
       const gif = `${SCRATCH}preview.gif`;
-      // The takeover is the newest thing in the clip and the easiest to miss: two
-      // frames, then eleven more of walking. Each of its frames holds twice as long
-      // as a walk frame, so a reader entering mid-loop still catches the keypress.
-      const delays = walk.map((frame) => (frame.label.startsWith("detach:") ? 2_400 : undefined));
+      // Each frame holds for the time `TOUR` gives it: a keypress stays on screen
+      // longer than a tab change, and the last frame holds longest so a reader entering
+      // mid-loop catches the end state.
+      const delays = walk.map((frame) => frame.ms);
       writeFileSync(gif, writeGif({ frames, delays }));
       // Windows keeps a file open in a viewer, a lock a plain overwrite cannot beat.
       try {

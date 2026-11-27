@@ -184,7 +184,9 @@ describe("pretty_task_bg_run with wait", () => {
     await harness.call("pretty_task_bg_kill", { id: firstId });
   });
 
-  it("lets no call go while two are blocked", async () => {
+  // Two real children, two three-second tree kills and a wait on each record: under a
+  // loaded machine (the full suite runs both projects at once) 30 s is not enough.
+  it("lets no call go while two are blocked", { timeout: 60_000 }, async () => {
     const { harness, dir } = await setup();
     const first = harness.call("pretty_task_bg_run", {
       command: await writeScript(dir.path, "one.mjs", "setInterval(() => {}, 1000);"),
