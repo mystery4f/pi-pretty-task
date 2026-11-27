@@ -69,6 +69,8 @@ Source references from the two upstream plugins are cloned under `.tmp/` (git-ig
 - `npm run test` — vitest over both projects (`unit`, `integration`); `npm run test:unit` runs the pure half in seconds.
 - `npm run verify` — check, lint and test in one run; CI (`.github/workflows/verify.yml`) runs the same three. Run the gates one by one and read each exit code: a chained `a && b` has already hidden a broken typecheck.
 - Acceptance for v0.1 is the five lines at the bottom of `docs/scope-v1.md`. A change that breaks any of them is not done.
+- `npm run lint` output is piped through a plugin in this environment and occasionally comes back as `ESLint output (JSON parse failed…)` instead of Biome's report; when that happens run `./node_modules/.bin/biome check src test scripts` and read its exit code, do not call the gate green on the mangled run.
+- A claim about what the model or the user actually saw is checked against the session record, not the source that was supposed to produce it: `node scripts/session-grep.mjs <pattern>` prints the matching records (line number, tool or customType, text) from the newest session of this project; `--session <id-prefix>` picks an older one.
 
 ## Git
 
