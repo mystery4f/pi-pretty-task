@@ -4,7 +4,7 @@
  * first, and two extensions that both claim `bg_*` cannot coexist: the model calls
  * one name and cannot tell which extension answered.
  *
- * So the set is asserted literally — exactly ten prefixed names, no aliases, one
+ * So the set is asserted literally — exactly eleven prefixed names, no aliases, one
  * name per tool — and the descriptions are checked for a bare spelling that would
  * send the model to a name that is not registered.
  *
@@ -58,7 +58,7 @@ async function loadHarness() {
 }
 
 describe("the registered tool names", () => {
-  it("registers exactly the ten pretty_task_ names and nothing else", async () => {
+  it("registers exactly the eleven pretty_task_ names and nothing else", async () => {
     const harness = await loadHarness();
 
     expect([...harness.toolNames].sort()).toEqual([...EXPECTED_TOOL_NAMES].sort());

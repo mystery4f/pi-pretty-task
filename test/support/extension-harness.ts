@@ -527,7 +527,7 @@ export function createHarness(defaultTurn: Turn, options: HarnessOptions = {}): 
         { expanded: false, keyText: () => "", keyHint: () => "" },
         fakeTheme(),
       );
-      return component === undefined ? "" : component.render(80).join("\n");
+      return component === undefined ? "" : component.render(width).join("\n");
     },
     async call(toolName, params, turn = defaultTurn, signal = undefined) {
       const tool = tools.find((candidate) => candidate.name === toolName);
