@@ -139,7 +139,9 @@ The key also works with the takeover off: the other waiting kind is a [blocking 
 
 Nothing streams while the call waits; the panel already shows the growing output, and a second copy in the transcript would cost the same bytes twice. Two ways out early: Esc ends the wait and leaves the task running (the same as `pretty_task_bg_wait`), while `ctrl+shift+b` lets the call go: it answers with what it had captured plus `↪ moved to bg-…` — no exit code, because none exists yet — and the press leaves the same detach card in the transcript that a foreground detach leaves. `timeoutSeconds` still stops the whole tree, and the call then answers with the ending that says `timeout`. A queued step cannot be waited for: `after` together with `wait` is refused before anything starts.
 
-See [ADR-0025](docs/adr/0025-blocking-run-waits-inside-the-call.md).
+A detach closes the front for a minute. In that minute a foreground command and a `wait: true` call are both refused, and the refusal is the reminder itself — it names what just moved, why, and how many seconds are left — because a long command started right after one was moved would only be moved the same way. The receipt of the detach ends with the same rule. Background starts are never refused: putting work in the background is the answer, not the problem.
+
+See [ADR-0025](docs/adr/0025-blocking-run-waits-inside-the-call.md) and [ADR-0026](docs/adr/0026-a-detach-closes-the-door-for-a-minute.md).
 
 ## Leave it running while you are away
 

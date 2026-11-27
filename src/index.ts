@@ -471,7 +471,11 @@ export function createExtension(
     // The child is already named `loop #N`, which is the alias the notice shows.
     await notifyTaskFinished(sendNotice, view).catch(reportNoticeFailure);
   }
-  for (const tool of processTaskTools(processTasks, chainTasks, templates.templates))
+  for (const tool of processTaskTools(processTasks, chainTasks, templates.templates, {
+    // The same minute the front is closed for: a `wait: true` call holds the turn
+    // open exactly the way a foreground command does (ADR-0026).
+    blockingRefusal: () => foreground.window.refusal(),
+  }))
     pi.registerTool(tool);
   for (const tool of loopTaskTools(loops)) pi.registerTool(tool);
   pi.registerMessageRenderer(TASK_FINISHED_CUSTOM_TYPE, renderTaskFinished);
@@ -514,6 +518,10 @@ export function createExtension(
     handler: async (ctx) => {
       const outcome = await letOneGo(foreground, processTasks);
       if (outcome.kind === "blocked") {
+        // Releasing a blocked call frees the front exactly like a detach does, so it
+        // closes the same minute: the next `wait: true` call is refused with the
+        // reminder instead of rebuilding the situation (ADR-0026).
+        foreground.window.note(outcome.result);
         // A blocked call has no runner to announce it, so the press draws the card
         // here. Without it the press would leave nothing the user can see: the tool
         // result goes to the model, and the record it released looks like any other.

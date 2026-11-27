@@ -76,6 +76,8 @@ Source references from the two upstream plugins are cloned under `.tmp/` (git-ig
 
 Personal/GitHub repository: Conventional Commits in English, author `mystery4f <40482524+mystery4f@users.noreply.github.com>`. Never commit `.tmp/`, `.pi/`, or `dist/`.
 
+Version follows the change, not the mood: a capability a user has to learn about bumps the minor (`1.3.0` → `1.4.0`); everything else — a small feature included — bumps the patch (`1.3.0` → `1.3.1`). One bump per release, in `package.json` and `package-lock.json`, before the Release is created — the publish workflow refuses a tag that disagrees with the manifest.
+
 ## Agent skills
 
 ### Issue tracker

@@ -93,12 +93,20 @@ export interface ForegroundRunnerOptions {
   readonly onDetached?: (detached: DetachedResult) => void;
 }
 
-/** The line a detached call ends with, in pi's own status-line shape. */
+/**
+ * The line a detached call ends with, in pi's own status-line shape.
+ *
+ * The last sentence is the only reminder the model is guaranteed to read at the
+ * moment it matters: it comes back in the tool result of this very call, so the
+ * next long command it considers meets the rule before the refusal has to state it
+ * again (ADR-0026).
+ */
 export function detachedNotice(detached: DetachedResult): string {
   return (
     `↪ moved to ${detached.taskId} — ${detachReason(detached)}. ` +
     `Still running in the background. ` +
-    `Follow: pretty_task_bg_logs ${detached.taskId} · Stop: pretty_task_bg_kill ${detached.taskId}`
+    `Follow: pretty_task_bg_logs ${detached.taskId} · Stop: pretty_task_bg_kill ${detached.taskId}. ` +
+    `A long command belongs in pretty_task_bg_run from here: another one in the front would only be moved the same way.`
   );
 }
 
@@ -116,6 +124,75 @@ export function detachReason(detached: Pick<DetachedResult, "trigger" | "afterSe
       return `it had held the front for ${String(detached.afterSeconds)}s, so the foreground timeout moved it`;
     case "shutdown":
       return "the session is shutting down";
+  }
+}
+
+/**
+ * How long a detach closes the front, in milliseconds.
+ *
+ * The model's next action comes within seconds, so a minute covers the rest of the
+ * turn with room to spare; longer would start refusing commands the user asked for
+ * after the model had already read the rule. Not a setting on purpose — a rule that
+ * cannot be stated in one sentence is not a rule (ADR-0026).
+ */
+export const DETACH_QUIET_MS = 60_000;
+
+/** The detach a session just lived through, and when it happened. */
+export interface DetachMark {
+  readonly taskId: string;
+  readonly trigger: DetachTrigger;
+  /** Whole seconds the command had held the front, so the reason reads right. */
+  readonly afterSeconds: number;
+  readonly at: number;
+}
+
+/**
+ * The minute after a detach, in which the front is closed.
+ *
+ * It holds no task state: a detach is already recorded on the task itself
+ * (`detached`), and what a refusal needs is only "how long ago" plus "which id to
+ * name". Kept in memory because it constrains one model's next moves — a reload
+ * starts a new context, and a stale window from before it would refuse work nobody
+ * was warned about (ADR-0026).
+ */
+export class DetachWindow {
+  private mark: DetachMark | undefined;
+
+  constructor(
+    private readonly now: () => number = Date.now,
+    private readonly quietMs: number = DETACH_QUIET_MS,
+  ) {}
+
+  /** Note a detach that just happened; the newest one wins. */
+  note(detached: Pick<DetachedResult, "taskId" | "trigger" | "afterSeconds">): void {
+    this.mark = {
+      taskId: detached.taskId,
+      trigger: detached.trigger,
+      afterSeconds: detached.afterSeconds,
+      at: this.now(),
+    };
+  }
+
+  /** The detach still inside the window, or undefined once it has passed. */
+  open(): DetachMark | undefined {
+    if (this.mark === undefined) return undefined;
+    return this.now() - this.mark.at < this.quietMs ? this.mark : undefined;
+  }
+
+  /**
+   * The refusal text while the window is open, or undefined. The text is the
+   * reminder: it says what just happened, what to use instead, and how long is left,
+   * so the model can act on it without another turn.
+   */
+  refusal(): string | undefined {
+    const mark = this.open();
+    if (mark === undefined) return undefined;
+    const left = Math.max(1, Math.ceil((this.quietMs - (this.now() - mark.at)) / 1000));
+    return (
+      `${mark.taskId} was just moved to the background (${detachReason(mark)}), ` +
+      `so a command in the front would land exactly where the last one did. ` +
+      `Use pretty_task_bg_run for anything that may run long; a foreground command or \`wait: true\` is refused for ${String(left)}s more.`
+    );
   }
 }
 
@@ -274,6 +351,8 @@ export class ForegroundRunner {
   private readonly pollMs: number;
   private readonly runs = new Map<string, ForegroundRun>();
   private readonly onDetached: ((detached: DetachedResult) => void) | undefined;
+  /** The minute a detach closes the front for, shared with the run tool (ADR-0026). */
+  readonly window: DetachWindow;
   private scope: TaskScope | undefined;
 
   constructor(options: ForegroundRunnerOptions) {
@@ -283,6 +362,7 @@ export class ForegroundRunner {
     this.platform = options.platform ?? process.platform;
     this.pollMs = options.pollMs ?? FOREGROUND_POLL_MS;
     this.onDetached = options.onDetached;
+    this.window = new DetachWindow(this.now);
   }
 
   /**
@@ -361,6 +441,11 @@ export class ForegroundRunner {
   operations(): BashOperations {
     return {
       exec: async (command, cwd, options) => {
+        // A detach closes the front for a minute: starting another command here
+        // would repeat what the detach just fixed, and the refusal itself carries
+        // the reminder (ADR-0026).
+        const closed = this.window.refusal();
+        if (closed !== undefined) throw new Error(closed);
         const scope = this.scope;
         if (scope === undefined) {
           throw new Error(
@@ -428,6 +513,9 @@ export class ForegroundRunner {
         // The process began before it was a task: the record's age starts there, so
         // a 91-second command is not reported as a 74-second one (ADR-0020).
         startedAt: run.startedAt,
+        // Which trigger moved it and how long it held the front: without these a
+        // `origin: "foreground"` record cannot say who moved it or why (ADR-0026).
+        detached: { trigger, heldSeconds: Math.round((this.now() - run.startedAt) / 1000) },
       });
       const detached: DetachedResult = {
         kind: "detached",
@@ -439,6 +527,7 @@ export class ForegroundRunner {
         afterSeconds: Math.round((this.now() - run.startedAt) / 1000),
       };
       run.finish(detached);
+      this.window.note(detached);
       this.onDetached?.(detached);
       return detached;
     } catch (error) {

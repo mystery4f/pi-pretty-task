@@ -106,6 +106,12 @@ export interface AdoptForegroundInput extends TaskScope {
    */
   readonly startedAt?: number;
   readonly name?: string;
+  /**
+   * Why the wait ended before the command did. A `origin: "foreground"` record
+   * without it cannot say which trigger moved the command or how long it had held
+   * the front — the gap 14 records in this machine's stores showed (ADR-0026).
+   */
+  readonly detached?: ProcessTask["detached"];
 }
 
 /** A task as it looks right now: the record plus the values that keep moving. */
@@ -567,6 +573,7 @@ export class ProcessTasks {
         ...input.reservation,
         origin: "foreground",
         ...(input.startedAt !== undefined ? { startedAt: input.startedAt } : {}),
+        ...(input.detached !== undefined ? { detached: input.detached } : {}),
       },
     );
     session.tasks.set(task.id, task);
@@ -596,6 +603,7 @@ export class ProcessTasks {
     reservation?: ForegroundReservation & {
       readonly origin?: ProcessTask["origin"];
       readonly startedAt?: number;
+      readonly detached?: ProcessTask["detached"];
     },
   ): Promise<ProcessTask> {
     const cwd = await this.resolveWorkingDirectory(input.cwd, input.workingDirectory);
@@ -616,6 +624,7 @@ export class ProcessTasks {
       ...(input.parentId !== undefined ? { parentId: input.parentId } : {}),
       ...(input.fire !== undefined ? { fire: input.fire } : {}),
       ...(reservation?.origin !== undefined ? { origin: reservation.origin } : {}),
+      ...(reservation?.detached !== undefined ? { detached: reservation.detached } : {}),
     };
   }
 

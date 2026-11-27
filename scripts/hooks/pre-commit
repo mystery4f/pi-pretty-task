@@ -1,0 +1,13 @@
+#!/bin/sh
+# The local gate a commit passes: types and lint, never the suite.
+#
+# The suite spawns real processes and takes minutes; CI runs it on two platforms
+# (.github/workflows/verify.yml). What a commit must not carry is a type error or a
+# formatting drift, which is what this checks in seconds.
+#
+# Installed per clone, because hooksPath is a local config value:
+#   git config core.hooksPath scripts/hooks
+set -e
+
+npm run check
+npm run lint

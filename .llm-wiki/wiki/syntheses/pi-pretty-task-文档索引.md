@@ -2,7 +2,7 @@
 type: synthesis
 title: pi-pretty-task 文档索引
 created: 2026-11-13
-updated: 2026-11-27
+updated: 2026-11-28
 ---
 
 # pi-pretty-task 文档索引
@@ -49,6 +49,7 @@ updated: 2026-11-27
 | [0023 发布走 OIDC，不留长期 token](../../docs/adr/0023-publish-through-oidc-not-a-token.md) | v1.0.8 发布先 404 再 403（`bypass 2fa` 被拒）；npm 自 2026-08 收账户变更、2027-01 收直接 `publish` 的绕 2FA token，2026-09-03 后新建的 trusted publisher 默认只给 staged；改为 `id-token: write` + Node 24（npm ≥ 11.5.1）+ 去掉 `NODE_AUTH_TOKEN`，删仓库 secret，npm 侧按 repo/workflow 名配 trusted publisher 并勾选允许直接 publish |
 | [0024 Loop 的提示词落盘，路径由 id 派生](../../docs/adr/0024-loop-prompt-lands-on-disk.md) | 提示词从记录里的冻结字符串改为 `.pi/tasks/<session>/<loop-id>.prompt.md`：地址只由 loop id 派生、任何工具都不收路径参数（AI 侧没有路径权力）、插件只在创建、显式改写与重建三处写、每发读一次、读失败重建后照常触发；记录上的 `prompt` 降为 seed 兼重建源 |
 | [0025 阻塞式 run 在调用里等任务结束](../../docs/adr/0025-blocking-run-waits-inside-the-call.md) | `wait: true` 仍是一条真 process task（第一毫秒起有记录、进面板、计入 `maxRunningTasks`），所以等待是 `session.waiters` 上多一个监听者，不复制 `foreground.ts` 的 `runs`；Esc 只结束等待、`timeoutSeconds` 照旧杀整棵树；只在结束时给一次回答（不流 `onUpdate`）；`after` + `wait` 直接拒；`ctrl+shift+b` 移出覆盖开关，按「前台 + 阻塞」合计数、恰好一条才动手 |
+| [0026 改道之后的一分钟里拒绝再起前台命令](../../docs/adr/0026-a-detach-closes-the-door-for-a-minute.md) | 模型只读得到三条通道：卡片 `appendEntry` 读不到、回执 `detachedNotice` 当次就读到、`sendNotice` 要开一轮；所以提醒用「拒绝」承载——改道后 60 s 内 `wait: true` 与前臺命令直接被拒、拒绝文案即提醒，回执末尾也加一句；任务记录补 `detached: { trigger, heldSeconds }`，补上 14 条只有 `origin` 的记录 |
 
 ## 工具链与代码风格
 

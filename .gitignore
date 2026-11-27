@@ -14,6 +14,9 @@ coverage/
 .DS_Store
 Thumbs.db
 
+# vitest's own scratch directory (json/ inside), recreated by every run
+.vitest/
+
 # regenerable wiki search index (rebuild with wiki_reindex)
 .llm-wiki/meta/qmd/
 

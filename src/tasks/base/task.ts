@@ -111,6 +111,16 @@ export interface ProcessTask extends TaskBase {
    * user began as a background task from one that became one.
    */
   readonly origin?: "foreground";
+  /**
+   * Why a foreground command stopped being waited for, and how long it had held the
+   * front. Present exactly with `origin: "foreground"` on the path that adopted it;
+   * absent on records written before ADR-0026 and on the shutdown path that had no
+   * adoption to report.
+   */
+  readonly detached?: {
+    readonly trigger: "shortcut" | "timeout" | "shutdown";
+    readonly heldSeconds: number;
+  };
 }
 
 /**

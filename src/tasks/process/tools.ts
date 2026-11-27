@@ -99,7 +99,7 @@ const RunParameters = Type.Object({
   wait: Type.Optional(
     Type.Boolean({
       description:
-        "Keep the call open until the command ends, then answer with its output tail, exit code and kill reason instead of a task id. One answer, at the end — nothing streams while it waits, and the panel already shows the same output. Esc ends the wait and leaves the task running; `timeoutSeconds` still kills it; `ctrl+shift+b` moves the call to the background with `↪ moved to bg-…` and no exit code. Cannot be combined with `after`: a queued step has not started yet. A command that never ends holds this call until Esc, so prefer a bounded command.",
+        "Keep the call open until the command ends, then answer with its output tail, exit code and kill reason instead of a task id. One answer, at the end — nothing streams while it waits, and the panel already shows the same output. Esc ends the wait and leaves the task running; `timeoutSeconds` still kills it; `ctrl+shift+b` moves the call to the background with `↪ moved to bg-…` and no exit code. Cannot be combined with `after`: a queued step has not started yet. Refused for a minute after a detach: the front has just been freed, and this call would hold it again. A command that never ends holds this call until Esc, so prefer a bounded command.",
     }),
   ),
 });
@@ -506,10 +506,23 @@ function stopHeadline(id: string, result: StopTaskResult): string {
   }
   return `Background task ${id} could not be stopped: ${result.detail ?? "its processes are still running"}.`;
 }
+/**
+ * What the process tools need from the extension beyond the two stores.
+ *
+ * `blockingRefusal` is the minute after a detach: while it is open, a `wait: true`
+ * call is refused with that text, because a call that holds the turn open repeats
+ * exactly what the detach just fixed (ADR-0026). Background starts are never
+ * refused — putting work in the background is the answer, not the problem.
+ */
+export interface ProcessToolOptions {
+  readonly blockingRefusal?: () => string | undefined;
+}
+
 export function processTaskTools(
   tasks: ProcessTasks,
   chains: ChainTasks,
   templates: ReadonlyMap<string, CommandTemplate> = new Map(),
+  options: ProcessToolOptions = {},
 ): ToolDefinition[] {
   /**
    * What an id names here, decided once. Every tool that takes an id asks this
@@ -583,6 +596,10 @@ export function processTaskTools(
         return text(
           "`wait` cannot be used with `after`: a queued step starts when the step ahead ends, so there is nothing to wait for yet. Drop `after` to wait for the command, or drop `wait` to queue it. The task was not started.",
         );
+      }
+      if (params.wait === true) {
+        const closed = options.blockingRefusal?.();
+        if (closed !== undefined) return text(closed);
       }
       let task: ProcessTask;
       if (params.after !== undefined) {
