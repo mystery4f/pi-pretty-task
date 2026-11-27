@@ -6,7 +6,9 @@
 
 - [[sources/adr-dated-status-and-index-guard]] — An undated ADR cannot be checked for staleness *(created: 2026-11-27)*
 - [[sources/await-state-not-bytes-in-process-tests]] — 进程类测试要等状态，不要等字节 *(created: 2026-11-15)*
+- [[sources/css-inside-a-js-template-literal-has-no-syntax-check]] — 模板字面量里的 CSS 没有语法检查，坏了只出一个丑图 *(created: 2026-11-27)*
 - [[sources/delete-remote-branch-via-gh-api]] — 删远端分支走 gh API，git push --delete 会被拦 *(created: 2026-11-15)*
+- [[sources/filtering-guards-silently-shrink-their-own-scope]] — 靠正则筛项的守卫会悄悄缩小自己的检查范围 *(created: 2026-11-27)*
 - [[sources/git-cat-file-full-sha-flake-multipack]] — git cat-file -e rejects a valid full SHA in a multi-pack repo *(created: 2026-11-25)*
 - [[sources/matt-implement-gate-needs-node-modules]] — A typed workflow gate returns null when its worktree lacks node_modules *(created: 2026-11-25)*
 - [[sources/matt-implement-sync-ticket-comments]] — matt-implement sync reads merge SHA from a ticket's Comments section *(created: 2026-11-25)*
@@ -54,4 +56,4 @@
 - [[syntheses/verify-red-tests-handoff]] — verify 红测修复交接（5 个 integration 用例） *(created: 2026-11-16)*
 
 ---
-*Last updated: 2026-11-27T18:04:20.175Z* | *Total pages: 45*
+*Last updated: 2026-11-27T18:10:51.346Z* | *Total pages: 47*

@@ -4,7 +4,9 @@
 
 - [An undated ADR cannot be checked for staleness](adr-dated-status-and-index-guard.md)
 - [进程类测试要等状态，不要等字节](await-state-not-bytes-in-process-tests.md)
+- [模板字面量里的 CSS 没有语法检查，坏了只出一个丑图](css-inside-a-js-template-literal-has-no-syntax-check.md)
 - [删远端分支走 gh API，git push --delete 会被拦](delete-remote-branch-via-gh-api.md)
+- [靠正则筛项的守卫会悄悄缩小自己的检查范围](filtering-guards-silently-shrink-their-own-scope.md)
 - [git cat-file -e rejects a valid full SHA in a multi-pack repo](git-cat-file-full-sha-flake-multipack.md)
 - [A typed workflow gate returns null when its worktree lacks node_modules](matt-implement-gate-needs-node-modules.md)
 - [matt-implement sync reads merge SHA from a ticket's Comments section](matt-implement-sync-ticket-comments.md)

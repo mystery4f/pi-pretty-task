@@ -43,3 +43,5 @@
 {"slug":"session-record-not-source-is-the-evidence","title":"What the model saw is in the session record, not the source","category":"debugging","timestamp":"2026-11-27T07:48:20.762Z","kind":"retro"}
 {"slug":"adr-dated-status-and-index-guard","title":"An undated ADR cannot be checked for staleness","category":"docs","timestamp":"2026-11-27T07:48:28.832Z","kind":"retro"}
 {"slug":"obs-2026-11-27-footer-handleinput","title":"footer 打印字形、handleInput 收的是终端序列：按键测试必须翻译","relevance":"high","timestamp":"2026-11-27T18:04:20.133Z","kind":"observe"}
+{"slug":"css-inside-a-js-template-literal-has-no-syntax-check","title":"模板字面量里的 CSS 没有语法检查，坏了只出一个丑图","category":"bugfix","timestamp":"2026-11-27T18:10:27.911Z","kind":"retro"}
+{"slug":"filtering-guards-silently-shrink-their-own-scope","title":"靠正则筛项的守卫会悄悄缩小自己的检查范围","category":"architecture","timestamp":"2026-11-27T18:10:35.614Z","kind":"retro"}

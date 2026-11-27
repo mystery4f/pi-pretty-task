@@ -3,7 +3,9 @@
   "sources/await-state-not-bytes-in-process-tests": [
     "syntheses/verify-red-tests-handoff"
   ],
+  "sources/css-inside-a-js-template-literal-has-no-syntax-check": [],
   "sources/delete-remote-branch-via-gh-api": [],
+  "sources/filtering-guards-silently-shrink-their-own-scope": [],
   "sources/git-cat-file-full-sha-flake-multipack": [],
   "sources/matt-implement-gate-needs-node-modules": [],
   "sources/matt-implement-sync-ticket-comments": [],
@@ -28,7 +30,9 @@
   "sources/obs-2026-11-24-pi-lens-test-tsconfig": [],
   "sources/obs-2026-11-25-pi-auto-retry": [],
   "sources/obs-2026-11-27-": [],
-  "sources/obs-2026-11-27-footer-handleinput": [],
+  "sources/obs-2026-11-27-footer-handleinput": [
+    "sources/filtering-guards-silently-shrink-their-own-scope"
+  ],
   "sources/obs-2026-11-27-pi-pretty-task": [],
   "sources/pi-extension-stale-instance-unhandled-rejection": [],
   "sources/pi-git-install-omits-dev-deps-so-ship-ts-entry": [
@@ -42,7 +46,9 @@
     "sources/pi-pretty-task-preview-from-the-built-panel",
     "sources/pi-pretty-task-session-hub-required"
   ],
-  "sources/pi-pretty-task-preview-from-the-built-panel": [],
+  "sources/pi-pretty-task-preview-from-the-built-panel": [
+    "sources/css-inside-a-js-template-literal-has-no-syntax-check"
+  ],
   "sources/pi-pretty-task-session-hub-required": [
     "sources/pi-pretty-task-panel-intents-and-view"
   ],

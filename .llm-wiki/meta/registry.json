@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "last_updated": "2026-11-27T18:04:20.175Z",
+  "last_updated": "2026-11-27T18:10:51.346Z",
   "pages": {
     "sources/adr-dated-status-and-index-guard": {
       "type": "source",
@@ -20,6 +20,15 @@
       "created": "2026-11-15",
       "updated": "2026-11-15"
     },
+    "sources/css-inside-a-js-template-literal-has-no-syntax-check": {
+      "type": "source",
+      "title": "模板字面量里的 CSS 没有语法检查，坏了只出一个丑图",
+      "category": "bugfix",
+      "status": "insight",
+      "slug": "css-inside-a-js-template-literal-has-no-syntax-check",
+      "created": "2026-11-27",
+      "updated": "2026-11-27"
+    },
     "sources/delete-remote-branch-via-gh-api": {
       "type": "source",
       "title": "删远端分支走 gh API，git push --delete 会被拦",
@@ -28,6 +37,15 @@
       "slug": "delete-remote-branch-via-gh-api",
       "created": "2026-11-15",
       "updated": "2026-11-15"
+    },
+    "sources/filtering-guards-silently-shrink-their-own-scope": {
+      "type": "source",
+      "title": "靠正则筛项的守卫会悄悄缩小自己的检查范围",
+      "category": "architecture",
+      "status": "insight",
+      "slug": "filtering-guards-silently-shrink-their-own-scope",
+      "created": "2026-11-27",
+      "updated": "2026-11-27"
     },
     "sources/git-cat-file-full-sha-flake-multipack": {
       "type": "source",

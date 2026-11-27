@@ -2,6 +2,8 @@
 
 ## 2026-11-27
 
+- **retro**: {"category":"architecture","slug":"filtering-guards-silently-shrink-their-own-scope","title":"靠正则筛项的守卫会悄悄缩小自己的检查范围"}
+- **retro**: {"category":"bugfix","slug":"css-inside-a-js-template-literal-has-no-syntax-check","title":"模板字面量里的 CSS 没有语法检查，坏了只出一个丑图"}
 - **observe**: {"relevance":"high","slug":"obs-2026-11-27-footer-handleinput","title":"footer 打印字形、handleInput 收的是终端序列：按键测试必须翻译"}
 - **retro**: {"category":"docs","slug":"adr-dated-status-and-index-guard","title":"An undated ADR cannot be checked for staleness"}
 - **retro**: {"category":"debugging","slug":"session-record-not-source-is-the-evidence","title":"What the model saw is in the session record, not the source"}
