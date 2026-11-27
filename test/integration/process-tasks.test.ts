@@ -860,7 +860,14 @@ describe("queued steps", () => {
   it("launches a queued step once, booking its end like a task the user started", async () => {
     const dir = await makeTempDir();
     cleanup.push(dir.dispose);
-    const command = await writeScript(dir.path, "step.js", "console.log('step ran');\n");
+    // The step must still be running when `launch` answers: a command that exits
+    // in a few milliseconds is already finished by the assertion below on a quick
+    // machine, which is exactly the race this case used to lose on Windows CI.
+    const command = await writeScript(
+      dir.path,
+      "step.js",
+      "console.log('step ran');\nsetTimeout(() => {}, 1200);\n",
+    );
     const sessions = new TaskSessions();
     const finished: string[] = [];
     const tasks = new ProcessTasks({
