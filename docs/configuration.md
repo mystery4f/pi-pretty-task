@@ -242,9 +242,9 @@ Unknown template "tset". Known templates: "lint", "test". The task was not start
 | `PI_PRETTY_TASK_ADOPT_FOREGROUND` | `on`、`off` | `off` | 覆盖内置 shell 工具并接管 `!` 命令 |
 | `PI_PRETTY_TASK_FOREGROUND_TIMEOUT` | 正整数秒（上限 2147483），或 `0` | `0` | 前台命令跑到该秒数自动改道；`0` 为关 |
 
-快捷键 `ctrl+shift+b` 只对唯一一条在跑的前台命令生效：并行工具调用时按键只给一条提示，不改道。改道的命令不重跑、不换 PID，输出继续写到 `.pi/tasks/` 下的任务文件；它计入同时运行的任务上限，撞上限时改道失败、命令留在前台继续跑。`PI_PRETTY_TASK_FOREGROUND_TIMEOUT` 与内置 `timeout` 参数是两件事：前者「放它走」，后者「到点就杀」，Esc 仍是杀。
+快捷键 `ctrl+shift+b` 只对唯一一条「在等」的命令生效，前台命令与阻塞调用（`pretty_task_bg_run` 带 `wait: true`，见 [ADR-0025](adr/0025-blocking-run-waits-inside-the-call.md)）合起来数：恰好一条才动手，两条以上只给一条提示。按键与改道开关无关——关闭覆盖的项目里它也注册，只是那时它只放走阻塞调用。改道的命令不重跑、不换 PID，输出继续写到 `.pi/tasks/` 下的任务文件；它计入同时运行的任务上限，撞上限时改道失败、命令留在前台继续跑。`PI_PRETTY_TASK_FOREGROUND_TIMEOUT` 与内置 `timeout` 参数是两件事：前者「放它走」，后者「到点就杀」，Esc 仍是杀。
 
-改道发生时，两个读者各得一句话，两句话都写明**是谁**结束了这次等待——按键、到点，还是会话在退出。模型唯一的渠道是那次工具调用的返回，形状是 `↪ moved to <id> — <原因>。Still running in the background. Follow: … · Stop: …`，拿到它说明命令还在跑、不是失败；用户那边得到一张会话卡片（`pi.appendEntry` + `registerEntryRenderer`），带底色的标题行（记录 id 与 `held 40.0s`）、一个空行、同一条原因从句，以及 `follow` / `stop` 两行命令，内边距和底色由渲染器自己建的 `Box` 给。卡片随会话落盘，重载后照样画出来，而且**不进模型上下文**——工具返回已经说过同样的事实，再发一条消息就是重复一遍。随后状态行立刻重画。反过来，没有前台命令、并行不止一条、撞上任务上限这三种情况只提示用户，模型那边看到的是命令照旧在前台跑完——没有人请求改道，也就没有什么要对模型说。
+改道发生时，两个读者各得一句话，两句话都写明**是谁**结束了这次等待——按键、到点，还是会话在退出。模型唯一的渠道是那次工具调用的返回，形状是 `↪ moved to <id> — <原因>。Still running in the background. Follow: … · Stop: …`，拿到它说明命令还在跑、不是失败；用户那边得到一张会话卡片（`pi.appendEntry` + `registerEntryRenderer`），带底色的标题行（记录 id 与 `held 40.0s`）、一个空行、同一条原因从句，以及 `follow` / `stop` 两行命令，内边距和底色由渲染器自己建的 `Box` 给。卡片随会话落盘，重载后照样画出来，而且**不进模型上下文**——工具返回已经说过同样的事实，再发一条消息就是重复一遍。随后状态行立刻重画。反过来，没有前台命令、并行不止一条、撞上任务上限这三种情况只提示用户，模型那边看到的是命令照旧在前台跑完——没有人请求改道，也就没有什么要对模型说。被 `wait: true` 放走的那一条拿到的是同一张卡：它没有 runner，卡由快捷键处理器自己落，原因从句同样是按键，工具返回同样以那句 `↪ moved to …` 收尾。
 
 ## 为什么配置只从一个地方读
 

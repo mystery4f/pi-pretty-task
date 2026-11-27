@@ -55,10 +55,10 @@ export interface DetachedResult {
 /** What one detach attempt answered; the caller reports it and nothing else. */
 export type DetachResult =
   | DetachedResult
-  /** Nothing was in the foreground to move. */
+  /** Nothing was waiting to move: no foreground command and no blocked call. */
   | { readonly kind: "nothing" }
-  /** More than one foreground command is running, so the key cannot pick one. */
-  | { readonly kind: "ambiguous"; readonly running: number }
+  /** More than one call is waiting — a foreground command or a blocked call — so the key cannot pick one. The number is both kinds together, because one key serves both (ADR-0025). */
+  | { readonly kind: "ambiguous"; readonly waiting: number }
   /** The task that would have been created was refused; the command keeps waiting. */
   | { readonly kind: "refused"; readonly message: string }
   /** A detach for this run is already under way. */
@@ -131,9 +131,9 @@ export function describeDetach(result: DetachResult): string {
       return `${held}Moved to ${result.taskId}. Follow: pretty_task_bg_logs ${result.taskId}`;
     }
     case "nothing":
-      return "Nothing is running in the foreground.";
+      return "Nothing is waiting: no foreground command and no blocked call.";
     case "ambiguous":
-      return `${String(result.running)} commands are running in the foreground; the shortcut moves exactly one.`;
+      return `${String(result.waiting)} calls are waiting; the shortcut lets exactly one go.`;
     case "refused":
       return `Cannot move it to the background: ${result.message}`;
     case "pending":
@@ -390,7 +390,7 @@ export class ForegroundRunner {
   async detachOnlyOne(): Promise<DetachResult> {
     const live = this.live();
     if (live.length === 0) return { kind: "nothing" };
-    if (live.length > 1) return { kind: "ambiguous", running: live.length };
+    if (live.length > 1) return { kind: "ambiguous", waiting: live.length };
     const [only] = live;
     if (only === undefined) return { kind: "nothing" };
     return this.detach(only, "shortcut");

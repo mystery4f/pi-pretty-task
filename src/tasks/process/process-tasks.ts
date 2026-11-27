@@ -159,6 +159,36 @@ export interface WaitTaskResult {
    */
   cancelled: boolean;
 }
+/**
+ * The fact that ended a wait. Not an error, and not the task's status: a wait can
+ * end because the task ended, because a deadline passed, because the caller pressed
+ * Esc, or because the shortcut ended it from outside (ADR-0025).
+ */
+export type WaitStop = "ended" | "deadline" | "aborted" | "released";
+
+/** What a blocking call got: the record, and the fact that released its wait. */
+export interface BlockedRunResult {
+  readonly view: ProcessTaskView;
+  readonly stop: WaitStop;
+  /** Whole seconds the call held its turn; the receipt names it the way a detach does. */
+  readonly afterSeconds: number;
+}
+
+/** What the shortcut's blocked-call target answered (ADR-0025). */
+export type BlockedRelease =
+  | { readonly kind: "released"; readonly taskId: string; readonly afterSeconds: number }
+  | { readonly kind: "nothing" }
+  | { readonly kind: "ambiguous"; readonly waiting: number };
+
+/** One blocked call as the shortcut sees it: which task, since when, and how to end the wait. */
+interface BlockedCall {
+  readonly taskId: string;
+  /** When the wait began, so a release can say how long the call held the turn. */
+  readonly startedAt: number;
+  /** Ends the wait without touching the process; false when it was already over. */
+  readonly release: () => boolean;
+}
+
 /** What a follow read answered: the new bytes, and where the cursor now sits. */
 export interface FollowTaskResult {
   /** The record as it stood when the read returned. */
@@ -339,6 +369,11 @@ export function deriveTaskName(command: string): string {
   return `${collapsed.slice(0, NAME_LIMIT - 1)}…`;
 }
 
+/** Session and task together: a task id is only unique inside its session. */
+function blockedKey(sessionId: string, taskId: string): string {
+  return `${sessionId}\u0000${taskId}`;
+}
+
 export class ProcessTasks {
   private readonly platform: NodeJS.Platform;
   private readonly env: NodeJS.ProcessEnv | undefined;
@@ -349,6 +384,14 @@ export class ProcessTasks {
    * twice.
    */
   private readonly sessions = new Map<string, Promise<SessionTasks>>();
+  /**
+   * The calls currently blocked on a task they started, keyed by session and task
+   * id: what the shortcut finds one by. The wait itself is a `waiters` listener
+   * like any other, so this map holds no lifecycle of its own — only the release a
+   * key press pulls (ADR-0025). It lives beside the runs instead of on a session,
+   * because a key press must count them without loading every session first.
+   */
+  private readonly blocked = new Map<string, BlockedCall>();
   private readonly killGraceMs: number | undefined;
   private readonly killConfirmMs: number | undefined;
   private readonly outputCapBytes: number;
@@ -816,36 +859,147 @@ export class ProcessTasks {
 
     // Waiting is a listener on the end event, not a poll: `finish` resolves it on
     // the same tick the record gets its final status, so the wake-up sees the end.
-    // An abort is a third way out and must release the turn too (issue: Esc could
-    // not interrupt a wait); it resolves the same listener without touching the
-    // process, so a cancelled wait still reports the running record.
-    // An already-aborted signal is not waited on at all: the caller asked to stop
-    // before the wait began, and the record is still the answer.
-    let cancelled = signal?.aborted === true;
-    if (signal?.aborted !== true) {
-      await new Promise<void>((resolve) => {
-        const waiters = session.waiters.get(id) ?? new Set<() => void>();
-        session.waiters.set(id, waiters);
-        const listener = (): void => {
-          cancelled = signal?.aborted === true;
-          clearTimeout(timer);
-          signal?.removeEventListener("abort", listener);
-          waiters.delete(listener);
-          if (waiters.size === 0) session.waiters.delete(id);
-          resolve();
-        };
-        const timer = setTimeout(listener, timeoutMs);
-        waiters.add(listener);
-        signal?.addEventListener("abort", listener, { once: true });
-        // An abort that landed between the check above and this registration
-        // never fires the listener, so the wait is settled here instead.
-        if (signal?.aborted === true) listener();
-      });
-    }
+    // The three ways out — the end, the deadline, the caller's abort — are one
+    // listener in `holdTurn`, which is also where a blocking call's release lands.
+    await this.holdTurn(session, id, {
+      timeoutMs,
+      ...(signal === undefined ? {} : { signal }),
+    });
 
-    return { view: this.view(session, task), waited: task.endedAt !== undefined, cancelled };
+    // `cancelled` describes the caller's own request, not who won a race: an Esc
+    // that arrived while the end was already on its way is still a cancelled wait.
+    return {
+      view: this.view(session, task),
+      waited: task.endedAt !== undefined,
+      cancelled: signal?.aborted === true,
+    };
   }
 
+  /**
+   * Hold the turn until one of four facts lands: the task ends, the deadline
+   * passes, `signal` aborts, or somebody pulls the release handed to `expose`.
+   * Every way out settles the same listener, so a wait never polls the record.
+   *
+   * An already-aborted signal is settled here rather than by the caller: the
+   * caller asked to stop before the wait began, and the record is still the answer.
+   */
+  private holdTurn(
+    session: SessionTasks,
+    id: string,
+    options: {
+      /** Absent means no deadline: only an end, an abort or a release ends the wait. */
+      timeoutMs?: number;
+      signal?: AbortSignal;
+      /** Hands the caller a way to end the wait from outside; absent when nobody can. */
+      expose?: (release: () => boolean) => void;
+    },
+  ): Promise<WaitStop> {
+    return new Promise<WaitStop>((resolve) => {
+      const waiters = session.waiters.get(id) ?? new Set<() => void>();
+      session.waiters.set(id, waiters);
+      let stop: WaitStop | undefined;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const settle = (reason: WaitStop): boolean => {
+        if (stop !== undefined) return false;
+        stop = reason;
+        if (timer !== undefined) clearTimeout(timer);
+        options.signal?.removeEventListener("abort", onAbort);
+        waiters.delete(listener);
+        if (waiters.size === 0) session.waiters.delete(id);
+        resolve(reason);
+        return true;
+      };
+      const listener = (): void => {
+        settle("ended");
+      };
+      const onAbort = (): void => {
+        settle("aborted");
+      };
+      waiters.add(listener);
+      options.signal?.addEventListener("abort", onAbort, { once: true });
+      options.expose?.(() => settle("released"));
+      if (options.timeoutMs !== undefined) {
+        timer = setTimeout(() => settle("deadline"), options.timeoutMs);
+      }
+      // An abort that landed between the caller's check and this registration
+      // never fires the listener, so the wait is settled here instead.
+      if (options.signal?.aborted === true) settle("aborted");
+    });
+  }
+
+  /**
+   * Hold a tool call open until the task it started ends, the caller's Esc aborts,
+   * or the shortcut releases it from outside (ADR-0025). Undefined means the
+   * session has no such task. The process is never touched: a released or aborted
+   * wait answers with the record as it is and leaves the task running.
+   */
+  async awaitRun(
+    scope: TaskScope,
+    id: string,
+    signal?: AbortSignal,
+  ): Promise<BlockedRunResult | undefined> {
+    const session = await this.session(scope);
+    const task = session.tasks.get(id);
+    if (task === undefined || task.kind !== "process") return undefined;
+    // A task that already ended has nothing to wait for, and the caller still gets
+    // its record: the blocking call did its work, it just arrived too late to see it.
+    if (!session.running.has(id)) {
+      return { view: this.view(session, task), stop: "ended", afterSeconds: 0 };
+    }
+
+    // The release is in place before the wait begins, so a key press in the first
+    // tick still finds it; the finally drops it only once the wait is over, so the
+    // shortcut can never pull a handle nobody is holding.
+    const key = blockedKey(scope.sessionId, id);
+    const startedAt = this.now();
+    let stop: WaitStop;
+    try {
+      stop = await this.holdTurn(session, id, {
+        ...(signal === undefined ? {} : { signal }),
+        expose: (release) => {
+          this.blocked.set(key, { taskId: id, startedAt, release });
+        },
+      });
+    } finally {
+      this.blocked.delete(key);
+    }
+    return { view: this.view(session, task), stop, afterSeconds: this.waitedSeconds(startedAt) };
+  }
+
+  /** How many calls are blocked right now, across every session of this instance. */
+  blockedCount(): number {
+    return this.blocked.size;
+  }
+
+  /** Whole seconds a wait has lasted, rounded the way a detach's `afterSeconds` is. */
+  private waitedSeconds(startedAt: number): number {
+    return Math.max(0, Math.round((this.now() - startedAt) / 1000));
+  }
+
+  /**
+   * Let exactly one blocked call's wait go. None answers `nothing`; more than one
+   * answers `ambiguous` and acts on none, because picking one out of several is the
+   * mistake ADR-0020 refuses. A release that finds the wait already over answers
+   * `nothing` too: there is nothing left to let go.
+   */
+  releaseBlocked(): BlockedRelease {
+    if (this.blocked.size === 0) return { kind: "nothing" };
+    if (this.blocked.size > 1) return { kind: "ambiguous", waiting: this.blocked.size };
+    const entries = [...this.blocked.entries()];
+    const only = entries[0];
+    if (only === undefined) return { kind: "nothing" };
+    const [key, call] = only;
+    if (!call.release()) return { kind: "nothing" };
+    // The `finally` above runs on the next microtask, and the key that let this one
+    // go may come again before it does; dropping the entry here keeps the count
+    // honest for that press instead of answering `ambiguous` about a spent handle.
+    this.blocked.delete(key);
+    return {
+      kind: "released",
+      taskId: call.taskId,
+      afterSeconds: this.waitedSeconds(call.startedAt),
+    };
+  }
   /**
    * Stop one task and everything its command started. Undefined means the
    * session has no such task; every other case is an answer, including a task

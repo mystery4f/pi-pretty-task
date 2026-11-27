@@ -29,6 +29,7 @@ Requires pi and Node >= 22.19. A local checkout works too: `pi install ./path/to
 | Find the one error in 40 MB of output | `pretty_task_bg_grep` |
 | Stop it *and* its children, not just the parent pid | `pretty_task_bg_kill` |
 | Run something after another job succeeds, instead of now | `pretty_task_bg_run` with `after` |
+| Get a command's exit code and output tail in one call, without a second round trip | `pretty_task_bg_run` with `wait: true` |
 | Wake the agent on a schedule — interval or cron | `pretty_task_loop_create` |
 | Fire that wake once more, now, without moving the schedule | `pretty_task_loop_fire` |
 | Find out what that wake-up actually did | `pretty_task_loop_list` with an id |
@@ -98,6 +99,7 @@ A fourth card, `task-detached`, is a session entry rather than a message: it rec
 
 ```text
 pretty_task_bg_run    command: "npm run build", name: "build"
+pretty_task_bg_run    command: "npm test", wait: true
 pretty_task_bg_status id: "bg-4xq81"
 pretty_task_bg_logs   id: "bg-4xq81", follow: true
 pretty_task_bg_grep   id: "bg-4xq81", pattern: "error"
@@ -119,13 +121,23 @@ Stopping means the whole tree: SIGTERM, a grace period, SIGKILL, then a poll unt
 
 ## A command in front can be let go
 
-A long build is already running in front of you — the first frames of the animation above are this exact move. With `PI_PRETTY_TASK_ADOPT_FOREGROUND=on`, the built-in `bash` tool — and your own `!` commands — run through this extension, so `ctrl+shift+b` moves the one command currently in front to the background instead of killing it. The call ends with the output it had captured and a `↪ moved to bg-…` line, and the command keeps running as an ordinary task: `pretty_task_bg_logs`, `pretty_task_bg_status`, `pretty_task_bg_kill` all work on it.
+Two kinds of call can be waiting on you, and one key lets exactly one of them go. A long build is already running in front of you — the first frames of the animation above are this exact move. With `PI_PRETTY_TASK_ADOPT_FOREGROUND=on`, the built-in `bash` tool — and your own `!` commands — run through this extension, so `ctrl+shift+b` moves the one command currently in front to the background instead of killing it. The call ends with the output it had captured and a `↪ moved to bg-…` line, and the command keeps running as an ordinary task: `pretty_task_bg_logs`, `pretty_task_bg_status`, `pretty_task_bg_kill` all work on it.
 
 Both triggers — the key and the deadline — end the call with the same shape and say which one it was (`ctrl+shift+b`, or `it had held the front for 91s`), so a model reading the transcript can tell a person's decision from a clock's. The move also leaves one card in the transcript naming the record and the trigger, so you learn it happened without opening `/tasks`; the card is part of the session, so it is still there after a reload, and it never enters the model's context.
 
 ![The detach card in the transcript, twice: once moved by ctrl+shift+b, once by the deadline — the record's id, how long it held the front, which trigger moved it, and the two commands that reach it](https://raw.githubusercontent.com/mystery4f/pi-pretty-task/main/docs/preview-detach.png)
 
 `PI_PRETTY_TASK_FOREGROUND_TIMEOUT` does the same on a timer, for the terminal you have already walked away from; `0`, the default, never moves anything. A call's own `timeout` still stops the tree — a timeout is a failure, not a move. The takeover is off by default because it re-registers pi's own shell tools; see [ADR-0020](docs/adr/0020-foreground-command-detaches-to-a-task.md).
+
+The key also works with the takeover off: the other waiting kind is a [blocking run](#waiting-inside-the-call), which has nothing to do with adoption.
+
+## Waiting inside the call
+
+`pretty_task_bg_run` normally answers as soon as the process is running. With `wait: true` it stays open instead and answers when the command ends: the status, exit code and kill reason, then the last 200 lines of its output. Either way it is the same task — recorded, listed in the panel, counted against `PI_PRETTY_TASK_MAX_RUNNING_TASKS` from the first millisecond — so nothing here waits for a record to appear first.
+
+Nothing streams while the call waits; the panel already shows the growing output, and a second copy in the transcript would cost the same bytes twice. Two ways out early: Esc ends the wait and leaves the task running (the same as `pretty_task_bg_wait`), while `ctrl+shift+b` lets the call go: it answers with what it had captured plus `↪ moved to bg-…` — no exit code, because none exists yet — and the press leaves the same detach card in the transcript that a foreground detach leaves. `timeoutSeconds` still stops the whole tree, and the call then answers with the ending that says `timeout`. A queued step cannot be waited for: `after` together with `wait` is refused before anything starts.
+
+See [ADR-0025](docs/adr/0025-blocking-run-waits-inside-the-call.md).
 
 ## Leave it running while you are away
 
@@ -146,7 +158,7 @@ Two skills ship with the package and are offered by name: `pretty-task-unattende
 
 | Tool | What it answers |
 |---|---|
-| `pretty_task_bg_run` | Start a command; also starts a chain step with `after`, or a named template with `template` |
+| `pretty_task_bg_run` | Start a command, with `wait: true` to answer only when it ends; also starts a chain step with `after`, or a named template with `template` |
 | `pretty_task_bg_status` | Status, elapsed time, working directory, kill reason |
 | `pretty_task_bg_logs` | The output tail, or `follow` for only what arrived since the last read |
 | `pretty_task_bg_grep` | Matching lines of the whole output file |

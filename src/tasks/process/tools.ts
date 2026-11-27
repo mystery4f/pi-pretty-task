@@ -16,6 +16,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { commandPreview, formatBytes, formatDuration } from "../base/format.js";
+import type { OutputTail } from "../base/output.js";
 import {
   clampSearchMatches,
   DEFAULT_SEARCH_BYTES,
@@ -31,6 +32,7 @@ import type {
   StopChainResult,
 } from "../chain/chain-tasks.js";
 
+import { detachedNotice } from "./foreground.js";
 import { parseFollowSeconds, parseTimeoutSeconds, parseWaitSeconds } from "./limits.js";
 import type {
   FollowTaskResult,
@@ -92,6 +94,12 @@ const RunParameters = Type.Object({
     Type.String({
       description:
         "Queue this command behind a task instead of starting it now. Pass a task id to put it behind that task, or a chain id (`ch-…`) to add it to that queue, even while it runs. The step is recorded at once as `waiting` and starts only after the step ahead ended with exit 0; a step that fails leaves the ones behind it `skipped`. Only process tasks and chains can be queued behind.",
+    }),
+  ),
+  wait: Type.Optional(
+    Type.Boolean({
+      description:
+        "Keep the call open until the command ends, then answer with its output tail, exit code and kill reason instead of a task id. One answer, at the end — nothing streams while it waits, and the panel already shows the same output. Esc ends the wait and leaves the task running; `timeoutSeconds` still kills it; `ctrl+shift+b` moves the call to the background with `↪ moved to bg-…` and no exit code. Cannot be combined with `after`: a queued step has not started yet. A command that never ends holds this call until Esc, so prefer a bounded command.",
     }),
   ),
 });
@@ -233,6 +241,37 @@ export function describeTask(view: ProcessTaskView, options: { full?: boolean } 
   return lines.join("\n");
 }
 
+/** Lines a blocking call reports with: enough to read a failure, not the file. */
+const BLOCKED_OUTPUT_LINES = 200;
+/** Bytes that tail may take; a longer one keeps its newest lines. */
+const BLOCKED_OUTPUT_BYTES = 16 * 1024;
+
+/**
+ * How the command of a blocked call ended, in one line. The kill reason comes
+ * first: a stopped task's exit code describes the tree, not the decision.
+ */
+function blockedVerdict(view: ProcessTaskView): string {
+  const { task } = view;
+  const what = `${task.id} (${task.name})`;
+  if (task.killReason !== undefined) return `${what} was stopped: ${task.killReason}.`;
+  if (task.exitCode === undefined || task.exitCode === null) {
+    return `${what} ended, status ${task.status}.`;
+  }
+  return `${what} exited with code ${String(task.exitCode)}.`;
+}
+
+/**
+ * The tail a blocking call answers with. A task that wrote nothing answers with
+ * an empty tail, not an error: the record above it already says why.
+ */
+async function blockedTail(tasks: ProcessTasks, scope: TaskScope, id: string): Promise<OutputTail> {
+  const found = await tasks.logs(scope, id, {
+    lines: BLOCKED_OUTPUT_LINES,
+    maxBytes: BLOCKED_OUTPUT_BYTES,
+  });
+  return found?.tail ?? { text: "", lines: 0, truncated: false };
+}
+
 /** What a tool reports about one task, in a shape the caller can inspect. */
 function taskDetails(view: ProcessTaskView) {
   return {
@@ -344,7 +383,7 @@ const RELOAD_NOTE =
  */
 function runDescription(templates: ReadonlyMap<string, CommandTemplate>): string {
   const base =
-    "Run a shell command in the background and return a task id at once, without waiting for the command to finish. stdout and stderr are captured together in one output file. With `after`, it queues behind a task or chain instead.";
+    "Run a shell command in the background and return a task id at once, without waiting for the command to finish. stdout and stderr are captured together in one output file. With `after`, it queues behind a task or chain instead. With `wait: true`, the call instead answers when the command ends, with its output tail, exit code and kill reason; Esc or ctrl+shift+b ends the wait early and leaves the task running.";
   // pi-lens-ignore: no-sort-without-comparator -- template names are plain words and the default string order is the intended one
   const names = [...templates.keys()].sort();
   if (names.length === 0) {
@@ -506,7 +545,7 @@ export function processTaskTools(
     label: "Run in background",
     description: runDescription(templates),
     parameters: RunParameters,
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       // Resolve the template before any store call: an unknown name must not
       // leave a task behind, and an explicit field on the call wins over the
       // template's value. `env` is deliberately never templated.
@@ -537,6 +576,13 @@ export function processTaskTools(
           const reason = error instanceof Error ? error.message : String(error);
           return text(`${reason} The task was not started.`);
         }
+      }
+      if (params.wait === true && params.after !== undefined) {
+        // Queueing and waiting answer different questions: the step has no start
+        // yet, so there is nothing this call could hold open (ADR-0025).
+        return text(
+          "`wait` cannot be used with `after`: a queued step starts when the step ahead ends, so there is nothing to wait for yet. Drop `after` to wait for the command, or drop `wait` to queue it. The task was not started.",
+        );
       }
       let task: ProcessTask;
       if (params.after !== undefined) {
@@ -614,6 +660,79 @@ export function processTaskTools(
         elapsedMs: 0,
         outputBytes: task.outputBytes,
       };
+      if (params.wait === true) {
+        // The wait is one more listener on the record, so the task keeps its panel
+        // row, its output file and its place in the ceiling while this call hangs
+        // (ADR-0025). Only the call is released early; the process is never touched.
+        const scope = scopeOf(ctx);
+        const blocked = await tasks.awaitRun(scope, task.id, signal);
+        if (blocked !== undefined) {
+          const tail = await blockedTail(tasks, scope, task.id);
+          if (blocked.stop === "ended") {
+            const note = tail.truncated
+              ? `(showing the last ${lineCount(tail.lines)}; the output file holds the rest)`
+              : "";
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: [
+                    blockedVerdict(blocked.view),
+                    "",
+                    describeTask(blocked.view),
+                    note,
+                    "",
+                    tail.text.length > 0 ? tail.text : "(the command wrote no output)",
+                    "",
+                    `Read the whole file with pretty_task_bg_logs id=${task.id}.`,
+                  ]
+                    .filter((line) => line.length > 0)
+                    .join("\n"),
+                },
+              ],
+              details: { ...taskDetails(blocked.view), waited: true, stop: blocked.stop },
+            };
+          }
+          // Two endings, two receipts. A released call is a detach from the reader's
+          // side, so it closes with the same line a foreground detach does, naming the
+          // key that fired; Esc is not a detach — nobody moved anything, the call merely
+          // stopped waiting — so it says that and claims no trigger (ADR-0025).
+          const receipt =
+            blocked.stop === "aborted"
+              ? `Follow: pretty_task_bg_logs ${task.id} · Stop: pretty_task_bg_kill ${task.id}`
+              : detachedNotice({
+                  kind: "detached",
+                  taskId: task.id,
+                  trigger: "shortcut",
+                  afterSeconds: blocked.afterSeconds,
+                });
+          const why =
+            blocked.stop === "aborted"
+              ? "this call stopped waiting"
+              : "the shortcut let this call go";
+          return {
+            content: [
+              {
+                type: "text",
+                text: [
+                  `${task.id} (${task.name}) is still running; ${why}.`,
+                  "",
+                  receipt,
+                  "",
+                  tail.text.length > 0 ? tail.text : "(no output yet)",
+                ].join("\n"),
+              },
+            ],
+            details: { ...taskDetails(blocked.view), waited: false, stop: blocked.stop },
+          };
+        }
+        // Nothing to wait for: the record vanished between the spawn and the wait,
+        // so say that rather than the start answer, which would claim a task that
+        // is not there to follow.
+        return text(
+          `${task.id} is not a task this session holds, so there is nothing to wait for.`,
+        );
+      }
       return {
         content: [
           {

@@ -194,7 +194,8 @@ describe("foreground takeover", () => {
     await harness.runShortcut("ctrl+shift+b");
     expect(harness.controller.foreground.live().length).toBe(2);
     // The user hears why nothing moved; the two calls above stay silent about it.
-    expect(harness.notifications.at(-1)?.message).toContain("2 commands are running");
+    // The one key counts both kinds of waiting call, so the message says "calls" now.
+    expect(harness.notifications.at(-1)?.message).toContain("2 calls are waiting");
     for (const result of [await first, await second]) {
       expect((result.structuredContent as { exit_code: number }).exit_code).toBe(0);
       expect(resultText(result)).not.toContain("↪ moved to");
@@ -315,8 +316,11 @@ describe("foreground takeover", () => {
       { env: { ...process.env, [ADOPT_FOREGROUND_ENV]: "off" } },
     );
     expect(off.toolNames).not.toContain("bash");
-    // The panel keeps its own "shift+down"; what must be absent is this takeover's key.
-    expect(off.shortcutKeys).not.toContain("ctrl+shift+b");
+    // The key is registered whether the takeover is on or off, because a blocked
+    // `wait: true` call has nothing to do with adoption (ADR-0025): its presence no
+    // longer says the takeover is on, and its absence would take the key from the
+    // one call kind that always has it.
+    expect(off.shortcutKeys).toContain("ctrl+shift+b");
   });
 });
 

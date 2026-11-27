@@ -27,7 +27,12 @@ import { Iterations, retryBudget } from "./tasks/loop/iterations.js";
 import { type LoopFire, LoopTasks } from "./tasks/loop/loop-tasks.js";
 import { loopTaskTools } from "./tasks/loop/tools.js";
 import { WakeDesk } from "./tasks/loop/wake-desk.js";
-import { describeDetach, ForegroundRunner } from "./tasks/process/foreground.js";
+import {
+  type DetachedResult,
+  type DetachResult,
+  describeDetach,
+  ForegroundRunner,
+} from "./tasks/process/foreground.js";
 import { ProcessTasks, type ProcessTaskView } from "./tasks/process/process-tasks.js";
 import { loadTemplates } from "./tasks/process/templates.js";
 import { processTaskTools } from "./tasks/process/tools.js";
@@ -136,6 +141,44 @@ function scopeOf(ctx: {
   readonly sessionManager: { getSessionId(): string };
 }): TaskScope {
   return { cwd: ctx.cwd, sessionId: ctx.sessionManager.getSessionId() };
+}
+
+/**
+ * Which of the two kinds of waiting call one key press let go, and what it answered.
+ * The split matters for the trace each press leaves: a foreground detach is announced
+ * by the runner, which owns the entry, while a blocked call has no runner — the caller
+ * of this function draws that card (ADR-0020, ADR-0025).
+ */
+type LetGoOutcome =
+  | { readonly kind: "foreground"; readonly result: DetachResult }
+  | { readonly kind: "blocked"; readonly result: DetachedResult };
+
+/**
+ * Let exactly one waiting call go: the foreground command, or a call blocked on
+ * `wait: true`. Both are counted together because a key press cannot know which
+ * kind the user means, and with more than one candidate it acts on none.
+ */
+async function letOneGo(foreground: ForegroundRunner, tasks: ProcessTasks): Promise<LetGoOutcome> {
+  const inFront = foreground.live().length;
+  const waiting = inFront + tasks.blockedCount();
+  if (waiting === 0) return { kind: "foreground", result: { kind: "nothing" } };
+  if (waiting > 1) return { kind: "foreground", result: { kind: "ambiguous", waiting } };
+  if (inFront === 1) {
+    return { kind: "foreground", result: await foreground.detachOnlyOne() };
+  }
+  const released = tasks.releaseBlocked();
+  if (released.kind !== "released") return { kind: "foreground", result: { kind: "nothing" } };
+  // The receipt a foreground detach gets, because this is the same event from the
+  // reader's side: the call stops waiting and the record keeps running.
+  return {
+    kind: "blocked",
+    result: {
+      kind: "detached",
+      taskId: released.taskId,
+      trigger: "shortcut",
+      afterSeconds: released.afterSeconds,
+    },
+  };
 }
 
 /** Build the stores, tools, renderers and pump; shared by production and tests. */
@@ -435,7 +478,14 @@ export function createExtension(
   pi.registerMessageRenderer(LOOP_SIGNAL_CUSTOM_TYPE, renderLoopSignal);
   pi.registerMessageRenderer(LOOP_WAKE_CUSTOM_TYPE, renderLoopWake);
   pi.registerEntryRenderer(TASK_DETACHED_ENTRY_TYPE, renderTaskDetached);
-  registerTasksCommand(pi, processTasks, loops, chainTasks, () => foreground.live().length);
+  registerTasksCommand(
+    pi,
+    processTasks,
+    loops,
+    chainTasks,
+    () => foreground.live().length,
+    () => processTasks.blockedCount(),
+  );
 
   // The takeover is opt-in and covers only what this extension spawns: a tool it
   // does not own has its own process elsewhere, and nothing here can reach it.
@@ -452,17 +502,39 @@ export function createExtension(
       pi.registerTool(createPowerShellTool(process.cwd()));
     }
     pi.on("user_bash", () => ({ operations }));
-    pi.registerShortcut("ctrl+shift+b", {
-      description: "Move the foreground command to the background",
-      handler: async (ctx) => {
-        const result = await foreground.detachOnlyOne();
-        // A successful detach announces itself from the runner above, so this press
-        // only reports what could not happen; two toasts for one press read as two
-        // events, and the runner's line is the one that also reaches a deadline.
-        if (result.kind !== "detached") ctx.ui.notify(describeDetach(result), "warning");
-      },
-    });
   }
+
+  // The shortcut serves two waiting calls, and only one of them comes from
+  // adoption: a `wait: true` run has nothing to do with `BashOperations`, so this
+  // key is registered whether adoption is on or off (ADR-0025). With several
+  // candidates it acts on none and says so — the rule ADR-0020 set, now counting
+  // both kinds together.
+  pi.registerShortcut("ctrl+shift+b", {
+    description: "Let exactly one waiting command go: the foreground command or a blocked call",
+    handler: async (ctx) => {
+      const outcome = await letOneGo(foreground, processTasks);
+      if (outcome.kind === "blocked") {
+        // A blocked call has no runner to announce it, so the press draws the card
+        // here. Without it the press would leave nothing the user can see: the tool
+        // result goes to the model, and the record it released looks like any other.
+        if (live) {
+          pi.appendEntry<DetachedTaskDetails>(TASK_DETACHED_ENTRY_TYPE, {
+            id: outcome.result.taskId,
+            trigger: outcome.result.trigger,
+            afterSeconds: outcome.result.afterSeconds,
+          });
+          publishStatusLine();
+        }
+        return;
+      }
+      // A successful foreground detach announces itself from the runner, so this press
+      // only reports what could not happen; two toasts for one press read as two events,
+      // and the runner's line is the one that also reaches a deadline.
+      if (outcome.result.kind !== "detached") {
+        ctx.ui.notify(describeDetach(outcome.result), "warning");
+      }
+    },
+  });
 
   // The status line is the panel's lasting trace (ADR-0003): it has to exist
   // before anyone opens `/tasks`, and it has to follow the tasks it counts.

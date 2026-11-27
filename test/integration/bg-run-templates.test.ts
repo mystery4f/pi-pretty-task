@@ -125,6 +125,10 @@ describe("pretty_task_bg_run with a template", () => {
     const description = harness.toolDescription("pretty_task_bg_run");
 
     expect(description).toContain("Command templates available here:");
+    // The blocking contract lives in the base sentence, so every configuration of
+    // this description carries it — a model that only ever calls the tool with a
+    // template still learns that `wait: true` exists (ADR-0025).
+    expect(description).toContain("With `wait: true`");
     expect(description).toContain("lint (");
     expect(description).toContain("test (");
     expect(description.indexOf("lint (")).toBeLessThan(description.indexOf("test ("));
@@ -161,8 +165,10 @@ describe("pretty_task_bg_run with a template", () => {
 
     const description = harness.toolDescription("pretty_task_bg_run");
 
-    // 190 characters of base sentence, 27 of lead-in, 300 of list, 145 of reload note.
-    expect(description.length).toBeLessThan(700);
+    // 411 characters of base sentence, 27 of lead-in, 300 of list, 134 of reload
+    // note: the base carries the `wait: true` contract since ADR-0025, so the ceiling
+    // moved with it instead of the sentence being trimmed for the test's sake.
+    expect(description.length).toBeLessThan(900);
     expect(description).toContain("…");
     expect(description).toContain("Command templates available here:");
 

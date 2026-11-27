@@ -32,6 +32,10 @@ _Avoid_: run, tick, execution, invocation
 本扩展替内置工具 spawn、正在被某个工具调用等待的那条命令。它还不是 Task，不在面板里、没有记录；只有被改道（或跑完）时才落地。同一时刻可以有多个（并行工具调用），所以「当前前台命令」这个说法只在恰好一条时才成立。
 _Avoid_: running command, live process, session command
 
+**Blocked run**:
+带 `wait: true` 的 `pretty_task_bg_run` 起的那条 Process task，从起进程起到调用返回之间。与 Foreground run 的分界是记录何时成立：Blocked run 从第一毫秒就是 Task——有记录、进面板、计入 `maxRunningTasks`，等它的调用只是 `session.waiters` 上多一个等待者，不是另一套生命周期。等待有三种结束方式：任务结束、调用方 Esc、`timeoutSeconds` 杀树；`ctrl+shift+b` 是第四条出口，只放走调用、不碰进程；放走时沿用 ADR-0020 的回执与那张 `task-detached` 卡（`trigger: "shortcut"`），所以用户看见的和一次前台改道一样（ADR-0025）。发起它的那次工具调用本身叫 blocking call。
+_Avoid_: foreground run, sync task, foreground task
+
 **Detached**:
 一条前台命令被改道而成的那条 Process task：进程没重启，只是不再有人等它的结果。记录带 `origin: "foreground"`，在面板里与普通 Process task 同页同行，用 `pretty_task_bg_logs` / `bg_wait` / `bg_kill` 一视同仁。改道不是失败也不是取消：Esc 仍是「杀掉」，改道是「放它走」。
 _Avoid_: promoted task, adopted task, transferred job, bg-ified

@@ -490,6 +490,24 @@ describe("the command in front", () => {
 
     panel.dispose();
   });
+
+  it("advertises the key for blocked calls alone, and counts both kinds together", async () => {
+    // Since ADR-0025 the key also lets a blocked call go, and that has nothing to do
+    // with the takeover being on — so the hint no longer needs a foreground count.
+    const source = Object.assign(new FakeSource(), { blocked: () => 1 });
+    const blockedOnly = openPanel(source, () => 13_000);
+    await blockedOnly.panel.settle();
+    expect(blockedOnly.drawn()).toContain("1 blocked call");
+    expect(blockedOnly.drawn()).toContain("ctrl+shift+b lets it go");
+    blockedOnly.panel.dispose();
+
+    const both = Object.assign(new FakeSource(), { foreground: () => 1, blocked: () => 2 });
+    const mixed = openPanel(both, () => 13_000);
+    await mixed.panel.settle();
+    expect(mixed.drawn()).toContain("1 command in front, 2 blocked calls");
+    expect(mixed.drawn()).toContain("ctrl+shift+b lets one go");
+    mixed.panel.dispose();
+  });
 });
 
 describe("detail view", () => {

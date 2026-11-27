@@ -182,15 +182,21 @@ export function listFooter(_panel: PanelView, room: number): string {
 }
 
 /**
- * The line above the keys when pi is waiting on a command this extension can let
- * go. Absent for a source that cannot see foreground runs, and for zero: the
- * panel never draws an empty hint.
+ * The line above the keys when pi is waiting on something this extension can let
+ * go: a foreground command, a blocked call, or both. Absent for a source that
+ * cannot see either, and for zero: the panel never draws an empty hint.
  */
 export function foregroundHint(panel: PanelView): string | undefined {
-  const count = panel.source.foreground?.() ?? 0;
-  if (count <= 0) return undefined;
-  const what = count === 1 ? "1 command in front" : `${String(count)} commands in front`;
-  return `↪ ${what} · ctrl+shift+b moves it to the background`;
+  const inFront = panel.source.foreground?.() ?? 0;
+  const blocked = panel.source.blocked?.() ?? 0;
+  if (inFront <= 0 && blocked <= 0) return undefined;
+  const front = inFront === 1 ? "1 command in front" : `${String(inFront)} commands in front`;
+  // A foreground run is not a task yet and a blocked call is: the wording keeps
+  // that difference visible while the key count stays one number (ADR-0025).
+  if (blocked <= 0) return `↪ ${front} · ctrl+shift+b moves it to the background`;
+  const held = blocked === 1 ? "1 blocked call" : `${String(blocked)} blocked calls`;
+  if (inFront <= 0) return `↪ ${held} · ctrl+shift+b lets it go`;
+  return `↪ ${front}, ${held} · ctrl+shift+b lets one go`;
 }
 
 export function listFrame(panel: PanelView, body: string[], width: number): string[] {

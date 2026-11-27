@@ -203,6 +203,12 @@ export interface PanelSource {
    * names the shortcut that moves one away (ADR-0020).
    */
   foreground?(): number;
+  /**
+   * How many `wait: true` calls are blocked in this session. They are tasks, so
+   * they have rows too; the hint counts them with the foreground runs because the
+   * same key serves both (ADR-0025).
+   */
+  blocked?(): number;
 }
 
 /**

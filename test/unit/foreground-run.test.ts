@@ -201,8 +201,8 @@ describe("detach wording", () => {
     expect(
       describeDetach({ kind: "detached", taskId: "bg-3", trigger: "timeout", afterSeconds: 91 }),
     ).toContain("held for 91s");
-    expect(describeDetach({ kind: "nothing" })).toContain("Nothing is running");
-    expect(describeDetach({ kind: "ambiguous", running: 2 })).toContain("2 commands");
+    expect(describeDetach({ kind: "nothing" })).toContain("Nothing is waiting");
+    expect(describeDetach({ kind: "ambiguous", waiting: 2 })).toContain("2 calls are waiting");
     expect(describeDetach({ kind: "refused", message: "capacity reached" })).toContain(
       "capacity reached",
     );

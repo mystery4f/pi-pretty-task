@@ -20,7 +20,7 @@
 - **改道语义**：进程不重启、不复制、不换 PID。改道那一刻起不再把输出当作工具结果等待，输出继续写入任务输出文件，原工具立即返回。Esc 取消仍按 pi 的老规矩杀整棵树——快捷键与超时是「放它走」，Esc 是「让它死」，两件事不混。
 - **记录形态**：改道后是一条普通的 `kind: "process"` Task，带来源字段 `origin: "foreground"`。不新增 kind，面板不加页，`pretty_task_bg_logs` / `bg_wait` / `bg_kill` 照常可用。术语见 `GLOSSARY.md` 的 `Detached`。
 - **上限**：计入 `maxRunningTasks`（20）。撞上限时改道失败、命令继续在前台跑——上限的意思是「不许再开」，不是「必须死」。
-- **快捷键只认唯一一条**：并行工具调用会让「当前前台命令」不唯一。此时按键只给一条提示（有 N 条在跑，去 `/tasks` 挑），不替你选；选错一条改道比不改道更贵。
+- **快捷键只认唯一一条**：并行工具调用会让「当前前台命令」不唯一。此时按键只给一条提示（有 N 条在跑，去 `/tasks` 挑），不替你选；选错一条改道比不改道更贵。自 ADR-0025 起「在等」的还有另一种：一条 `wait: true` 的阻塞调用。按键把两者合起来数，恰好一条才动手，所以这条规则现在管的是两个来源。
 - **超时**：`PI_PRETTY_TASK_FOREGROUND_TIMEOUT`，单位秒，`0` 为关（默认）。到点自动改道而不是杀掉；与内置 `timeout` 参数是两件事，后者仍是「到点就杀」。更大的值会被拒绝：Node 把超过 2147483 秒的延时钳到 1ms，「到点改道」就成了「每条命令瞬间改道」。
 - **回执**：agent 侧拿到一条成功结果的变体——已捕获输出（同样受 20MiB 上限）、任务 id、「用 `pretty_task_bg_logs`/`bg_wait` 跟进」的提示，不给退出码（它还没退出）。`!` 侧输出框保留已捕获内容，末尾一行 `↪ moved to bg-xxx`。两边都不许把改道渲染成失败。
 - **不做**：任意外来工具转后台（被否决的 idea B）。没有句柄就没有改道；`docs/scope-v1.md` 的延后表记下它与解锁条件。
@@ -47,6 +47,7 @@
 ## 相关
 
 - 术语与派生记录的关系：[`GLOSSARY.md`](../../GLOSSARY.md)（`Detached`、`Process task`、`Fire`、`Step`）
+- 第二个「在等」的来源，以及与它共用的快捷键：[ADR-0025](0025-blocking-run-waits-inside-the-call.md)
 - shell 选择与解码：[ADR-0008](0008-shell-choice-and-output-decoding.md)
 - 上限与终止原因：[`docs/configuration.md`](../configuration.md)
 - 范围与延后项：[`docs/scope-v1.md`](../scope-v1.md)
