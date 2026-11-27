@@ -1,5 +1,10 @@
 # Wiki Update Log
 
+## 2026-11-27
+
+- **observe**: {"relevance":"high","slug":"obs-2026-11-27-","title":"改道卡必须是会话条目而非自定义消息"}
+- **observe**: {"relevance":"high","slug":"obs-2026-11-27-pi-pretty-task","title":"pi-pretty-task：改道通知带触发器，静默分支以负断言固化"}
+
 ## 2026-11-26
 
 - **retro**: {"category":"architecture","slug":"pi-matt-implement-flow-script-gotchas","title":"pi-matt-implement-flow 脚本层的七个坑（自己重写时的清单）"}

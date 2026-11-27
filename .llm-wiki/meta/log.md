@@ -119,3 +119,9 @@
 ## [2026-11-26T11:43:57.754Z] retro
 - slug: "pi-matt-implement-flow-script-gotchas", title: "pi-matt-implement-flow 脚本层的七个坑（自己重写时的清单）", category: "architecture"
 
+## [2026-11-27T06:22:28.611Z] observe
+- slug: "obs-2026-11-27-pi-pretty-task", title: "pi-pretty-task：改道通知带触发器，静默分支以负断言固化", relevance: "high"
+
+## [2026-11-27T07:05:37.396Z] observe
+- slug: "obs-2026-11-27-", title: "改道卡必须是会话条目而非自定义消息", relevance: "high"
+

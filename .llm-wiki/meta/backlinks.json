@@ -26,6 +26,8 @@
   "sources/obs-2026-11-22-gif": [],
   "sources/obs-2026-11-24-pi-lens-test-tsconfig": [],
   "sources/obs-2026-11-25-pi-auto-retry": [],
+  "sources/obs-2026-11-27-": [],
+  "sources/obs-2026-11-27-pi-pretty-task": [],
   "sources/pi-extension-stale-instance-unhandled-rejection": [],
   "sources/pi-git-install-omits-dev-deps-so-ship-ts-entry": [
     "syntheses/release-1-0-0-publish-support"

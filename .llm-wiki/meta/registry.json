@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "last_updated": "2026-11-26T11:47:54.831Z",
+  "last_updated": "2026-11-27T07:05:37.432Z",
   "pages": {
     "sources/await-state-not-bytes-in-process-tests": {
       "type": "source",
@@ -313,6 +313,41 @@
       "source_context": "pi-pretty-task 实现 ticket #47（重试可见）时子代理发现的 API 缺口",
       "created": "2026-11-25",
       "updated": "2026-11-25"
+    },
+    "sources/obs-2026-11-27-": {
+      "type": "source",
+      "title": "Observation: 改道卡必须是会话条目而非自定义消息",
+      "tags": [
+        "pi-pretty-task",
+        "pi-extension",
+        "tui",
+        "session-entry"
+      ],
+      "status": "observation",
+      "slug": "obs-2026-11-27-",
+      "relevance": "high",
+      "observed_at": "2026-11-27T07:05:37.393Z",
+      "source_context": "pi-pretty-task 改道通知改造成会话卡片",
+      "created": "2026-11-27",
+      "updated": "2026-11-27"
+    },
+    "sources/obs-2026-11-27-pi-pretty-task": {
+      "type": "source",
+      "title": "Observation: pi-pretty-task：改道通知带触发器，静默分支以负断言固化",
+      "tags": [
+        "pi-pretty-task",
+        "foreground",
+        "detach",
+        "adr-0020",
+        "testing"
+      ],
+      "status": "observation",
+      "slug": "obs-2026-11-27-pi-pretty-task",
+      "relevance": "high",
+      "observed_at": "2026-11-27T06:22:28.603Z",
+      "source_context": "Making foreground detach announce its trigger to model and user",
+      "created": "2026-11-27",
+      "updated": "2026-11-27"
     },
     "sources/pi-extension-stale-instance-unhandled-rejection": {
       "type": "source",
