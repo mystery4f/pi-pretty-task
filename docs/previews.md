@@ -6,6 +6,7 @@ README 里的图不是手工画的，是脚本驱动**仓库里真实的面板�
 
 ```bash
 npm run preview                              # = npm run build && node scripts/preview/preview.mjs
+npm run preview -- --only cmd-loop           # 只重写这一张，其余文件不碰
 npm run preview:dump --only <label>          # 只打文字帧，不起浏览器
 ```
 
