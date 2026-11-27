@@ -1,5 +1,9 @@
 # Loop 唤醒 LLM，不执行 shell 命令
 
+## 状态
+
+已接受（2026-11-13）
+
 Loop 到点时通过 `pi.sendMessage(prompt, { deliverAs: "followUp", triggerTurn: true })` 把一段预置 prompt 送进会话，唤醒 agent 跑一轮。Loop 自身不持有 `command` 字段，也不 spawn 任何进程；命令只可能来自被唤醒的这一轮里 agent 调用的工具。
 
 ## Considered Options

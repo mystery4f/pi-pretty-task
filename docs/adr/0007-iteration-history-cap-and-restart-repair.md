@@ -1,5 +1,9 @@
 # Iteration 有历史上限，重启时把未完成的标记为 interrupted
 
+## 状态
+
+已接受（2026-11-14）
+
 Iteration 与它的 Loop task 存在同一份状态文件里，所以“记多少”不只是展示问题，还是文件体积问题。ADR-0002 只给单条 Iteration 的子记录设了上限；一个每 10 秒触发的 Loop 一天会积累 8640 条 Iteration，每条还带着自己的工具调用，状态文件会被历史撑大，每次写入都变慢、损坏时回退的代价也变大。因此历史本身也设上限：一条 Loop task 只保留最近 50 条 Iteration，被丢掉的数量累加在 `droppedIterations` 里。同时，进程重启后不可能还有“正在跑”的一轮执行：加载时把仍是 `running` 的 Iteration 标成 `interrupted`，并把其中仍在 `running` 的调用一并标成 `interrupted`，与 process task 重启后的语义一致。
 
 ## Considered Options

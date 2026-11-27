@@ -1,5 +1,9 @@
 # 参考上游行为，重写代码结构
 
+## 状态
+
+已接受（2026-11-13）
+
 `pi-background-tasks` 与 `@trevonistrevon/pi-loop` 的源码只作为**行为参考**，不 fork、不复制类结构。凡是踩出来的细节（Windows `cmd.exe /d /s /c` 调用方式、`windowsVerbatimArguments`、POSIX 进程组、`taskkill /PID n /T`、SIGTERM 宽限后强杀并轮询确认整组消失）逐条照搬行为；文件划分与抽象重新设计。
 
 ## Considered Options

@@ -1,5 +1,9 @@
 # Loop 的调度吃两种语法：间隔简写与五段 cron
 
+## 状态
+
+已接受（2026-11-13）
+
 一条 loop task 的调度可以写成间隔简写（`30s`、`10m`、`2h`）或五段 cron 表达式（`分 时 日 月 周`，支持 `*`、列表、区间、步长）。两者都解析成同一个 `nextFire(after: number): number | null`，调度器只认这个函数，不关心原文长什么样。
 
 ## Considered Options

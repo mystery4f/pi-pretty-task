@@ -1,5 +1,9 @@
 # Task 的“更新时间”是落盘字段，不是算出来的
 
+## 状态
+
+已接受（2026-11-14）
+
 每条 Task 带一个 `updatedAt`：创建时等于 `createdAt`，此后只在**状态变化、循环触发、迭代落定、任务结束**时推进；输出文件增长**不算**一次更新。面板按 `updatedAt` 降序排，`tasks.json` 升到 `version: 2`，读到 `version: 1` 或缺这个字段时用 `createdAt` 兜底。
 
 ## Considered Options

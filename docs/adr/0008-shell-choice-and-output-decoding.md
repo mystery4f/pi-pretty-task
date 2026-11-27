@@ -1,5 +1,9 @@
 # 命令用哪个 shell 跑，输出按什么编码读
 
+## 状态
+
+已接受（2026-11-23）；Windows 默认 shell 与 bash 查找途径部分被 [ADR-0022](0022-bash-by-default-and-where-git-lives.md) 取代
+
 > 2026-11-23：本文的默认值（Windows `cmd`、POSIX `inherit`）与「只在 PATH 上找 bash」已被 [ADR-0022](0022-bash-by-default-and-where-git-lives.md) 取代；四个键、单次调用的 `shell` 覆盖与 GBK 回退不变。
 Windows 上 `pretty_task_bg_run` 默认走 `cmd.exe /d /s /c`（ADR-0004 定的），于是习惯 POSIX 的人写 `for i in 1..5; do …` 会直接失败，`cmd` 还把它读成乱码；`cmd` 控制台输出的 GBK 中文按 UTF-8 解也是乱码。两件事分开解决：shell 由用户显式选，编码在读的时候自动判断。
 

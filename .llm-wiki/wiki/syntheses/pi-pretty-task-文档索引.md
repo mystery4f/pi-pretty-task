@@ -2,7 +2,7 @@
 type: synthesis
 title: pi-pretty-task 文档索引
 created: 2026-11-13
-updated: 2026-11-21
+updated: 2026-11-27
 ---
 
 # pi-pretty-task 文档索引
@@ -17,8 +17,8 @@ updated: 2026-11-21
 | [GLOSSARY.md](../../GLOSSARY.md) | 术语：Task（四种 kind：process / prompt-loop / cmd-loop / chain）/ Iteration / Fire / Step / Panel | 已定 |
 | [scope-v1.md](../../docs/scope-v1.md) | v0.1 范围：做 / 不做 / 延后（含复杂度与风险） | 已定，随实现更新 |
 | [panel-narrow-detail.md](../../docs/panel-narrow-detail.md) | 窄 pane / 矮 pane 下的面板：高度预算、字段与窗口分账、宽度两档与长值折行、子行状态前置 | 已定，随实现更新 |
-| [configuration.md](../../docs/configuration.md) | 配置面：`PI_PRETTY_TASK_OUTPUT_CAP_BYTES`（默认 20 MiB，启动校验）与 `pretty_task_bg_run` 的 `timeoutSeconds`；两类终止原因 | 已定 |
-| [previews.md](../../docs/previews.md) | README 四张图怎么来：`scripts/preview/` 驱动真实面板抓帧、ANSI→HTML→截图→GIF，重跑与踩坑 | 已定，随面板更新 |
+| [configuration.md](../../docs/configuration.md) | 配置面：十个 `PI_PRETTY_TASK_*` 键（输出上限、并发上限、通知、保留天数、两种 shell 与路径、前台接管与其超时）、启动即校验、两类终止原因、命令模板的两个文件 | 已定，随实现更新 |
+| [previews.md](../../docs/previews.md) | README 十一张图怎么来：`scripts/preview/` 驱动真实面板与真实卡片渲染器抓帧、ANSI→HTML→截图→GIF，`--only` 单张重跑、踩坑 | 已定，随面板更新 |
 
 ## 决策记录（ADR）
 
