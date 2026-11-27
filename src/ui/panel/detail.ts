@@ -348,9 +348,9 @@ export function renderCommandLoopDetail(
     ),
     streakFacts,
     signalFacts,
-    field(panel, "Last exit", task.lastExitCode === undefined ? "—" : String(task.lastExitCode)),
+    field(panel, "Last exit", lastExitText(task.lastExitCode)),
     field(panel, "Env", envCount === 0 ? "—" : variables),
-    field(panel, "Wake on failure", task.wakeOnFailure === false ? "off" : "on"),
+    field(panel, "Wake", task.wakeOnFailure === false ? "off" : "on failure"),
     task.expiresAt === undefined ? [] : field(panel, "Expires", formatClockTime(task.expiresAt)),
     task.endedAt === undefined ? [] : field(panel, "Ended", formatClockTime(task.endedAt)),
     task.error === undefined ? [] : block(panel, "Error", theme.fg(colour, task.error)),
@@ -578,11 +578,28 @@ export function field(panel: PanelView, label: string, value: string): string[] 
     // Cut here, once, against the frame: the border and the label take their share first.
     const room = Math.max(8, panel.renderWidth - 2 - LABEL_WIDTH - 2);
     const text = visibleWidth(value) > room ? truncateToWidth(value, room, "…", false) : value;
-    return [`${panel.theme.fg("muted", pad(`${label}:`, LABEL_WIDTH))}${text}`];
+    return [`${panel.theme.fg("muted", labelCell(label))}${text}`];
   }
   // A narrow pane gives the value a line of its own: a label column would leave a
   // status word or a path nothing but an ellipsis.
   return [panel.theme.fg("muted", `${label}:`), ...wrapValue(panel, value, 2)];
+}
+
+/**
+ * The label column. A label wider than the column is cut with an ellipsis and still
+ * ends in a space: `pad` clips silently, so `Wake on failure:` used to print as
+ * `Wake on failon` — the label and its value running into one word.
+ */
+function labelCell(label: string): string {
+  const tag = `${label}:`;
+  if (visibleWidth(tag) <= LABEL_WIDTH) return pad(tag, LABEL_WIDTH);
+  return `${truncateToWidth(tag, LABEL_WIDTH - 1, "…", false)} `;
+}
+
+/** An unknown exit code reaches the record as `null` (a killed fire, a timeout), so
+ *  the page has to read that as "nothing to show" rather than printing `null`. */
+function lastExitText(code: number | null | undefined): string {
+  return code === undefined || code === null ? "—" : String(code);
 }
 
 /** A long value — a command, a path, a prompt — wrapped under its label on a

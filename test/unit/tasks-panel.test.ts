@@ -2806,6 +2806,45 @@ describe("command loops in the list and in the detail", () => {
     panel.dispose();
   });
 
+  it("reads the record's own last exit, and never runs a label into its value", async () => {
+    const failed = new FakeSource();
+    failed.rows = [
+      cmdLoopView(
+        "lc00001",
+        { name: "watch loop", lastExitCode: 22, wakeOnFailure: false },
+        30_000,
+        5_000,
+      ),
+    ];
+    const first = await openOn("loops", failed);
+    await first.panel.settle();
+    first.panel.handleInput(ENTER);
+    await first.panel.settle();
+
+    const screen = plain(first.drawn());
+    expect(screen).toMatch(/Last exit:\s+22/u);
+    // `pad` clips silently, so `Wake on failure:` used to print as `Wake on failon`.
+    expect(screen).toMatch(/Wake:\s{2,}off/u);
+    expect(screen).not.toContain("failon");
+    first.panel.dispose();
+
+    // A killed fire leaves the record with `null`, which is "nothing to show", not
+    // the word `null` on the page.
+    const killed = new FakeSource();
+    killed.rows = [
+      cmdLoopView("lc00002", { name: "watch loop", lastExitCode: null }, 30_000, 5_000),
+    ];
+    const second = await openOn("loops", killed);
+    await second.panel.settle();
+    second.panel.handleInput(ENTER);
+    await second.panel.settle();
+
+    const nullScreen = plain(second.drawn());
+    expect(nullScreen).toMatch(/Last exit:\s+—/u);
+    expect(nullScreen).not.toContain("null");
+    second.panel.dispose();
+  });
+
   it("opens a fire's output, returns to the loop with the left arrow, and stops only that fire", async () => {
     const source = new FakeSource();
     const child: PanelTaskView = view("bg-00045", {

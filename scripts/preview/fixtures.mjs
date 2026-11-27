@@ -185,12 +185,13 @@ const LOOPS = [
     nextFireAt: CLOCK + 240_000,
     lastFireAt: CLOCK - 60_000,
     lastOutputBytes: 240,
+    lastExitCode: 22,
     fireHistory: [
-      fireOf(12, { at: CLOCK - 900_000, startedAt: CLOCK - 900_000, outputBytes: 212 }),
-      fireOf(13, { at: CLOCK - 600_000, startedAt: CLOCK - 600_000, outputBytes: 240 }),
+      fireOf(12, { at: CLOCK - 660_000, startedAt: CLOCK - 660_000, outputBytes: 212 }),
+      fireOf(13, { at: CLOCK - 360_000, startedAt: CLOCK - 360_000, outputBytes: 240 }),
       fireOf(14, {
-        at: CLOCK - 300_000,
-        startedAt: CLOCK - 300_000,
+        at: CLOCK - 60_000,
+        startedAt: CLOCK - 60_000,
         outcome: "failed",
         exitCode: 22,
         durationMs: 1_400,
