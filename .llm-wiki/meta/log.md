@@ -125,3 +125,12 @@
 ## [2026-11-27T07:05:37.396Z] observe
 - slug: "obs-2026-11-27-", title: "改道卡必须是会话条目而非自定义消息", relevance: "high"
 
+## [2026-11-27T07:48:20.755Z] retro
+- slug: "preview-rerun-shifts-untouched-images", title: "A full preview re-render rewrites images nothing changed", category: "tooling"
+
+## [2026-11-27T07:48:20.762Z] retro
+- slug: "session-record-not-source-is-the-evidence", title: "What the model saw is in the session record, not the source", category: "debugging"
+
+## [2026-11-27T07:48:28.832Z] retro
+- slug: "adr-dated-status-and-index-guard", title: "An undated ADR cannot be checked for staleness", category: "docs"
+

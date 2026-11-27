@@ -1,4 +1,5 @@
 {
+  "sources/adr-dated-status-and-index-guard": [],
   "sources/await-state-not-bytes-in-process-tests": [
     "syntheses/verify-red-tests-handoff"
   ],
@@ -47,6 +48,8 @@
   "sources/pi-pretty-task-side-index-to-field": [
     "sources/pi-pretty-task-one-projection-and-formula"
   ],
+  "sources/preview-rerun-shifts-untouched-images": [],
+  "sources/session-record-not-source-is-the-evidence": [],
   "sources/slow-suite-timings-not-workers": [
     "sources/await-state-not-bytes-in-process-tests"
   ],
@@ -68,9 +71,12 @@
     "sources/pi-pretty-task-side-index-to-field"
   ],
   "syntheses/pi-pretty-task-文档索引": [
+    "sources/adr-dated-status-and-index-guard",
     "sources/await-state-not-bytes-in-process-tests",
     "sources/delete-remote-branch-via-gh-api",
     "sources/pi-git-install-omits-dev-deps-so-ship-ts-entry",
+    "sources/preview-rerun-shifts-untouched-images",
+    "sources/session-record-not-source-is-the-evidence",
     "sources/slow-suite-timings-not-workers",
     "sources/windows-taskkill-t-needs-force-for-console-node",
     "syntheses/pi-pretty-task-交接v02-收尾状态",

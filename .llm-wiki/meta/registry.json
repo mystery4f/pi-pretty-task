@@ -1,7 +1,16 @@
 {
   "version": "1.0",
-  "last_updated": "2026-11-27T07:05:37.432Z",
+  "last_updated": "2026-11-27T07:48:28.855Z",
   "pages": {
+    "sources/adr-dated-status-and-index-guard": {
+      "type": "source",
+      "title": "An undated ADR cannot be checked for staleness",
+      "category": "docs",
+      "status": "insight",
+      "slug": "adr-dated-status-and-index-guard",
+      "created": "2026-11-27",
+      "updated": "2026-11-27"
+    },
     "sources/await-state-not-bytes-in-process-tests": {
       "type": "source",
       "title": "进程类测试要等状态，不要等字节",
@@ -421,6 +430,24 @@
       "created": "2026-11-16",
       "updated": "2026-11-16"
     },
+    "sources/preview-rerun-shifts-untouched-images": {
+      "type": "source",
+      "title": "A full preview re-render rewrites images nothing changed",
+      "category": "tooling",
+      "status": "insight",
+      "slug": "preview-rerun-shifts-untouched-images",
+      "created": "2026-11-27",
+      "updated": "2026-11-27"
+    },
+    "sources/session-record-not-source-is-the-evidence": {
+      "type": "source",
+      "title": "What the model saw is in the session record, not the source",
+      "category": "debugging",
+      "status": "insight",
+      "slug": "session-record-not-source-is-the-evidence",
+      "created": "2026-11-27",
+      "updated": "2026-11-27"
+    },
     "sources/slow-suite-timings-not-workers": {
       "type": "source",
       "title": "慢测试先治写死的时长，再谈并行度",
@@ -480,7 +507,7 @@
       "type": "synthesis",
       "title": "pi-pretty-task 文档索引",
       "created": "2026-11-13",
-      "updated": "2026-11-21"
+      "updated": "2026-11-27"
     },
     "syntheses/release-1-0-0-publish-support": {
       "type": "synthesis",

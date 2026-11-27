@@ -4,6 +4,7 @@
 
 ## Sources
 
+- [[sources/adr-dated-status-and-index-guard]] — An undated ADR cannot be checked for staleness *(created: 2026-11-27)*
 - [[sources/await-state-not-bytes-in-process-tests]] — 进程类测试要等状态，不要等字节 *(created: 2026-11-15)*
 - [[sources/delete-remote-branch-via-gh-api]] — 删远端分支走 gh API，git push --delete 会被拦 *(created: 2026-11-15)*
 - [[sources/git-cat-file-full-sha-flake-multipack]] — git cat-file -e rejects a valid full SHA in a multi-pack repo *(created: 2026-11-25)*
@@ -35,6 +36,8 @@
 - [[sources/pi-pretty-task-preview-from-the-built-panel]] — README 截图从 dist 里的真面板渲染，三处状态陷阱 *(created: 2026-11-21)*
 - [[sources/pi-pretty-task-session-hub-required]] — 会话 hub 必须由入口注入，默认值会分裂写入权 *(created: 2026-11-16)*
 - [[sources/pi-pretty-task-side-index-to-field]] — 并行索引应当塌回记录上的一个字段 *(created: 2026-11-16)*
+- [[sources/preview-rerun-shifts-untouched-images]] — A full preview re-render rewrites images nothing changed *(created: 2026-11-27)*
+- [[sources/session-record-not-source-is-the-evidence]] — What the model saw is in the session record, not the source *(created: 2026-11-27)*
 - [[sources/slow-suite-timings-not-workers]] — 慢测试先治写死的时长，再谈并行度 *(created: 2026-11-15)*
 - [[sources/subagent-structured-verdict-path]] — Subagent structured verdicts live in structured-output/output.json, not the artifact md *(created: 2026-11-25)*
 - [[sources/windows-ci-slow-fsync-record-write]] — Windows CI: fsync per state write outran the record wait *(created: 2026-11-16)*
@@ -50,4 +53,4 @@
 - [[syntheses/verify-red-tests-handoff]] — verify 红测修复交接（5 个 integration 用例） *(created: 2026-11-16)*
 
 ---
-*Last updated: 2026-11-27T07:05:37.432Z* | *Total pages: 41*
+*Last updated: 2026-11-27T07:48:28.855Z* | *Total pages: 44*

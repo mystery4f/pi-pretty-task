@@ -2,6 +2,9 @@
 
 ## 2026-11-27
 
+- **retro**: {"category":"docs","slug":"adr-dated-status-and-index-guard","title":"An undated ADR cannot be checked for staleness"}
+- **retro**: {"category":"debugging","slug":"session-record-not-source-is-the-evidence","title":"What the model saw is in the session record, not the source"}
+- **retro**: {"category":"tooling","slug":"preview-rerun-shifts-untouched-images","title":"A full preview re-render rewrites images nothing changed"}
 - **observe**: {"relevance":"high","slug":"obs-2026-11-27-","title":"改道卡必须是会话条目而非自定义消息"}
 - **observe**: {"relevance":"high","slug":"obs-2026-11-27-pi-pretty-task","title":"pi-pretty-task：改道通知带触发器，静默分支以负断言固化"}
 

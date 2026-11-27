@@ -2,6 +2,7 @@
 
 ## Concepts
 
+- [An undated ADR cannot be checked for staleness](adr-dated-status-and-index-guard.md)
 - [进程类测试要等状态，不要等字节](await-state-not-bytes-in-process-tests.md)
 - [删远端分支走 gh API，git push --delete 会被拦](delete-remote-branch-via-gh-api.md)
 - [git cat-file -e rejects a valid full SHA in a multi-pack repo](git-cat-file-full-sha-flake-multipack.md)
@@ -33,6 +34,8 @@
 - [README 截图从 dist 里的真面板渲染，三处状态陷阱](pi-pretty-task-preview-from-the-built-panel.md)
 - [会话 hub 必须由入口注入，默认值会分裂写入权](pi-pretty-task-session-hub-required.md)
 - [并行索引应当塌回记录上的一个字段](pi-pretty-task-side-index-to-field.md)
+- [A full preview re-render rewrites images nothing changed](preview-rerun-shifts-untouched-images.md)
+- [What the model saw is in the session record, not the source](session-record-not-source-is-the-evidence.md)
 - [慢测试先治写死的时长，再谈并行度](slow-suite-timings-not-workers.md)
 - [Subagent structured verdicts live in structured-output/output.json, not the artifact md](subagent-structured-verdict-path.md)
 - [Windows CI: fsync per state write outran the record wait](windows-ci-slow-fsync-record-write.md)
