@@ -10,11 +10,12 @@
  * @author mystery4f <40482524+mystery4f@users.noreply.github.com>
  */
 
-import type { MessageRenderer } from "@earendil-works/pi-coding-agent";
-import { Text } from "@earendil-works/pi-tui";
+import type { EntryRenderer, MessageRenderer } from "@earendil-works/pi-coding-agent";
+import { Box, Text } from "@earendil-works/pi-tui";
 import { formatDuration } from "../tasks/base/format.js";
 import { readOutputFrom, readOutputTail } from "../tasks/base/output.js";
 import type { TaskKind, TaskStatus } from "../tasks/base/task.js";
+import { type DetachTrigger, detachReason } from "../tasks/process/foreground.js";
 import type { ProcessTaskView } from "../tasks/process/process-tasks.js";
 import { STATUS_COLOUR } from "./status-colour.js";
 
@@ -163,6 +164,52 @@ export const renderTaskFinished: MessageRenderer<FinishedTaskDetails> = (
     lines.push(theme.fg("dim", `… older output left out — pretty_task_bg_logs id=${details.id}`));
   }
   return new Text(lines.join("\n"), 0, 0);
+};
+
+/**
+ * The session entry a detach is recorded as. An entry, not a message: the model
+ * already read the same facts in the tool result that ended the call, so this one
+ * is the user's card — persisted with the session and replayed on reload, and
+ * absent from the model's context by construction (ADR-0020).
+ */
+export const TASK_DETACHED_ENTRY_TYPE = "task-detached";
+
+/** What a detach card carries: which record, which trigger, and how long it held. */
+export interface DetachedTaskDetails {
+  readonly id: string;
+  readonly trigger: DetachTrigger;
+  /** Whole seconds the command held the front before it was handed over. */
+  readonly afterSeconds: number;
+}
+
+/**
+ * Draws one detach card. Every fact comes from the entry's data and the colour
+ * from the shared table, so the card and the tool result cannot disagree, and the
+ * trigger's own words come from the one function that writes them.
+ */
+export const renderTaskDetached: EntryRenderer<DetachedTaskDetails> = (entry, _options, theme) => {
+  const details = entry.data;
+  if (details === undefined) return undefined;
+  const title = [
+    theme.fg(STATUS_COLOUR.running, "↪ moved to the background"),
+    theme.bold(details.id),
+    theme.fg("muted", `· held ${formatDuration(details.afterSeconds * 1000)}`),
+  ].join(" ");
+  const body = [
+    // The same clause the tool result carried, so the two surfaces name one trigger.
+    theme.fg("muted", detachReason(details)),
+    // Two lines, not one: at 80 columns the pair on one line wraps mid-command, and a
+    // card whose hint breaks awkwardly is harder to copy than two short lines.
+    theme.fg("dim", `follow: pretty_task_bg_logs id=${details.id}`),
+    theme.fg("dim", `stop: pretty_task_bg_kill id=${details.id}`),
+  ].join("\n");
+  // The host draws an entry as a Spacer plus whatever the renderer returns
+  // (CustomEntryComponent adds no frame of its own), so the panel is ours to build.
+  // `toolPendingBg` is the host's panel for work still in flight, which is what the
+  // card reports; `muted` and `dim` are checked readable against every tool panel.
+  const card = new Box(1, 1, (text) => theme.bg("toolPendingBg", text));
+  card.addChild(new Text(`${title}\n\n${body}`, 0, 0));
+  return card;
 };
 
 /** Custom message type a signalled fire's notice is registered under. */

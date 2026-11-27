@@ -19,6 +19,7 @@ import {
   MAX_RUNNING_TASKS_ENV,
 } from "../../src/tasks/base/settings.js";
 import type { Task } from "../../src/tasks/base/task.js";
+import { TASK_DETACHED_ENTRY_TYPE } from "../../src/ui/notification.js";
 import { createHarness, type Harness, resultText } from "../support/extension-harness.js";
 import { makeTempDir, waitFor, writeScript } from "../support/processes.js";
 
@@ -98,11 +99,22 @@ describe("foreground takeover", () => {
     expect(id).toBeDefined();
     expect(harness.controller.foreground.live()).toEqual([]);
 
-    // The user is told once, at the moment of the move, and the toast says why.
-    const toasts = harness.notifications.filter((notice) => notice.message.includes("Moved to"));
-    expect(toasts).toHaveLength(1);
-    expect(toasts[0]?.message).toContain(`Moved to ${String(id)}`);
-
+    // The user gets one card at the moment of the move: it names the record and the
+    // key press, the session persists it, and it stays out of the model's context —
+    // the tool result above already carried the same facts.
+    expect(harness.entries).toHaveLength(1);
+    expect(harness.entries[0]?.customType).toBe(TASK_DETACHED_ENTRY_TYPE);
+    const card = harness.entries[0]?.data as {
+      readonly id?: string;
+      readonly trigger?: string;
+      readonly afterSeconds?: number;
+    };
+    expect(card.id).toBe(id);
+    expect(card.trigger).toBe("shortcut");
+    expect(card.afterSeconds).toBeGreaterThanOrEqual(0);
+    // One surface, not two: no toast repeats it and no message enters the session.
+    expect(harness.notifications).toEqual([]);
+    expect(harness.messages).toEqual([]);
     // It is a task now, reachable the way any task is.
     await waitFor("the detached task to be recorded as running", async () => {
       const task = (await records(dir)).find((record) => record.id === id);
@@ -140,7 +152,7 @@ describe("foreground takeover", () => {
     await harness.runShortcut("ctrl+shift+b");
     const id = /↪ moved to (\S+)/.exec(resultText(await pending))?.[1];
     expect(id).toBeDefined();
-    expect(harness.notifications.some((notice) => notice.message.includes("Moved to"))).toBe(true);
+    expect(harness.entries.map((entry) => entry.customType)).toContain(TASK_DETACHED_ENTRY_TYPE);
 
     // The wait ended; the command did not. Its ending is a task ending like any
     // other, and a session that never hears about it has a model that believes a
@@ -235,11 +247,20 @@ describe("foreground takeover", () => {
 
     const id = /↪ moved to (\S+)/.exec(text)?.[1];
     expect(id).toBeDefined();
-    // The user learns about it without opening the panel, and hears it once.
-    const toasts = harness.notifications.filter((notice) => notice.message.includes("Moved to"));
-    expect(toasts).toHaveLength(1);
-    expect(toasts[0]?.message).toContain("held for 1s");
-    expect(toasts[0]?.message).not.toContain("ctrl+shift+b");
+    // The user learns about it without opening the panel: one card, and it says the
+    // deadline did this — never the key press, which nobody made.
+    expect(harness.entries).toHaveLength(1);
+    const card = harness.entries[0]?.data as {
+      readonly id?: string;
+      readonly trigger?: string;
+      readonly afterSeconds?: number;
+    };
+    expect(card.id).toBe(id);
+    expect(card.trigger).toBe("timeout");
+    expect(card.afterSeconds).toBeGreaterThanOrEqual(1);
+    const drawn = harness.renderEntry(TASK_DETACHED_ENTRY_TYPE, harness.entries[0]?.data);
+    expect(drawn).toContain("held the front for");
+    expect(drawn).not.toContain("ctrl+shift+b");
     // The command is still running, so no ending has been announced yet.
     expect(harness.messages).toEqual([]);
 

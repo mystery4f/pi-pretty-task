@@ -33,12 +33,15 @@ import { loadTemplates } from "./tasks/process/templates.js";
 import { processTaskTools } from "./tasks/process/tools.js";
 import { LOOP_WAKE_CUSTOM_TYPE, renderLoopWake, sendLoopWake } from "./ui/loop-wake.js";
 import {
+  type DetachedTaskDetails,
   LOOP_SIGNAL_CUSTOM_TYPE,
   type NoticeSender,
   notifyLoopSignal,
   notifyTaskFinished,
   renderLoopSignal,
+  renderTaskDetached,
   renderTaskFinished,
+  TASK_DETACHED_ENTRY_TYPE,
   TASK_FINISHED_CUSTOM_TYPE,
 } from "./ui/notification.js";
 import { publishStatus, registerTasksCommand } from "./ui/tasks-command.js";
@@ -351,13 +354,17 @@ export function createExtension(
     tasks: processTasks,
     detachAfterMs: settings.foregroundTimeoutMs,
     now,
-    // One announcement per detach, whichever trigger caused it: the deadline has no
-    // key press to hang a toast on, so the runner reports the ending here and the
-    // status line is repainted at once instead of waiting up to a pump tick — the
-    // handed-over record is what the user now has to follow.
+    // One card per detach, whichever trigger caused it. A card rather than a notice:
+    // the model already has these facts in the tool result, so the entry keeps them
+    // out of its context while still being there after a reload. The status line is
+    // repainted at once, because the handed-over record is what the user now follows.
     onDetached: (detached) => {
       if (!live) return;
-      statusUi?.notify(describeDetach(detached), "info");
+      pi.appendEntry<DetachedTaskDetails>(TASK_DETACHED_ENTRY_TYPE, {
+        id: detached.taskId,
+        trigger: detached.trigger,
+        afterSeconds: detached.afterSeconds,
+      });
       publishStatusLine();
     },
   });
@@ -427,6 +434,7 @@ export function createExtension(
   pi.registerMessageRenderer(TASK_FINISHED_CUSTOM_TYPE, renderTaskFinished);
   pi.registerMessageRenderer(LOOP_SIGNAL_CUSTOM_TYPE, renderLoopSignal);
   pi.registerMessageRenderer(LOOP_WAKE_CUSTOM_TYPE, renderLoopWake);
+  pi.registerEntryRenderer(TASK_DETACHED_ENTRY_TYPE, renderTaskDetached);
   registerTasksCommand(pi, processTasks, loops, chainTasks, () => foreground.live().length);
 
   // The takeover is opt-in and covers only what this extension spawns: a tool it

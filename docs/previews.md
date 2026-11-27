@@ -15,16 +15,18 @@ npm run preview      # = npm run build && node scripts/preview/preview.mjs
 | `docs/preview.png` | 进程列表，九条记录、四种状态，dev server 那一行带 `+4.1 KiB ↑` 的生长标记 |
 | `docs/preview-tail.png` | 打开一个进程：`npm run dev` 在跑，下面是每秒刷新的输出尾巴 |
 | `docs/preview-iteration.png` | 打开一次 loop fire：那一轮唤醒调用的十二个 tool call |
+| `docs/preview-detach.png` | 改道卡本身：同一张卡的两个触发器（`ctrl+shift+b` 与计时器），带面板底色。卡片是会话条目，面板截图里看不到，只有这一张图能看 |
 | `docs/preview.gif` | 十一帧动画：先按一次 `ctrl+shift+b` 把前台命令改道（提示行消失、命令进列表），再三个 tab 走一遍、搜一次 dev server |
 
 需要本机有 Chrome 或 Edge，脚本按常见路径找（Windows 上是 `C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe`），也可以用 `PREVIEW_BROWSER=/path/to/browser` 指定。没有 `ffmpeg` 也行：GIF 由纯 JS 的 `gifenc` 编码。
 
 ## 管线
 
-在 `scripts/preview/` 里，五步：
+在 `scripts/preview/` 里，六步：
 
 - `render.mjs` — 用脚本按键驱动 `TasksPanel`，每按一次键 `await panel.settle()` 后 `render(106)` 抓一帧。面板从 `dist/` 导入，所以必须先 build。
 - `fixtures.mjs` — 固定的场景：九个进程、三个 loop、一个 chain、若干输出尾巴。时间基准是常量 `CLOCK`（2026-11-21 09:12 UTC），面板按本机时区渲染，所以图上永远是同一批时间戳。
+- `card.mjs` — 改道卡不是面板页，按键驱动碰不到它：这里把 `{id, trigger, afterSeconds}` 直接交给 `dist/ui/notification.js` 的 `renderTaskDetached`，两个触发器各画一张，同样的宽度断言。
 - `page.mjs` — ANSI 转 HTML span，套一个圆角深色终端窗口（标题栏三个圆点 + macOS 风格渐变背景）。字体优先 `Cascadia Mono`，关掉连字（否则 `--` 会被渲染成一根长横线）。
 - `shoot.mjs` — `playwright-core` 起本机浏览器截图；`pngjs` 解码 + `gifenc` 编码，一帧一秒、末帧停 2.6 秒。
 - `dump.mjs` — 不起浏览器，把同样的帧按纯文本打出来（`npm run preview:dump`，`--only detach` 只看含该词的帧）。改一帧之后最快的检查方式。GIF 的每帧 PNG 默认删掉，`PREVIEW_FRAMES=1 npm run preview` 保留到 `.tmp/preview/`。

@@ -19,6 +19,8 @@ export const PALETTE = {
   error: "#f2777a",
   warning: "#e3b341",
   selectedBg: "#202636",
+  // The panel a detach card paints itself on: the host's `toolPendingBg` slot.
+  toolPendingBg: "#1a202d",
 };
 
 const rgb = (hex) => {

@@ -107,7 +107,7 @@ export function detachedNotice(detached: DetachedResult): string {
  * and the user's notice. The shortcut and the deadline are one seam, so the clause
  * is the only place either reader can learn which of them fired.
  */
-export function detachReason(detached: DetachedResult): string {
+export function detachReason(detached: Pick<DetachedResult, "trigger" | "afterSeconds">): string {
   // pi-lens-ignore: switch-without-default -- exhaustive over the closed trigger union; a default would hide a new trigger from the compiler
   switch (detached.trigger) {
     case "shortcut":

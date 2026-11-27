@@ -11,6 +11,7 @@
 import { join } from "node:path";
 import type {
   AgentToolResult,
+  EntryRenderer,
   EventBus,
   ExtensionAPI,
   ExtensionCommandContext,
@@ -57,6 +58,12 @@ export interface SentMessage {
     readonly deliverAs?: "steer" | "followUp" | "nextTurn";
     readonly triggerTurn?: boolean;
   };
+}
+
+/** One `pi.appendEntry` call: the custom type and the data the session persisted. */
+export interface AppendedEntry {
+  readonly customType: string;
+  readonly data: unknown;
 }
 
 /** Knobs the tests need so no real timer or wall clock drives a loop. */
@@ -131,6 +138,12 @@ export interface Harness {
   readonly messages: readonly SentMessage[];
   /** Custom types the extension registered a message renderer for. */
   readonly rendererTypes: readonly string[];
+  /** Custom types the extension registered a session-entry renderer for. */
+  readonly entryRendererTypes: readonly string[];
+  /** Every `pi.appendEntry` call, oldest first: what the session persisted for a card. */
+  readonly entries: readonly AppendedEntry[];
+  /** Draw one session entry through the renderer registered for its type. */
+  renderEntry(customType: string, data: unknown, width?: number): string;
   /**
    * Call a registered tool as the model would, from the given turn. `signal` is
    * the abort the harness hands pi on an Esc; only an abort-aware tool sees it.
@@ -143,6 +156,7 @@ export interface Harness {
   ): Promise<AgentToolResult<unknown>>;
   /** Draw a custom message through the renderer registered for its type. */
   render(customType: string, details: unknown, options?: Partial<MessageRenderOptions>): string;
+  /** Draw one session entry through its registered `EntryRenderer`. */
   /** Names of every command the extension registered. */
   readonly commandNames: readonly string[];
   /** Keys of every shortcut the extension registered, in registration order. */
@@ -296,6 +310,8 @@ export function createHarness(defaultTurn: Turn, options: HarnessOptions = {}): 
   const problems: string[] = [];
   const tools: ToolDefinition[] = [];
   const renderers = new Map<string, MessageRenderer>();
+  const entryRenderers = new Map<string, EntryRenderer>();
+  const entries: AppendedEntry[] = [];
   const messages: SentMessage[] = [];
   const handlers = new Map<string, Array<(event: unknown, ctx: unknown) => unknown>>();
   const commands = new Map<string, CommandDefinition>();
@@ -396,6 +412,13 @@ export function createHarness(defaultTurn: Turn, options: HarnessOptions = {}): 
     registerMessageRenderer(customType: string, renderer: MessageRenderer): void {
       renderers.set(customType, renderer);
     },
+    // A session entry, not a message: what the user's card is persisted as.
+    registerEntryRenderer(customType: string, renderer: EntryRenderer): void {
+      entryRenderers.set(customType, renderer);
+    },
+    appendEntry(customType: string, data?: unknown): void {
+      entries.push({ customType, data });
+    },
     // pi's settings, as far as the extension reads them: the retry budget only,
     // because that is the one setting a test varies (ticket #47).
     getSettings(): { readonly retry?: { readonly enabled: boolean; readonly maxRetries: number } } {
@@ -483,6 +506,29 @@ export function createHarness(defaultTurn: Turn, options: HarnessOptions = {}): 
     problems,
     messages,
     rendererTypes: [...renderers.keys()],
+    entries,
+    entryRendererTypes: [...entryRenderers.keys()],
+    renderEntry(customType, data, width = 80) {
+      const renderer = entryRenderers.get(customType);
+      if (renderer === undefined) {
+        throw new Error(
+          `no entry renderer for ${customType}; registered: ${[...entryRenderers.keys()]}`,
+        );
+      }
+      const component = renderer(
+        {
+          type: "custom",
+          customType,
+          data,
+          id: "entry-1",
+          timestamp: new Date().toISOString(),
+          parentId: null,
+        },
+        { expanded: false, keyText: () => "", keyHint: () => "" },
+        fakeTheme(),
+      );
+      return component === undefined ? "" : component.render(80).join("\n");
+    },
     async call(toolName, params, turn = defaultTurn, signal = undefined) {
       const tool = tools.find((candidate) => candidate.name === toolName);
       if (tool === undefined) {
