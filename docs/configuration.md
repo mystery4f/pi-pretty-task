@@ -244,6 +244,8 @@ Unknown template "tset". Known templates: "lint", "test". The task was not start
 
 快捷键 `ctrl+shift+b` 只对唯一一条在跑的前台命令生效：并行工具调用时按键只给一条提示，不改道。改道的命令不重跑、不换 PID，输出继续写到 `.pi/tasks/` 下的任务文件；它计入同时运行的任务上限，撞上限时改道失败、命令留在前台继续跑。`PI_PRETTY_TASK_FOREGROUND_TIMEOUT` 与内置 `timeout` 参数是两件事：前者「放它走」，后者「到点就杀」，Esc 仍是杀。
 
+改道发生时，两个读者各得一句话，两句话都写明**是谁**结束了这次等待——按键、到点，还是会话在退出。模型唯一的渠道是那次工具调用的返回，形状是 `↪ moved to <id> — <原因>。Still running in the background. Follow: … · Stop: …`，拿到它说明命令还在跑、不是失败；用户的那句是一次性提示（`Moved to <id>.`，到点时前面多一段 `The command in front held for Ns;`），随后状态行立刻重画。这两句就是全部：成功改道不会再往会话里补一条消息。反过来，没有前台命令、并行不止一条、撞上任务上限这三种情况只提示用户，模型那边看到的是命令照旧在前台跑完——没有人请求改道，也就没有什么要对模型说。
+
 ## 为什么配置只从一个地方读
 
 所有由环境变量决定的东西——输出上限、同时运行的任务上限、shell 策略、通知开关、旧会话保留天数、agent 设置目录——都在 `src/tasks/base/settings.ts` 里读一次，合成一个 `Settings` 值交给需要它的模块；`src/tasks/process/limits.ts` 只剩与时间有关的数值校验，`src/tasks/process/shell.ts` 从传入的环境里解析，扩展只经 `Settings` 调用它。一个键一种形状——见 `docs/scope-v1.md`。这样测试可以把一份显式环境（或一个普通对象）交给扩展入口，宿主也可以用同样的方式传入，而“读哪里、什么时候校验”只有一个答案：某个模块自己再读一次 `process.env` 是缺陷，不是优化。

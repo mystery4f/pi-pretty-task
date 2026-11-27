@@ -13,7 +13,11 @@
 import { readFile } from "node:fs/promises";
 import { afterAll, describe, expect, it } from "vitest";
 import { sessionTaskDirectory, taskRecordPath } from "../../src/tasks/base/runtime-state.js";
-import { ADOPT_FOREGROUND_ENV, MAX_RUNNING_TASKS_ENV } from "../../src/tasks/base/settings.js";
+import {
+  ADOPT_FOREGROUND_ENV,
+  FOREGROUND_TIMEOUT_ENV,
+  MAX_RUNNING_TASKS_ENV,
+} from "../../src/tasks/base/settings.js";
 import type { Task } from "../../src/tasks/base/task.js";
 import { createHarness, type Harness, resultText } from "../support/extension-harness.js";
 import { makeTempDir, waitFor, writeScript } from "../support/processes.js";
@@ -86,11 +90,18 @@ describe("foreground takeover", () => {
     const text = resultText(result);
     expect(text).toContain("building the site");
     expect(text).toContain("↪ moved to");
+    expect(text).toContain("ctrl+shift+b");
+    expect(text).toContain("Still running in the background");
     expect((result.structuredContent as { exit_code: number }).exit_code).toBe(0);
 
     const id = /↪ moved to (\S+)/.exec(text)?.[1];
     expect(id).toBeDefined();
     expect(harness.controller.foreground.live()).toEqual([]);
+
+    // The user is told once, at the moment of the move, and the toast says why.
+    const toasts = harness.notifications.filter((notice) => notice.message.includes("Moved to"));
+    expect(toasts).toHaveLength(1);
+    expect(toasts[0]?.message).toContain(`Moved to ${String(id)}`);
 
     // It is a task now, reachable the way any task is.
     await waitFor("the detached task to be recorded as running", async () => {
@@ -108,6 +119,8 @@ describe("foreground takeover", () => {
     const result = await harness.call("bash", { command });
     expect((result.structuredContent as { exit_code: number }).exit_code).toBe(7);
     expect(resultText(result)).not.toContain("↪ moved to");
+    // Nothing was moved and nothing ended early, so the user hears nothing.
+    expect(harness.notifications).toEqual([]);
   });
 
   it("announces the ending of a command it let go", async () => {
@@ -127,6 +140,7 @@ describe("foreground takeover", () => {
     await harness.runShortcut("ctrl+shift+b");
     const id = /↪ moved to (\S+)/.exec(resultText(await pending))?.[1];
     expect(id).toBeDefined();
+    expect(harness.notifications.some((notice) => notice.message.includes("Moved to"))).toBe(true);
 
     // The wait ended; the command did not. Its ending is a task ending like any
     // other, and a session that never hears about it has a model that believes a
@@ -167,6 +181,8 @@ describe("foreground takeover", () => {
     );
     await harness.runShortcut("ctrl+shift+b");
     expect(harness.controller.foreground.live().length).toBe(2);
+    // The user hears why nothing moved; the two calls above stay silent about it.
+    expect(harness.notifications.at(-1)?.message).toContain("2 commands are running");
     for (const result of [await first, await second]) {
       expect((result.structuredContent as { exit_code: number }).exit_code).toBe(0);
       expect(resultText(result)).not.toContain("↪ moved to");
@@ -192,11 +208,83 @@ describe("foreground takeover", () => {
     );
     await harness.runShortcut("ctrl+shift+b");
     expect(harness.controller.foreground.live().length).toBe(1);
+    expect(harness.notifications.at(-1)?.message).toContain("Cannot move it");
 
     const result = await pending;
     expect((result.structuredContent as { exit_code: number }).exit_code).toBe(0);
     expect(resultText(result)).not.toContain("↪ moved to");
     await harness.call("pretty_task_bg_kill", { id: fillerId });
+  });
+
+  it("moves the command on the deadline and says the clock did it", async () => {
+    const { harness, dir } = await setup({ [FOREGROUND_TIMEOUT_ENV]: "1" });
+    const command = await longCommand(dir);
+
+    const started = Date.now();
+    const result = await harness.call("bash", { command });
+    const text = resultText(result);
+
+    // No key was pressed: the deadline is what ended the wait, and the line has to
+    // say so — otherwise a model cannot tell this from a user's ctrl+shift+b.
+    expect(Date.now() - started).toBeGreaterThanOrEqual(900);
+    expect(text).toContain("building the site");
+    expect(text).toContain("↪ moved to");
+    expect(text).toContain("held the front for 1s");
+    expect(text).not.toContain("ctrl+shift+b");
+    expect((result.structuredContent as { exit_code: number }).exit_code).toBe(0);
+
+    const id = /↪ moved to (\S+)/.exec(text)?.[1];
+    expect(id).toBeDefined();
+    // The user learns about it without opening the panel, and hears it once.
+    const toasts = harness.notifications.filter((notice) => notice.message.includes("Moved to"));
+    expect(toasts).toHaveLength(1);
+    expect(toasts[0]?.message).toContain("held for 1s");
+    expect(toasts[0]?.message).not.toContain("ctrl+shift+b");
+    // The command is still running, so no ending has been announced yet.
+    expect(harness.messages).toEqual([]);
+
+    await waitFor("the deadline's task to be recorded as running", async () => {
+      const task = (await records(dir)).find((record) => record.id === id);
+      return task?.kind === "process" && task.status === "running" && task.origin === "foreground";
+    });
+    await harness.call("pretty_task_bg_kill", { id });
+  });
+
+  it("hands the command over in silence when the session shuts down", async () => {
+    const { harness, dir } = await setup();
+    const command = await writeScript(
+      dir.path,
+      "brief.mjs",
+      ["console.log('compiling');", "setTimeout(() => console.log('all done'), 1500);", ""].join(
+        "\n",
+      ),
+    );
+    const pending = harness.call("bash", { command });
+    await waitFor(
+      "the command to reach the foreground",
+      () => harness.controller.foreground.live().length === 1,
+    );
+
+    await harness.shutdownSession();
+    const text = resultText(await pending);
+    expect(text).toContain("↪ moved to");
+    expect(text).toContain("shutting down");
+
+    // The record outlives the instance, so the next session follows the id…
+    const id = /↪ moved to (\S+)/.exec(text)?.[1];
+    expect(id).toBeDefined();
+    await waitFor("the record to outlive the session", async () => {
+      const task = (await records(dir)).find((record) => record.id === id);
+      return task?.kind === "process" && task.status === "running";
+    });
+    // …and its ending stays unannounced: the session that would have heard it is
+    // gone, and a notice sent now would be dropped after being built. Silence here
+    // is deliberate — the reload path is what tells the next session (ADR-0020).
+    await waitFor("the command to end", async () => {
+      const task = (await records(dir)).find((record) => record.id === id);
+      return task?.status === "completed";
+    });
+    expect(harness.messages).toEqual([]);
   });
 
   it("leaves pi's shell tool alone when the takeover is off", () => {

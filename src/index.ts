@@ -351,6 +351,15 @@ export function createExtension(
     tasks: processTasks,
     detachAfterMs: settings.foregroundTimeoutMs,
     now,
+    // One announcement per detach, whichever trigger caused it: the deadline has no
+    // key press to hang a toast on, so the runner reports the ending here and the
+    // status line is repainted at once instead of waiting up to a pump tick — the
+    // handed-over record is what the user now has to follow.
+    onDetached: (detached) => {
+      if (!live) return;
+      statusUi?.notify(describeDetach(detached), "info");
+      publishStatusLine();
+    },
   });
 
   /**
@@ -439,7 +448,10 @@ export function createExtension(
       description: "Move the foreground command to the background",
       handler: async (ctx) => {
         const result = await foreground.detachOnlyOne();
-        ctx.ui.notify(describeDetach(result), result.kind === "detached" ? "info" : "warning");
+        // A successful detach announces itself from the runner above, so this press
+        // only reports what could not happen; two toasts for one press read as two
+        // events, and the runner's line is the one that also reaches a deadline.
+        if (result.kind !== "detached") ctx.ui.notify(describeDetach(result), "warning");
       },
     });
   }

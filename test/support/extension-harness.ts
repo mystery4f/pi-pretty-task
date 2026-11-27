@@ -162,6 +162,12 @@ export interface Harness {
   /** Keys passed to `setWidget`, for a quick "did it use the widget slot" check. */
   readonly widgetKeys: readonly string[];
   /**
+   * Every `ctx.ui.notify` the extension made, oldest first. A one-time notice is a
+   * channel in its own right: a detach that only repainted the status line would be
+   * invisible here, so the tests can tell the two apart.
+   */
+  readonly notifications: readonly NotificationUpdate[];
+  /**
    * Pump loops due at a fake instant, as the extension timer would. While the
    * agent is idle this also delivers the wakes the pump recorded.
    */
@@ -196,6 +202,12 @@ export interface WidgetUpdate {
 export interface StatusUpdate {
   readonly key: string;
   readonly text: string | undefined;
+}
+
+/** One call the extension made to `ctx.ui.notify`; the level it chose is kept. */
+export interface NotificationUpdate {
+  readonly message: string;
+  readonly level: string | undefined;
 }
 
 /** The parts of the `ctx.ui.custom` options a panel cares about. */
@@ -291,6 +303,7 @@ export function createHarness(defaultTurn: Turn, options: HarnessOptions = {}): 
   const statuses: StatusUpdate[] = [];
   const widgetKeys: string[] = [];
   const widgets: WidgetUpdate[] = [];
+  const notifications: NotificationUpdate[] = [];
   let opened: { component: Component; options: CustomOptions } | undefined;
 
   /**
@@ -353,8 +366,8 @@ export function createHarness(defaultTurn: Turn, options: HarnessOptions = {}): 
       widgetKeys.push(key);
       widgets.push({ key, lines: content === undefined ? [] : [...content] });
     },
-    notify(): void {
-      // Notices are not what these tests assert; recorded nowhere on purpose.
+    notify(message: string, level?: string): void {
+      notifications.push({ message, level });
     },
   };
 
@@ -525,6 +538,7 @@ export function createHarness(defaultTurn: Turn, options: HarnessOptions = {}): 
     statuses,
     widgets,
     widgetKeys,
+    notifications,
     pump(at) {
       return controller.pump(at);
     },

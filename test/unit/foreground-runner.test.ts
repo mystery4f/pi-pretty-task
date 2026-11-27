@@ -19,7 +19,7 @@ import {
 } from "../../src/tasks/base/runtime-state.js";
 import type { ProcessTask } from "../../src/tasks/base/task.js";
 import { TaskSessions } from "../../src/tasks/base/task-sessions.js";
-import { ForegroundRunner } from "../../src/tasks/process/foreground.js";
+import { type DetachedResult, ForegroundRunner } from "../../src/tasks/process/foreground.js";
 import { ProcessTasks } from "../../src/tasks/process/process-tasks.js";
 import { fakeSupervisor } from "../support/fake-supervisor.js";
 import { makeTempDir, waitFor } from "../support/processes.js";
@@ -31,13 +31,13 @@ afterEach(async () => {
 });
 
 /** A runner over one session in its own directory, with the processes faked. */
-async function makeRunner() {
+async function makeRunner(onDetached?: (detached: DetachedResult) => void) {
   const dir = await makeTempDir();
   cleanup.push(dir.dispose);
   const sessions = new TaskSessions();
   const supervisor = fakeSupervisor();
   const tasks = new ProcessTasks({ sessions, supervise: supervisor.supervise });
-  const runner = new ForegroundRunner({ tasks, detachAfterMs: 0 });
+  const runner = new ForegroundRunner({ tasks, detachAfterMs: 0, onDetached });
   const scope: TaskScope = { cwd: dir.path, sessionId: "session-runner" };
   runner.setScope(scope);
   return { dir, runner, supervisor, scope };
@@ -73,7 +73,7 @@ describe("the foreground runner", () => {
       command: "node build.js",
       workingDirectory: sub,
     });
-    const result = await runner.detach(run);
+    const result = await runner.detach(run, "shortcut");
 
     expect(result.kind).toBe("detached");
     // The record is read from the session's directory, and its own cwd is the one the
@@ -91,9 +91,23 @@ describe("the foreground runner", () => {
     const { dir, runner, scope } = await makeRunner();
     const run = await runner.start({ ...scope, command: "node build.js" });
 
-    expect(await runner.detach(run)).toMatchObject({ kind: "detached" });
-    expect(await runner.detach(run)).toEqual({ kind: "nothing" });
+    expect(await runner.detach(run, "shortcut")).toMatchObject({ kind: "detached" });
+    expect(await runner.detach(run, "shortcut")).toEqual({ kind: "nothing" });
     expect(await records(dir.path, scope.sessionId)).toHaveLength(1);
+  });
+
+  it("carries the trigger into the result and the caller's hook", async () => {
+    const seen: DetachedResult[] = [];
+    const { runner, scope } = await makeRunner((detached) => seen.push(detached));
+    const run = await runner.start({ ...scope, command: "node build.js" });
+
+    const result = await runner.detach(run, "timeout");
+
+    // One value carries both: the trigger is how a deadline is told apart from a key
+    // press, and afterSeconds is the number the notice quotes back to the reader.
+    expect(result).toMatchObject({ kind: "detached", trigger: "timeout" });
+    expect(seen).toEqual([result]);
+    expect(result.kind === "detached" && result.afterSeconds).toBeGreaterThanOrEqual(0);
   });
 
   it("lets every command in front go when the session shuts down", async () => {
@@ -113,7 +127,7 @@ describe("the foreground runner", () => {
     const run = await runner.start({ ...scope, command: "node build.js" });
     supervisor.processes[0]?.end(7);
 
-    expect(await runner.detach(run)).toEqual({ kind: "nothing" });
+    expect(await runner.detach(run, "shortcut")).toEqual({ kind: "nothing" });
     // A command that already ended keeps its exit code in front of the reader: no
     // record is written, so the file a later turn would read does not exist.
     await expect(

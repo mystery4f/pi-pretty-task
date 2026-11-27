@@ -27,7 +27,7 @@ export type ForegroundOutcome =
   /** The command exited on its own; the shell's code is the call's result. */
   | { readonly kind: "exited"; readonly exitCode: number }
   /** The command is a task now and keeps running; the call returns without it. */
-  | { readonly kind: "detached"; readonly taskId: string }
+  | DetachedResult
   /** The caller withdrew (Esc); the tree was stopped. */
   | { readonly kind: "aborted" }
   /** The call's own `timeout` ran out; the tree was stopped. */
@@ -36,8 +36,25 @@ export type ForegroundOutcome =
   | { readonly kind: "failed"; readonly message: string };
 
 /** What one detach attempt answered; the caller reports it and nothing else. */
+/** What ended the wait early; both notices name it so neither reader has to guess. */
+export type DetachTrigger = "shortcut" | "timeout" | "shutdown";
+
+/**
+ * One successful detach. The trigger travels with the result because the key press
+ * and the deadline share one seam: without it the transcript would read the same
+ * whether a person moved the command or the clock did.
+ */
+export interface DetachedResult {
+  readonly kind: "detached";
+  readonly taskId: string;
+  readonly trigger: DetachTrigger;
+  /** Whole seconds the command had held the front when the wait ended. */
+  readonly afterSeconds: number;
+}
+
+/** What one detach attempt answered; the caller reports it and nothing else. */
 export type DetachResult =
-  | { readonly kind: "detached"; readonly taskId: string }
+  | DetachedResult
   /** Nothing was in the foreground to move. */
   | { readonly kind: "nothing" }
   /** More than one foreground command is running, so the key cannot pick one. */
@@ -46,7 +63,6 @@ export type DetachResult =
   | { readonly kind: "refused"; readonly message: string }
   /** A detach for this run is already under way. */
   | { readonly kind: "pending" };
-
 /** What a caller supplies to put one command in the foreground. */
 export interface StartForegroundInput extends TaskScope {
   readonly command: string;
@@ -69,22 +85,51 @@ export interface ForegroundRunnerOptions {
   readonly platform?: NodeJS.Platform;
   /** Overrides the output poll interval, mostly for tests. */
   readonly pollMs?: number;
+  /**
+   * Called once per successful detach, before the caller hears the result. The
+   * runner owns no UI: a key press and a deadline meet again here, so both can be
+   * announced to the user instead of only the key press being visible.
+   */
+  readonly onDetached?: (detached: DetachedResult) => void;
 }
 
 /** The line a detached call ends with, in pi's own status-line shape. */
-export function detachedNotice(taskId: string): string {
+export function detachedNotice(detached: DetachedResult): string {
   return (
-    `↪ moved to ${taskId} — still running in the background. ` +
-    `Follow: pretty_task_bg_logs ${taskId} · Stop: pretty_task_bg_kill ${taskId}`
+    `↪ moved to ${detached.taskId} — ${detachReason(detached)}. ` +
+    `Still running in the background. ` +
+    `Follow: pretty_task_bg_logs ${detached.taskId} · Stop: pretty_task_bg_kill ${detached.taskId}`
   );
+}
+
+/**
+ * Why the wait ended before the command did, in one clause shared by the transcript
+ * and the user's notice. The shortcut and the deadline are one seam, so the clause
+ * is the only place either reader can learn which of them fired.
+ */
+export function detachReason(detached: DetachedResult): string {
+  // pi-lens-ignore: switch-without-default -- exhaustive over the closed trigger union; a default would hide a new trigger from the compiler
+  switch (detached.trigger) {
+    case "shortcut":
+      return "the user moved it off the front with ctrl+shift+b";
+    case "timeout":
+      return `it had held the front for ${String(detached.afterSeconds)}s, so the foreground timeout moved it`;
+    case "shutdown":
+      return "the session is shutting down";
+  }
 }
 
 /** What the shortcut's notification says, one line per outcome. */
 export function describeDetach(result: DetachResult): string {
   // pi-lens-ignore: switch-without-default -- exhaustive over the closed outcome union; a default would hide a new outcome from the compiler
   switch (result.kind) {
-    case "detached":
-      return `Moved to ${result.taskId}. Follow: pretty_task_bg_logs ${result.taskId}`;
+    case "detached": {
+      const held =
+        result.trigger === "timeout"
+          ? `The command in front held for ${String(result.afterSeconds)}s; `
+          : "";
+      return `${held}Moved to ${result.taskId}. Follow: pretty_task_bg_logs ${result.taskId}`;
+    }
     case "nothing":
       return "Nothing is running in the foreground.";
     case "ambiguous":
@@ -228,6 +273,7 @@ export class ForegroundRunner {
   private readonly platform: NodeJS.Platform;
   private readonly pollMs: number;
   private readonly runs = new Map<string, ForegroundRun>();
+  private readonly onDetached: ((detached: DetachedResult) => void) | undefined;
   private scope: TaskScope | undefined;
 
   constructor(options: ForegroundRunnerOptions) {
@@ -236,6 +282,7 @@ export class ForegroundRunner {
     this.now = options.now ?? Date.now;
     this.platform = options.platform ?? process.platform;
     this.pollMs = options.pollMs ?? FOREGROUND_POLL_MS;
+    this.onDetached = options.onDetached;
   }
 
   /**
@@ -346,7 +393,7 @@ export class ForegroundRunner {
     if (live.length > 1) return { kind: "ambiguous", running: live.length };
     const [only] = live;
     if (only === undefined) return { kind: "nothing" };
-    return this.detach(only);
+    return this.detach(only, "shortcut");
   }
 
   /**
@@ -358,7 +405,7 @@ export class ForegroundRunner {
    * that is still waiting for it. A second trigger while the first is asking
    * answers `pending` rather than creating a second record.
    */
-  async detach(run: ForegroundRun): Promise<DetachResult> {
+  async detach(run: ForegroundRun, trigger: DetachTrigger): Promise<DetachResult> {
     if (run.done) return { kind: "nothing" };
     const process = run.running;
     if (process === undefined) return { kind: "nothing" };
@@ -382,8 +429,18 @@ export class ForegroundRunner {
         // a 91-second command is not reported as a 74-second one (ADR-0020).
         startedAt: run.startedAt,
       });
-      run.finish({ kind: "detached", taskId: task.id });
-      return { kind: "detached", taskId: task.id };
+      const detached: DetachedResult = {
+        kind: "detached",
+        taskId: task.id,
+        trigger,
+        // Whole seconds, the unit the deadline and the panel both speak: "40.527s"
+        // would only invite a wrong comparison with the number PI_PRETTY_TASK_
+        // FOREGROUND_TIMEOUT was set to.
+        afterSeconds: Math.round((this.now() - run.startedAt) / 1000),
+      };
+      run.finish(detached);
+      this.onDetached?.(detached);
+      return detached;
     } catch (error) {
       run.abandonDetach();
       return { kind: "refused", message: errorMessage(error) };
@@ -396,7 +453,7 @@ export class ForegroundRunner {
    * neither, and its tree outlives the extension as an orphan (ADR-0020).
    */
   async releaseAll(): Promise<void> {
-    await Promise.all(this.live().map((run) => this.detach(run)));
+    await Promise.all(this.live().map((run) => this.detach(run, "shutdown")));
   }
 
   /** Arm the call's own timeout and the configured detach deadline, in that order. */
@@ -407,7 +464,7 @@ export class ForegroundRunner {
       void run.settled.then(() => clearTimeout(kill));
     }
     if (this.detachAfterMs > 0) {
-      const release = setTimeout(() => void this.detach(run), this.detachAfterMs);
+      const release = setTimeout(() => void this.detach(run, "timeout"), this.detachAfterMs);
       release.unref?.();
       void run.settled.then(() => clearTimeout(release));
     }
@@ -449,7 +506,10 @@ export class ForegroundRunner {
       // pi-lens-ignore: switch-without-default -- exhaustive over the closed outcome union; a default would hide a new outcome from the compiler
       switch (outcome.kind) {
         case "detached":
-          onData(Buffer.from(`\n${detachedNotice(outcome.taskId)}\n`, "utf8"));
+          // The one line a model gets about this ending, so it names the trigger:
+          // the shortcut and the deadline share this seam. Zero, because pi turns a
+          // null exit code into a failure message (ADR-0020 keeps the output intact).
+          onData(Buffer.from(`\n${detachedNotice(outcome)}\n`, "utf8"));
           return { exitCode: 0 };
         case "exited":
           return { exitCode: outcome.exitCode };

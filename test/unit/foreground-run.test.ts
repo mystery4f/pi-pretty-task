@@ -80,10 +80,17 @@ describe("foreground run", () => {
     const run = makeRun();
     const process = fakeProcess();
     run.bind(process.running);
-    expect(run.finish({ kind: "detached", taskId: "bg-7" })).toBe(true);
+    expect(
+      run.finish({ kind: "detached", taskId: "bg-7", trigger: "shortcut", afterSeconds: 40 }),
+    ).toBe(true);
     process.end(0);
     expect(run.finish({ kind: "aborted" })).toBe(false);
-    expect(await run.settled).toEqual({ kind: "detached", taskId: "bg-7" });
+    expect(await run.settled).toEqual({
+      kind: "detached",
+      taskId: "bg-7",
+      trigger: "shortcut",
+      afterSeconds: 40,
+    });
   });
 
   it("reports an abort as withdrawn rather than as the code a signal left behind", async () => {
@@ -142,7 +149,9 @@ describe("foreground run", () => {
     const run = makeRun();
     const process = fakeProcess();
     run.bind(process.running);
-    expect(run.finish({ kind: "detached", taskId: "bg-7" })).toBe(true);
+    expect(
+      run.finish({ kind: "detached", taskId: "bg-7", trigger: "shortcut", afterSeconds: 40 }),
+    ).toBe(true);
     run.abort();
     expect(process.stops()).toBe(0);
   });
@@ -159,14 +168,39 @@ describe("foreground run", () => {
 
 describe("detach wording", () => {
   it("names the task and both ways to follow it", () => {
-    const notice = detachedNotice("bg-12");
+    const notice = detachedNotice({
+      kind: "detached",
+      taskId: "bg-12",
+      trigger: "shortcut",
+      afterSeconds: 40,
+    });
     expect(notice).toContain("↪ moved to bg-12");
     expect(notice).toContain("pretty_task_bg_logs bg-12");
     expect(notice).toContain("pretty_task_bg_kill bg-12");
+    // The command is not a failure: the outcome list said so already, and the line
+    // must not read like one to a model that only sees the tool result.
+    expect(notice).toContain("Still running in the background");
+  });
+
+  it("says which trigger ended the wait, so the two paths are not one text", () => {
+    const base = { kind: "detached", taskId: "bg-9", afterSeconds: 91 } as const;
+    const shortcut = detachedNotice({ ...base, trigger: "shortcut" });
+    const timeout = detachedNotice({ ...base, trigger: "timeout" });
+    const shutdown = detachedNotice({ ...base, trigger: "shutdown" });
+    expect(shortcut).toContain("ctrl+shift+b");
+    expect(timeout).toContain("held the front for 91s");
+    expect(timeout).not.toContain("ctrl+shift+b");
+    expect(shutdown).toContain("shutting down");
+    expect(new Set([shortcut, timeout, shutdown]).size).toBe(3);
   });
 
   it("says one line per outcome", () => {
-    expect(describeDetach({ kind: "detached", taskId: "bg-3" })).toContain("bg-3");
+    expect(
+      describeDetach({ kind: "detached", taskId: "bg-3", trigger: "shortcut", afterSeconds: 3 }),
+    ).toContain("bg-3");
+    expect(
+      describeDetach({ kind: "detached", taskId: "bg-3", trigger: "timeout", afterSeconds: 91 }),
+    ).toContain("held for 91s");
     expect(describeDetach({ kind: "nothing" })).toContain("Nothing is running");
     expect(describeDetach({ kind: "ambiguous", running: 2 })).toContain("2 commands");
     expect(describeDetach({ kind: "refused", message: "capacity reached" })).toContain(
