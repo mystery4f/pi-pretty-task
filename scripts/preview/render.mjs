@@ -8,7 +8,12 @@
  */
 
 import { visibleWidth } from "@earendil-works/pi-tui";
-import { rememberPanelTab, TasksPanel } from "../../dist/ui/panel/tasks-panel.js";
+import {
+  DEFAULT_PANEL_FILTER,
+  PANEL_FILTERS,
+  rememberPanelTab,
+  TasksPanel,
+} from "../../dist/ui/panel/tasks-panel.js";
 import { detachFront, growWeb, holdInFront, now, source } from "./fixtures.mjs";
 import { assertWidths, makeTheme } from "./theme.mjs";
 
@@ -21,7 +26,19 @@ const DOWN = "\u001b[B";
 const ENTER = "\r";
 /** Leaving search keeps the query, which keeps filtering the list. */
 const ALT_Q = "\u001bq";
-const FILTERS_TO_ALL = 4;
+/**
+ * The `f` presses that take the panel from where it opens to `choice`, each frame
+ * named after the filter it lands on. Derived from the panel's own list, so moving
+ * a filter never leaves a stale keystroke count in the image scripts.
+ */
+function filterSteps(choice) {
+  const from = PANEL_FILTERS.indexOf(DEFAULT_PANEL_FILTER);
+  const count = (PANEL_FILTERS.indexOf(choice) - from + PANEL_FILTERS.length) % PANEL_FILTERS.length;
+  return Array.from({ length: count }, (_, index) => ({
+    name: `filter ${String(PANEL_FILTERS[(from + index + 1) % PANEL_FILTERS.length])}`,
+    key: "f",
+  }));
+}
 
 function newPanel() {
   return new TasksPanel({
@@ -71,10 +88,7 @@ async function drive(steps, label, before) {
 
 /** Every status in one list, with the dev server's row mid-growth. */
 export async function renderList() {
-  const steps = Array.from({ length: FILTERS_TO_ALL }, (_, index) => ({
-    name: `filter ${String(index)}`,
-    key: "f",
-  }));
+  const steps = filterSteps("all");
   const frames = await drive(steps, "list", async (panel) => {
     await panel.refresh();
     growWeb();
@@ -177,26 +191,17 @@ export async function renderCommandLoop() {
 /** The list with the filter on `failed`: what a failure looks like as a row, and that
  * the filter keeps the reason (status, exit code) and drops the rest. */
 export async function renderFailed() {
-  // `running` is the default filter; `signal` comes next, then `failed`.
-  const frames = await drive(
-    [
-      { name: "filter signal", key: "f" },
-      { name: "filter failed", key: "f" },
-    ],
-    "failed",
-  );
+  // The panel opens on every status, so `failed` is two presses up the walk.
+  const frames = await drive(filterSteps("failed"), "failed");
   return frames.at(-1).lines;
 }
 
 /** The search box with a query that hits: the list narrowed to the matching records,
  * matched on the name and on the command both. */
 export async function renderSearch() {
-  // The default filter hides ended records, and half the matches in the fixture have
-  // ended: walk back to `all` first, so the picture shows what the query found.
-  const steps = Array.from({ length: FILTERS_TO_ALL }, (_, index) => ({
-    name: `filter ${String(index)}`,
-    key: "f",
-  }));
+  // Every status is what the panel opens on, so the query is typed on the picture
+  // the panel already shows; a default that ever narrows again is walked back here.
+  const steps = filterSteps("all");
   const frames = await drive(
     [
       ...steps,

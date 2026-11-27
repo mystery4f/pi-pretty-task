@@ -254,11 +254,20 @@ export const TAB_KEY: ReadonlyMap<string, PanelTab> = new Map([
   ["3", "chains"],
 ]);
 
-/** The filters in the order `f` walks them, starting from the one the panel opens on. */
-export const PANEL_FILTERS: readonly PanelFilter[] = ["all", "running", "signal", "failed", "done"];
+/**
+ * The filters in the order `f` walks them, starting from the one the panel opens
+ * on. `signal` sits last because it is the narrowest reading of a live row: a
+ * command loop with its latch up is still `running` (ADR-0018), so the walk
+ * reaches it after the three ordinary endings instead of in the middle of them.
+ */
+export const PANEL_FILTERS: readonly PanelFilter[] = ["all", "running", "failed", "done", "signal"];
 
-/** The filter a freshly opened panel starts on: live work, not the archive. */
-export const DEFAULT_PANEL_FILTER: PanelFilter = "running";
+/**
+ * The filter a freshly opened panel starts on: every status. A session whose work
+ * has all ended must not open on an empty list — the archive is the session too —
+ * and `f` narrows to the living rows in one press.
+ */
+export const DEFAULT_PANEL_FILTER: PanelFilter = "all";
 
 /** The word each page is titled with; the glossary's own names (GLOSSARY.md). */
 export const TAB_TITLE = {

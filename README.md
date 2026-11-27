@@ -63,9 +63,9 @@ Deliberately not here: subagent/delegate/fusion tools, monitors-with-shell, work
 
 ## The panel
 
-Opens with `/tasks` or `shift+down`, and has three tabs — processes, loops, chains — plus five filters (`all`, `running`, `signal`, `failed`, `done`). One summary line above the editor stays after it closes; the footer row is shared with every other extension, so the count lives where it can be read.
+Opens with `/tasks` or `shift+down`, and has three tabs — processes, loops, chains — plus five filters (`all`, `running`, `failed`, `done`, `signal`). It opens on `all`, so a session whose work has all ended still shows its rows; `f` narrows. One summary line above the editor stays after it closes; the footer row is shared with every other extension, so the count lives where it can be read.
 
-List keys: `↑/↓` select, `Enter` open, `←` back, `k` stop, `a` stop all, `f` cycle filter (`all`/`running`/`signal`/`failed`/`done`), `o` toggle other sessions' records, `R` rerun, `c` show the output path, `/` search, `x` close from the list, `alt+q` close from anywhere (the first press leaves search mode).
+List keys: `↑/↓` select, `Enter` open, `←` back, `k` stop, `a` stop all, `f` cycle filter (`all`/`running`/`failed`/`done`/`signal`), `o` toggle other sessions' records, `R` rerun, `c` show the output path, `/` search, `x` close from the list, `alt+q` close from anywhere (the first press leaves search mode).
 
 ```text
 ↑/↓ · Enter logs · k stop · f filter · o others · 1/2/3 tabs · / search · R rerun · a stop all · alt+q close

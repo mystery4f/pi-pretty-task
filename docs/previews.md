@@ -56,5 +56,5 @@ README 引用的每一张都必须在上表里、也必须在磁盘上：`test/u
 - 面板会记住上次打开的 tab（`rememberedTab` 是模块级变量），所以每个渲染函数开头都调 `rememberPanelTab("processes")`，否则图片内容取决于上一次跑过谁。
 - 搜索状态下 `Enter` 不打开详情，`handleSearchInput` 只处理输入和退格；要先 `alt+q` 退出搜索（查询保留）。
 - 搜索会连 prompt 正文一起匹配，输入 `web` 会命中 `hourly-review` 的 prompt（"…review the commits… broken." 里的 w-e-b）。要点名某一行，用 `↓` 而不是搜索。
-- 按键序列依赖默认 filter：`DEFAULT_PANEL_FILTER` 是 `running`，要 `all` 得按四次 `f`，所以脚本里用 `FILTERS_TO_ALL` 算而不是写死数字。
+- 按键序列从面板自己的列表推：`render.mjs` 的 `filterSteps(choice)` 按 `PANEL_FILTERS` 与 `DEFAULT_PANEL_FILTER` 算要按几次 `f`，并让每帧以落到的 filter 命名（`--only failed` 就是靠这个前缀选帧）。默认改成 `all` 之后 `renderSearch()` 一次都不用按，`renderFailed()` 仍是两次（先 `running` 再 `failed`）——数字来自推导，不写死。
 - Windows 上 `docs/preview.gif` 被别的程序打开着（看图软件、浏览器标签）时写不进去，脚本会报 `EBUSY` 并把新图留在 `.tmp/preview/preview.gif`：关掉那个程序再跑一次。

@@ -564,7 +564,10 @@ export class TasksPanel implements Component, PanelView {
     this.paint();
   }
 
-  /** `f` walks all → running → failed → done inside the open page, and round again. */
+  /**
+   * `f` walks all → running → failed → done → signal inside the open page, and
+   * round again. The order lives in `PANEL_FILTERS`; this method reads it.
+   */
   cycleFilter(): void {
     const index = PANEL_FILTERS.indexOf(this.filter);
     this.filter = PANEL_FILTERS[(index + 1) % PANEL_FILTERS.length] ?? "all";

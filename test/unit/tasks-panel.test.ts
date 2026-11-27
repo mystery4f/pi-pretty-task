@@ -323,7 +323,7 @@ function openPanel(
  * machinery is exercised rather than bypassed.
  */
 async function openOn(
-  tab: PanelTab | PanelFilter,
+  tab: PanelTab,
   source: FakeSource,
   now: () => number = () => 13_000,
   theme: Theme = plainTheme(),
@@ -334,34 +334,21 @@ async function openOn(
   return opened;
 }
 
+/** The number key that opens `tab` from wherever the panel stands. */
+function tabKey(tab: PanelTab): string {
+  return String(PANEL_TABS.indexOf(tab) + 1);
+}
+
 /**
- * The key that reaches a page or a filter from wherever the panel opens: `1`–`3`
- * for a page, `f` as many times as the filter is from the one the panel opens on.
+ * `f` walks `PANEL_FILTERS` in one direction and only one, so a filter is reached by
+ * pressing it that many times from where the panel actually stands — read off the
+ * panel, never assumed from the default.
  */
-function tabKey(choice: PanelTab | PanelFilter): string {
-  switch (choice) {
-    case "processes":
-    case "loops":
-    case "chains":
-      return String(PANEL_TABS.indexOf(choice) + 1);
-    default: {
-      // The panel opens on DEFAULT_PANEL_FILTER; `f` walks the list in one direction only.
-      const from = PANEL_FILTERS.indexOf(DEFAULT_PANEL_FILTER);
-      const to = PANEL_FILTERS.indexOf(choice);
-      return "f".repeat((to - from + PANEL_FILTERS.length) % PANEL_FILTERS.length);
-    }
-  }
-}
-
-// `handleInput` reads one key per call (`f` is matched exactly), so a test that
-// walks to a filter sends the presses one at a time.
 function pressFilter(panel: TasksPanel, choice: PanelFilter): void {
-  for (const key of tabKey(choice)) panel.handleInput(key);
-}
-
-/** `f` walks running → failed → done → all, so the archive is three presses away. */
-function showAll(panel: TasksPanel): void {
-  for (let press = 0; press < PANEL_FILTERS.length - 1; press += 1) panel.handleInput("f");
+  const from = PANEL_FILTERS.indexOf(panel.filter);
+  const count =
+    (PANEL_FILTERS.indexOf(choice) - from + PANEL_FILTERS.length) % PANEL_FILTERS.length;
+  for (let index = 0; index < count; index += 1) panel.handleInput("f");
 }
 
 // The remembered page outlives a panel, which is the point of it; each test still
@@ -534,8 +521,8 @@ describe("detail view", () => {
     const { panel, drawn } = openPanel(source);
     await panel.settle();
 
-    // A finished task is history, so it has to be asked for before Enter can open it.
-    showAll(panel);
+    // The panel opens on every status, so the finished build is already listed:
+    // Enter opens history without asking the filter first.
     await panel.settle();
     panel.handleInput(ENTER);
     await panel.settle();
@@ -1967,10 +1954,11 @@ describe("the status filter", () => {
     const { panel, drawn } = openPanel(byStatus());
     await panel.settle();
 
-    // `running` is where the panel opens: the past is a keypress group away.
+    // The panel opens on every status: a session whose work has all ended must
+    // not look empty, and `f` narrows to the living rows from here.
     expect(plain(drawn())).toContain(`filter: ${DEFAULT_PANEL_FILTER}`);
     expect(drawn()).toContain("server");
-    expect(drawn()).not.toContain("lint");
+    expect(drawn()).toContain("lint");
 
     // The walk and the rows it shows are read off the filter list, so a filter
     // added between two others moves this test with it instead of turning red.
@@ -1988,6 +1976,13 @@ describe("the status filter", () => {
       if (next === "failed") expect(drawn()).not.toContain("server");
     }
 
+    // One press from the opening filter narrows to live rows only, and the walk's
+    // last step brings every status back.
+    panel.handleInput("f");
+    expect(plain(drawn())).toContain("filter: running");
+    expect(drawn()).toContain("server");
+    expect(drawn()).not.toContain("lint");
+
     panel.dispose();
   });
 
@@ -2002,16 +1997,15 @@ describe("the status filter", () => {
 
     panel.handleInput("/");
     for (const character of "dpl") panel.handleInput(character);
-    // The panel opens on `running`, so the failed row is hidden until the filter
-    // asks for it; the query keeps narrowing whatever the filter lets through.
+    // The panel opens on every status, so both rows answer the query; `f` then
+    // decides which of them the list keeps.
     expect(plain(drawn())).toContain("deploy east");
-    expect(plain(drawn())).not.toContain("deploy west");
+    expect(plain(drawn())).toContain("deploy west");
 
-    // Leaving search keeps the query; `f` then walks the filter under it.
+    // Leaving search keeps the query; the filter narrows what it let through.
     panel.handleInput("\x1bq");
     expect(plain(drawn())).toContain("deploy east");
-    expect(plain(drawn())).not.toContain("deploy west");
-
+    expect(plain(drawn())).toContain("deploy west");
     pressFilter(panel, "failed");
     expect(plain(drawn())).toContain("deploy west");
     expect(plain(drawn())).not.toContain("deploy east");
@@ -2022,6 +2016,7 @@ describe("the status filter", () => {
   it("counts a paused schedule as running, since it is still owed a turn", async () => {
     const { panel, drawn } = await openOn("loops", byStatus());
 
+    pressFilter(panel, "running");
     expect(drawn()).toContain("review loop");
     expect(drawn()).toContain("filter: running");
     expect(drawn()).not.toContain("Nothing");
@@ -2053,7 +2048,7 @@ describe("the status filter", () => {
       chainView("ch-done1", { name: "old news", status: "completed" }),
     ];
     const { panel, drawn } = await openOn("chains", source);
-
+    pressFilter(panel, "running");
     expect(drawn()).toContain("ship it");
     expect(drawn()).not.toContain("old news");
 
@@ -2381,8 +2376,7 @@ describe("recency and search", () => {
     const source = searchFixture();
     const { panel, drawn } = openPanel(source);
     await panel.settle();
-    // The fixture keeps a failed row, which the opening `running` filter would hide.
-    showAll(panel);
+    // The panel opens on every status, so the fixture's failed row is already listed.
 
     panel.handleInput("/");
     for (const character of "a1b") panel.handleInput(character);
@@ -2505,8 +2499,7 @@ describe("recency and search", () => {
     const source = searchFixture();
     const { panel, drawn } = openPanel(source);
     await panel.settle();
-    // The fixture keeps a failed row, which the opening `running` filter would hide.
-    showAll(panel);
+    // The panel opens on every status, so the fixture's failed row is already listed.
     panel.handleInput("/");
     for (const character of "failed") panel.handleInput(character);
 
