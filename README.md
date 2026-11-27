@@ -30,6 +30,7 @@ Requires pi and Node >= 22.19. A local checkout works too: `pi install ./path/to
 | Stop it *and* its children, not just the parent pid | `pretty_task_bg_kill` |
 | Run something after another job succeeds, instead of now | `pretty_task_bg_run` with `after` |
 | Wake the agent on a schedule — interval or cron | `pretty_task_loop_create` |
+| Fire that wake once more, now, without moving the schedule | `pretty_task_loop_fire` |
 | Find out what that wake-up actually did | `pretty_task_loop_list` with an id |
 | Just look at everything | `/tasks`, or `shift+down` |
 
@@ -39,20 +40,31 @@ Requires pi and Node >= 22.19. A local checkout works too: `pi install ./path/to
 
   ![A task opened: npm run dev under way, its output tail refreshing once a second](https://raw.githubusercontent.com/mystery4f/pi-pretty-task/main/docs/preview-tail.png)
 
-- **Chain** — a command queued behind another task or chain instead of started now. A step is recorded as `waiting` and starts only after the step ahead ends with exit 0; a failing step leaves the ones behind it `skipped`.
-- **Loop / Iteration** — wake the LLM on a schedule with a preset prompt (`30s`/`10m`/`2h`, or five-field cron such as `0 9 * * 1-5`), and record every tool call of the turn that follows, so "what did that loop actually run?" has an answer. A fire that made no tool call prints its `0 calls` as a fact, and two in a row are marked — a turn that read files and thought before acting is not a stall on its first occurrence. A turn pi is retrying after a provider error says so — `retry 2/4 · 529` on the loop row, and a Retry field on the iteration page — so four failed attempts are not mistaken for one slow one. When the provider finally gives up, that fire is counted: the loop keeps the error, the time and a run of consecutive failures, its row counts the run (`2 failed` beside the fire count) and its page prints the error the provider gave up with and reads that fire as `failed` rather than `completed`, and its next wake is pushed back instead of hammering a provider that is down — while a turn you stopped yourself counts for nothing. Wakes wait for an idle agent instead of interrupting a turn.
+- **Chain** — a command queued behind another task or chain instead of started now. A step is recorded as `waiting` and starts only after the step ahead ends with exit 0; a failing step leaves the ones behind it `skipped`. The chain's own page is the only place the queue is visible as a queue: every step in run order, a `›` on the one running, and the child record each step became (ADR-0013).
+
+  ![A chain opened: build, then release:test both done, release:publish still waiting, with the id each step will become](https://raw.githubusercontent.com/mystery4f/pi-pretty-task/main/docs/preview-chain.png)
+
+- **Loop / Iteration** — wake the LLM on a schedule with a preset prompt (`30s`/`10m`/`2h`, or five-field cron such as `0 9 * * 1-5`), and record every tool call of the turn that follows, so "what did that loop actually run?" has an answer.
+
+  **What you see.** A fire that made no tool call prints its `0 calls` as a fact, and two in a row are marked — a turn that read files and thought before acting is not a stall on its first occurrence. A command loop has no iterations to record, so it keeps its fires instead: each one with its outcome, exit code, duration and size, newest first, with the older ones the history cap dropped counted rather than hidden.
+
+  ![A command loop's page: every fire with its outcome and exit code, including the one that failed](https://raw.githubusercontent.com/mystery4f/pi-pretty-task/main/docs/preview-cmdloop.png)
+
+  **What it says.** A turn pi is retrying after a provider error says so — `retry 2/4 · 529` on the loop row, and a Retry field on the iteration page — so four failed attempts are not mistaken for one slow one. When the provider finally gives up, that fire is counted: the loop keeps the error, the time and a run of consecutive failures, its row counts the run (`2 failed` beside the fire count) and its page prints the error the provider gave up with and reads that fire as `failed` rather than `completed`, and its next wake is pushed back instead of hammering a provider that is down — while a turn you stopped yourself counts for nothing. Wakes wait for an idle agent instead of interrupting a turn. A command loop that exits with one of the codes you declared as a signal is `signalled`, not failed: it keeps its schedule, and wakes you once per raised condition instead of once per fire.
+
+  **Where the rules are.** [ADR-0001](docs/adr/0001-loop-wakes-llm-not-shell.md) (a fire is a turn, not a shell command), [ADR-0006](docs/adr/0006-cron-alongside-intervals.md) (cron beside intervals), [ADR-0007](docs/adr/0007-iteration-history-cap-and-restart-repair.md) (history cap and restart repair), [ADR-0009](docs/adr/0009-wakes-wait-for-idle-and-bind-their-turn.md) (wakes wait for idle), [ADR-0015](docs/adr/0015-loop-row-carries-a-fire-strip.md) (the fire strip), [ADR-0017](docs/adr/0017-overlap-skips-and-failures-back-off.md) (overlap skips, failures back off), [ADR-0018](docs/adr/0018-signal-outcome-and-minimum-fire-gap.md) (signal outcome and the minimum gap).
 
   ![A loop fire opened: the twelve tool calls that one wake-up made](https://raw.githubusercontent.com/mystery4f/pi-pretty-task/main/docs/preview-iteration.png)
 
-A fire that comes due while the previous one still runs is skipped and counted, never queued. An id says its kind on sight: `bg-` runs a command, `lp-` wakes the assistant, `ch-` is a chain.
+A fire that comes due while the previous one still runs is skipped and counted, never queued. An id says its kind on sight: `bg-` runs a command, `lp-` wakes the assistant, `lc-` runs a command on a schedule, `ch-` is a chain.
 
 Deliberately not here: subagent/delegate/fusion tools, monitors-with-shell, workflow/orchestration families, provider-attested runs. See [docs/scope-v1.md](docs/scope-v1.md).
 
 ## The panel
 
-Opens with `/tasks` or `shift+down`, and has three tabs — processes, loops, chains. One summary line above the editor stays after it closes; the footer row is shared with every other extension, so the count lives where it can be read.
+Opens with `/tasks` or `shift+down`, and has three tabs — processes, loops, chains — plus five filters (`all`, `running`, `signal`, `failed`, `done`). One summary line above the editor stays after it closes; the footer row is shared with every other extension, so the count lives where it can be read.
 
-List keys: `↑/↓` select, `Enter` open, `←` back, `k` stop, `a` stop all, `f` cycle filter (`all`/`running`/`failed`/`done`), `o` toggle other sessions' records, `R` rerun, `c` show the output path, `/` search, `x` close from the list, `alt+q` close from anywhere (the first press leaves search mode).
+List keys: `↑/↓` select, `Enter` open, `←` back, `k` stop, `a` stop all, `f` cycle filter (`all`/`running`/`signal`/`failed`/`done`), `o` toggle other sessions' records, `R` rerun, `c` show the output path, `/` search, `x` close from the list, `alt+q` close from anywhere (the first press leaves search mode).
 
 ```text
 ↑/↓ · Enter logs · k stop · f filter · o others · 1/2/3 tabs · / search · R rerun · a stop all · alt+q close
@@ -60,7 +72,27 @@ List keys: `↑/↓` select, `Enter` open, `←` back, `k` stop, `a` stop all, `
 
 ![The /tasks panel: every process, loop and chain in one list, with the dev server's row still growing](https://raw.githubusercontent.com/mystery4f/pi-pretty-task/main/docs/preview.png)
 
+The filter keeps the reason on the row — a failure keeps its exit code and its runtime — and the header counts what the filter left out, so a narrowed list never reads as an empty session.
+
+![The list filtered to failed: two rows, both showing exit 1, and the header still counting what the filter hides](https://raw.githubusercontent.com/mystery4f/pi-pretty-task/main/docs/preview-failed.png)
+
+Search matches the name, the command and a loop's prompt at once, and keeps filtering after `alt+q` leaves the box.
+
+![The search box with a query that hits: seven records narrowed to the ones whose command contains "run"](https://raw.githubusercontent.com/mystery4f/pi-pretty-task/main/docs/preview-search.png)
+
+With the panel closed, one line stands in for it: how many records are running, how many command loops have a raised signal, how many have ended, and the way back in. It is a widget (`PI_PRETTY_TASK` slot), so another extension cannot take the line, and it reprints after every change the extension makes.
+
+![The status line above the editor: 9 running · 1 signal · 9 finished, and the command that reopens the panel](https://raw.githubusercontent.com/mystery4f/pi-pretty-task/main/docs/preview-status.png)
+
 Every image on this page is a screenshot of the shipped panel, not a mock-up: `npm run preview` renders them from `TasksPanel` itself, so a change in `src/ui/panel/` shows up in the next run instead of drifting away from the picture.
+
+## What lands in the transcript
+
+Three cards, one per kind of event, so a reader scrolling back does not have to open `/tasks` to know what happened: `task-finished` (status, name, id, duration, exit code, the reason if there is one, and the last lines of output), `loop-signal` (a command loop's fire that raised its condition, with the report it printed) and `loop-wake` (the prompt a fire delivered, exactly as the loop carries it). Each is a session message — the model reads the same facts — and each renders from its `details`, never from prose.
+
+![Three cards in a row: a failed task with its output tail, a signalled command loop with its report, and the prompt one wake delivered](https://raw.githubusercontent.com/mystery4f/pi-pretty-task/main/docs/preview-cards.png)
+
+A fourth card, `task-detached`, is a session entry rather than a message: it records a command moved out of the front, and it is described under the takeover below.
 
 ## Use it
 
@@ -76,8 +108,12 @@ pretty_task_loop_create schedule: "10m", prompt: "Check the deploy and report dr
 pretty_task_loop_create schedule: "0 9 * * 1-5", command: "npm run nightly"
 pretty_task_loop_update id: "lp-9f3kd", action: "pause"
 pretty_task_loop_update id: "lp-9f3kd", prompt: "Check the deploy, and report only drift."
+pretty_task_loop_fire   id: "lc-7k2m9"
 pretty_task_loop_list   id: "lp-9f3kd"
+pretty_task_loop_delete id: "lp-9f3kd"
 ```
+
+`pretty_task_loop_update` also takes `resume`, `complete`, `rearm` (recompute the next fire from now on the same schedule, the way back onto a slot after a backoff) and `clear-signal` (drop a raised condition you have already dealt with, without waiting for a healthy round). `pretty_task_loop_fire` runs one fire of a command loop immediately without spending a schedule slot or touching the failure streak — the way to test a command before trusting it to a clock.
 
 Stopping means the whole tree: SIGTERM, a grace period, SIGKILL, then a poll until the process group is really gone — grandchildren included. On Windows that is `taskkill /PID <n> /T`.
 
@@ -102,6 +138,10 @@ A prompt loop is a clock: every fire delivers a message into the session and sta
 
 The bundled `pretty-task-unattended` skill carries the whole recipe — the file shape, the exact contract text, and what to read the next morning. Ask for it in plain words ("run this unattended overnight") and it fills in the calls.
 
+## Bundled skills
+
+Two skills ship with the package and are offered by name: `pretty-task-unattended` (the overnight recipe above) and `pretty-task-templates` (adding or changing a command template — what the file must contain, which of the two files wins, and that an edit applies after `/reload`).
+
 ## Tools
 
 | Tool | What it answers |
@@ -112,7 +152,11 @@ The bundled `pretty-task-unattended` skill carries the whole recipe — the file
 | `pretty_task_bg_grep` | Matching lines of the whole output file |
 | `pretty_task_bg_wait` | Wait for a task to end, up to 600 seconds |
 | `pretty_task_bg_kill` | Stop the task and every process it started |
-| `pretty_task_loop_create` / `_list` / `_update` / `_delete` | A schedule, its fires, and its recorded iterations |
+| `pretty_task_loop_create` | A schedule: an interval, a cron expression, or a command that runs on it |
+| `pretty_task_loop_list` | The loops, or one loop's fires and the tool calls of each iteration |
+| `pretty_task_loop_update` | Pause, resume, complete, retune the schedule, replace the prompt, rearm, or clear a raised signal |
+| `pretty_task_loop_fire` | Run one fire of a command loop right now, off the schedule |
+| `pretty_task_loop_delete` | Delete a loop and its prompt file |
 
 ## Configuration
 
@@ -129,13 +173,15 @@ Every key is read once at load; a value it cannot use fails the extension with t
 | `PI_PRETTY_TASK_ADOPT_FOREGROUND` | `off` | Run pi's `bash` tool and `!` commands through this extension, so the command in front can be moved to a task; the `powershell` tool it registers has no such move |
 | `PI_PRETTY_TASK_FOREGROUND_TIMEOUT` | `0` | Seconds before the command in front is moved to the background by itself; `0` never moves; either trigger says which one it was, once, in the tool result and on a card |
 
+The OSC 9 notification rings once per task and only on an ending: `completed`, `failed`, `killed` and `interrupted` write `\u001b]9;<name> <status>\u0007`, a running or paused task writes nothing, and `PI_PRETTY_TASK_NOTIFY=off` silences all of it. A terminal that ignores OSC 9 shows nothing at all, which is why the same ending is also a card.
+
 Command templates live in `<project>/.pi/pretty-task.json` and `~/.pi/agent/pretty-task.json`, project first, and are read once at load — a file edited mid-session applies after `/reload`. Adding or changing one is covered by the bundled `pretty-task-templates` skill.
 
 Full detail, including the shell rules, decoding order and per-call `cwd`/`env`: [docs/configuration.md](docs/configuration.md).
 
 ## Documentation
 
-Start at [AGENTS.md](AGENTS.md) for the product model and rules, and [GLOSSARY.md](GLOSSARY.md) for the vocabulary. Scope and decisions live in [docs/](docs/) — [docs/scope-v1.md](docs/scope-v1.md) and the ADRs under [docs/adr/](docs/adr/) — and the index for all of it is the wiki page [`.llm-wiki/wiki/syntheses/pi-pretty-task-文档索引.md`](.llm-wiki/wiki/syntheses/pi-pretty-task-文档索引.md).
+Start at [AGENTS.md](AGENTS.md) for the product model and rules, and [GLOSSARY.md](GLOSSARY.md) for the vocabulary. Scope and decisions live in [docs/](docs/) — [docs/scope-v1.md](docs/scope-v1.md) and the ADRs under [docs/adr/](docs/adr/) — and the index for all of it is the wiki page [`.llm-wiki/wiki/syntheses/pi-pretty-task-文档索引.md`](.llm-wiki/wiki/syntheses/pi-pretty-task-文档索引.md). The screenshots and how they are made: [docs/previews.md](docs/previews.md).
 
 ## Development
 
@@ -148,7 +194,7 @@ npm run preview   # build, then re-render docs/preview*.{png,gif}
 
 `npm run check` typechecks without emit, `npm run lint` is Biome, `npm run test` runs vitest over both projects, `npm run test:unit` the pure half in seconds. Style is machine-enforced by `.editorconfig` + Biome; `dist/` is build output and is never committed. [AGENTS.md](AGENTS.md) has the full verification list.
 
-`npm run preview` drives the built panel with scripted keystrokes in a headless browser and writes the images on this page; it needs a Chrome or Edge on the machine (`PREVIEW_BROWSER` points at another one). [docs/previews.md](docs/previews.md) covers the frames and the colours.
+`npm run preview` drives the built panel with scripted keystrokes in a headless browser and writes the images on this page; it needs a Chrome or Edge on the machine (`PREVIEW_BROWSER` points at another one). `npm run preview:dump --only <label>` prints the same frames as text without a browser. [docs/previews.md](docs/previews.md) covers the frames and the colours.
 
 ## Releasing
 

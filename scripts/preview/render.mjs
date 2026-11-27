@@ -147,3 +147,65 @@ export async function renderTail() {
   });
   return frames.at(-1).lines;
 }
+
+/** One chain, open: its steps in order, how far the cursor has got, and the step waiting.
+ * Opening a chain is the only way to read the queue ADR-0013 puts in a task record. */
+export async function renderChain() {
+  const frames = await drive(
+    [
+      { name: "chains", key: "3" },
+      { name: "open the chain", key: ENTER },
+    ],
+    "chain",
+  );
+  return frames.at(-1).lines;
+}
+
+/** A command loop's own page: every fire with its outcome, its exit code and its size.
+ * The fire strip on the row (ADR-0015) is the summary; this is the record. */
+export async function renderCommandLoop() {
+  const frames = await drive(
+    [
+      { name: "loops", key: "2" },
+      { name: "open the loop", key: ENTER },
+    ],
+    "cmd-loop",
+  );
+  return frames.at(-1).lines;
+}
+
+/** The list with the filter on `failed`: what a failure looks like as a row, and that
+ * the filter keeps the reason (status, exit code) and drops the rest. */
+export async function renderFailed() {
+  // `running` is the default filter; `signal` comes next, then `failed`.
+  const frames = await drive(
+    [
+      { name: "filter signal", key: "f" },
+      { name: "filter failed", key: "f" },
+    ],
+    "failed",
+  );
+  return frames.at(-1).lines;
+}
+
+/** The search box with a query that hits: the list narrowed to the matching records,
+ * matched on the name and on the command both. */
+export async function renderSearch() {
+  // The default filter hides ended records, and half the matches in the fixture have
+  // ended: walk back to `all` first, so the picture shows what the query found.
+  const steps = Array.from({ length: FILTERS_TO_ALL }, (_, index) => ({
+    name: `filter ${String(index)}`,
+    key: "f",
+  }));
+  const frames = await drive(
+    [
+      ...steps,
+      { name: "search", key: "/" },
+      { name: "r", key: "r" },
+      { name: "u", key: "u" },
+      { name: "n", key: "n" },
+    ],
+    "search",
+  );
+  return frames.at(-1).lines;
+}

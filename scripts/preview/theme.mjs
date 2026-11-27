@@ -21,6 +21,9 @@ export const PALETTE = {
   selectedBg: "#202636",
   // The panel a detach card paints itself on: the host's `toolPendingBg` slot.
   toolPendingBg: "#1a202d",
+  // The panel the host paints behind a message card (custom-message.js); a copy
+  // of pi's own `violet` slot, so a card shot here matches the transcript.
+  customMessageBg: "#2a2040",
 };
 
 const rgb = (hex) => {

@@ -15,8 +15,19 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
 import { terminalPage } from "./page.mjs";
 import { renderDetachCards } from "./card.mjs";
-import { renderDetach, renderIteration, renderList, renderTail, renderWalk } from "./render.mjs";
+import {
+  renderChain,
+  renderCommandLoop,
+  renderDetach,
+  renderFailed,
+  renderIteration,
+  renderList,
+  renderSearch,
+  renderTail,
+  renderWalk,
+} from "./render.mjs";
 import { launchBrowser, screenshot, writeGif } from "./shoot.mjs";
+import { renderMessageCards, renderStatusLine } from "./transcript.mjs";
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const DOCS = `${ROOT}docs/`;
@@ -38,6 +49,12 @@ async function main() {
   const list = await renderList();
   const iteration = await renderIteration();
   const tail = await renderTail();
+  // One image per class of page: the list is not the only thing the panel can show,
+  // and a reader deciding whether to install it needs to see a chain and a loop too.
+  const chain = await renderChain();
+  const commandLoop = await renderCommandLoop();
+  const failed = await renderFailed();
+  const search = await renderSearch();
   // The takeover goes first in the animation so the detached task is already one of
   // the rows the rest of the walk moves through.
   const detach = await renderDetach();
@@ -47,6 +64,10 @@ async function main() {
   // The card is a transcript entry, so it gets its own image: the panel shots can
   // never show it, and it is the only surface a detached command leaves behind.
   const cards = renderDetachCards();
+  // The other two transcript surfaces: the three notice cards, and the line the
+  // widget draws above the editor while the panel is closed.
+  const messages = renderMessageCards();
+  const status = await renderStatusLine();
 
   const browser = await launchBrowser(chromium);
   try {
@@ -66,8 +87,39 @@ async function main() {
       scale: 2,
     });
     await screenshot(browser, {
+      htmlPath: writePage("chain", { lines: chain }),
+      outPath: `${DOCS}preview-chain.png`,
+      scale: 2,
+    });
+    await screenshot(browser, {
+      htmlPath: writePage("cmd-loop", { lines: commandLoop }),
+      outPath: `${DOCS}preview-cmdloop.png`,
+      scale: 2,
+    });
+    await screenshot(browser, {
+      htmlPath: writePage("failed", { lines: failed }),
+      outPath: `${DOCS}preview-failed.png`,
+      scale: 2,
+    });
+    await screenshot(browser, {
+      htmlPath: writePage("search", { lines: search }),
+      outPath: `${DOCS}preview-search.png`,
+      scale: 2,
+    });
+    await screenshot(browser, {
       htmlPath: writePage("cards", { lines: cards, title: "pi — transcript — ~/work/storefront" }),
       outPath: `${DOCS}preview-detach.png`,
+      scale: 2,
+    });
+    // The transcript, not the panel: a notice card and the line above the editor.
+    await screenshot(browser, {
+      htmlPath: writePage("messages", { lines: messages, title: "pi — transcript — ~/work/storefront" }),
+      outPath: `${DOCS}preview-cards.png`,
+      scale: 2,
+    });
+    await screenshot(browser, {
+      htmlPath: writePage("status", { lines: status, title: "pi — above the editor" }),
+      outPath: `${DOCS}preview-status.png`,
       scale: 2,
     });
 
@@ -96,7 +148,20 @@ async function main() {
       console.log(`docs/preview.gif is open in another program — close it and re-run, or copy ${gif} into docs/`);
     }
 
-    for (const name of ["preview.png", "preview-iteration.png", "preview-tail.png", "preview-detach.png", "preview.gif"]) {
+    const images = [
+      "preview.png",
+      "preview-iteration.png",
+      "preview-tail.png",
+      "preview-chain.png",
+      "preview-cmdloop.png",
+      "preview-failed.png",
+      "preview-search.png",
+      "preview-detach.png",
+      "preview-cards.png",
+      "preview-status.png",
+      "preview.gif",
+    ];
+    for (const name of images) {
       console.log(`${name}  ${String(kb(`${DOCS}${name}`))} KB`);
     }
     for (const frame of walk) console.log(`  frame ${frame.label}`);

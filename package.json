@@ -49,7 +49,14 @@
     "docs/preview.png",
     "docs/preview.gif",
     "docs/preview-iteration.png",
-    "docs/preview-tail.png"
+    "docs/preview-tail.png",
+    "docs/preview-chain.png",
+    "docs/preview-cmdloop.png",
+    "docs/preview-failed.png",
+    "docs/preview-search.png",
+    "docs/preview-detach.png",
+    "docs/preview-cards.png",
+    "docs/preview-status.png"
   ],
   "publishConfig": {
     "access": "public",
