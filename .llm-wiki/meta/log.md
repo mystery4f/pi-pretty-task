@@ -134,3 +134,6 @@
 ## [2026-11-27T07:48:28.832Z] retro
 - slug: "adr-dated-status-and-index-guard", title: "An undated ADR cannot be checked for staleness", category: "docs"
 
+## [2026-11-27T18:04:20.133Z] observe
+- slug: "obs-2026-11-27-footer-handleinput", title: "footer 打印字形、handleInput 收的是终端序列：按键测试必须翻译", relevance: "high"
+

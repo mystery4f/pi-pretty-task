@@ -2,6 +2,7 @@
 
 ## 2026-11-27
 
+- **observe**: {"relevance":"high","slug":"obs-2026-11-27-footer-handleinput","title":"footer 打印字形、handleInput 收的是终端序列：按键测试必须翻译"}
 - **retro**: {"category":"docs","slug":"adr-dated-status-and-index-guard","title":"An undated ADR cannot be checked for staleness"}
 - **retro**: {"category":"debugging","slug":"session-record-not-source-is-the-evidence","title":"What the model saw is in the session record, not the source"}
 - **retro**: {"category":"tooling","slug":"preview-rerun-shifts-untouched-images","title":"A full preview re-render rewrites images nothing changed"}

@@ -25,6 +25,7 @@
 - [Observation: pi-lens 告警清零：抑制语法与 test tsconfig 项目](obs-2026-11-24-pi-lens-test-tsconfig.md)
 - [Observation: pi 扩展拿不到 auto_retry 事件，重试进度只能派生](obs-2026-11-25-pi-auto-retry.md)
 - [Observation: 改道卡必须是会话条目而非自定义消息](obs-2026-11-27-.md)
+- [Observation: footer 打印字形、handleInput 收的是终端序列：按键测试必须翻译](obs-2026-11-27-footer-handleinput.md)
 - [Observation: pi-pretty-task：改道通知带触发器，静默分支以负断言固化](obs-2026-11-27-pi-pretty-task.md)
 - [pi 扩展实例失效后的 sendMessage 抛出会杀死进程](pi-extension-stale-instance-unhandled-rejection.md)
 - [pi 的 git 安装不带 devDeps，入口要写 .ts 而不是靠 prepare 构建](pi-git-install-omits-dev-deps-so-ship-ts-entry.md)

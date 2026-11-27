@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "last_updated": "2026-11-27T07:48:28.855Z",
+  "last_updated": "2026-11-27T18:04:20.175Z",
   "pages": {
     "sources/adr-dated-status-and-index-guard": {
       "type": "source",
@@ -337,6 +337,23 @@
       "relevance": "high",
       "observed_at": "2026-11-27T07:05:37.393Z",
       "source_context": "pi-pretty-task 改道通知改造成会话卡片",
+      "created": "2026-11-27",
+      "updated": "2026-11-27"
+    },
+    "sources/obs-2026-11-27-footer-handleinput": {
+      "type": "source",
+      "title": "Observation: footer 打印字形、handleInput 收的是终端序列：按键测试必须翻译",
+      "tags": [
+        "testing",
+        "panel",
+        "keys",
+        "pi-pretty-task"
+      ],
+      "status": "observation",
+      "slug": "obs-2026-11-27-footer-handleinput",
+      "relevance": "high",
+      "observed_at": "2026-11-27T18:04:20.127Z",
+      "source_context": "为 pi-pretty-task 补面板按键守卫测试",
       "created": "2026-11-27",
       "updated": "2026-11-27"
     },

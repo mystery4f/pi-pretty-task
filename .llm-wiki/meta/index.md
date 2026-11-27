@@ -27,6 +27,7 @@
 - [[sources/obs-2026-11-24-pi-lens-test-tsconfig]] — Observation: pi-lens 告警清零：抑制语法与 test tsconfig 项目 *(created: 2026-11-24)*
 - [[sources/obs-2026-11-25-pi-auto-retry]] — Observation: pi 扩展拿不到 auto_retry 事件，重试进度只能派生 *(created: 2026-11-25)*
 - [[sources/obs-2026-11-27-]] — Observation: 改道卡必须是会话条目而非自定义消息 *(created: 2026-11-27)*
+- [[sources/obs-2026-11-27-footer-handleinput]] — Observation: footer 打印字形、handleInput 收的是终端序列：按键测试必须翻译 *(created: 2026-11-27)*
 - [[sources/obs-2026-11-27-pi-pretty-task]] — Observation: pi-pretty-task：改道通知带触发器，静默分支以负断言固化 *(created: 2026-11-27)*
 - [[sources/pi-extension-stale-instance-unhandled-rejection]] — pi 扩展实例失效后的 sendMessage 抛出会杀死进程 *(created: 2026-11-24)*
 - [[sources/pi-git-install-omits-dev-deps-so-ship-ts-entry]] — pi 的 git 安装不带 devDeps，入口要写 .ts 而不是靠 prepare 构建 *(created: 2026-11-15)*
@@ -53,4 +54,4 @@
 - [[syntheses/verify-red-tests-handoff]] — verify 红测修复交接（5 个 integration 用例） *(created: 2026-11-16)*
 
 ---
-*Last updated: 2026-11-27T07:48:28.855Z* | *Total pages: 44*
+*Last updated: 2026-11-27T18:04:20.175Z* | *Total pages: 45*

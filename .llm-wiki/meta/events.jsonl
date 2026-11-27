@@ -42,3 +42,4 @@
 {"slug":"preview-rerun-shifts-untouched-images","title":"A full preview re-render rewrites images nothing changed","category":"tooling","timestamp":"2026-11-27T07:48:20.755Z","kind":"retro"}
 {"slug":"session-record-not-source-is-the-evidence","title":"What the model saw is in the session record, not the source","category":"debugging","timestamp":"2026-11-27T07:48:20.762Z","kind":"retro"}
 {"slug":"adr-dated-status-and-index-guard","title":"An undated ADR cannot be checked for staleness","category":"docs","timestamp":"2026-11-27T07:48:28.832Z","kind":"retro"}
+{"slug":"obs-2026-11-27-footer-handleinput","title":"footer 打印字形、handleInput 收的是终端序列：按键测试必须翻译","relevance":"high","timestamp":"2026-11-27T18:04:20.133Z","kind":"observe"}
