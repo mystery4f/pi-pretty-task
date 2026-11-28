@@ -2,7 +2,9 @@
 
 ## 状态
 
-已接受（2026-11-27）
+已接受（2026-11-27）；「不设等待上限」一条被 [ADR-0027](0027-waitseconds-bounds-the-blocking-call.md) 修订
+
+> 2026-11-28：等待不再强制无上限——`pretty_task_bg_run` 新增可选 `waitSeconds`（1–600 秒）。不写它时仍与本文逐字节相同：`holdTurn` 收不到 `timeoutMs`，等到任务结束、Esc 或快捷键为止。其余各条不变。
 
 ## 背景
 

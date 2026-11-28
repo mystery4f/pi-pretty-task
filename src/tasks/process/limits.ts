@@ -20,7 +20,8 @@ export const MAX_TIMEOUT_MS = 2_147_483_647;
 export const DEFAULT_WAIT_SECONDS = 60;
 
 /**
- * Longest wait `pretty_task_bg_wait` accepts. A wait holds the turn, so its bound is much
+ * Longest wait a call may hold the turn for: `pretty_task_bg_wait`'s window and a
+ * blocking run's `waitSeconds` share it. A wait holds the turn, so its bound is much
  * tighter than a task's runtime cap.
  */
 export const MAX_WAIT_SECONDS = 600;
@@ -56,6 +57,21 @@ export function parseWaitSeconds(seconds: number | undefined): number {
   return timeoutMs;
 }
 
+/**
+ * Turn a blocking call's `waitSeconds` into milliseconds, or explain why it is not
+ * usable. Absent is the caller's business: leaving the parameter out means no deadline
+ * at all (ADR-0027), never this function's default — `DEFAULT_WAIT_SECONDS` belongs to
+ * `pretty_task_bg_wait`, where an absent bound still has to be bounded.
+ */
+export function parseHoldSeconds(seconds: number): number {
+  const timeoutMs = Math.round(seconds * 1000);
+  if (!Number.isFinite(seconds) || seconds <= 0 || seconds > MAX_WAIT_SECONDS || timeoutMs < 1) {
+    throw new RangeError(
+      `waitSeconds must be a positive number no larger than ${String(MAX_WAIT_SECONDS)}; received ${String(seconds)}`,
+    );
+  }
+  return timeoutMs;
+}
 /** Default window `pretty_task_bg_logs` follows a task's output for, in seconds. */
 export const DEFAULT_FOLLOW_SECONDS = 10;
 

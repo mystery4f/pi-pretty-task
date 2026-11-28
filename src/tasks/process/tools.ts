@@ -33,7 +33,12 @@ import type {
 } from "../chain/chain-tasks.js";
 
 import { detachedNotice } from "./foreground.js";
-import { parseFollowSeconds, parseTimeoutSeconds, parseWaitSeconds } from "./limits.js";
+import {
+  parseFollowSeconds,
+  parseHoldSeconds,
+  parseTimeoutSeconds,
+  parseWaitSeconds,
+} from "./limits.js";
 import type {
   FollowTaskResult,
   ProcessTasks,
@@ -99,7 +104,13 @@ const RunParameters = Type.Object({
   wait: Type.Optional(
     Type.Boolean({
       description:
-        "Keep the call open until the command ends, then answer with its output tail, exit code and kill reason instead of a task id. One answer, at the end — nothing streams while it waits, and the panel already shows the same output. Esc ends the wait and leaves the task running; `timeoutSeconds` still kills it; `ctrl+shift+b` moves the call to the background with `↪ moved to bg-…` and no exit code. Cannot be combined with `after`: a queued step has not started yet. Refused for a minute after a detach: the front has just been freed, and this call would hold it again. A command that never ends holds this call until Esc, so prefer a bounded command.",
+        "Keep the call open until the command ends, then answer with its output tail, exit code and kill reason instead of a task id. One answer, at the end — nothing streams while it waits, and the panel already shows the same output. Esc ends the wait and leaves the task running; `timeoutSeconds` still kills it; `ctrl+shift+b` moves the call to the background with `↪ moved to bg-…` and no exit code. `waitSeconds` bounds how long this call waits; a command that never ends otherwise holds it until Esc. Cannot be combined with `after`: a queued step has not started yet. Refused for a minute after a detach: the front has just been freed, and this call would hold it again.",
+    }),
+  ),
+  waitSeconds: Type.Optional(
+    Type.Number({
+      description:
+        "How long this call may wait, in seconds (1–600), when `wait: true` is set. Absent means no limit: the call waits until the command ends, Esc, or `ctrl+shift+b`. Reaching the deadline ends only the wait — the task keeps running, the answer says the deadline passed — so it is not the same as `timeoutSeconds`, which stops the task. Refused without `wait: true`.",
     }),
   ),
 });
@@ -383,7 +394,7 @@ const RELOAD_NOTE =
  */
 function runDescription(templates: ReadonlyMap<string, CommandTemplate>): string {
   const base =
-    "Run a shell command in the background and return a task id at once, without waiting for the command to finish. stdout and stderr are captured together in one output file. With `after`, it queues behind a task or chain instead. With `wait: true`, the call instead answers when the command ends, with its output tail, exit code and kill reason; Esc or ctrl+shift+b ends the wait early and leaves the task running.";
+    "Run a shell command in the background and return a task id at once, without waiting for it to finish. stdout and stderr are captured together in one output file. With `after`, it queues behind a task or chain instead. With `wait: true`, the call answers when the command ends, with its output tail, exit code and kill reason; Esc or ctrl+shift+b ends the wait, leaving the task running; `waitSeconds` bounds that wait.";
   // pi-lens-ignore: no-sort-without-comparator -- template names are plain words and the default string order is the intended one
   const names = [...templates.keys()].sort();
   if (names.length === 0) {
@@ -597,6 +608,22 @@ export function processTaskTools(
           "`wait` cannot be used with `after`: a queued step starts when the step ahead ends, so there is nothing to wait for yet. Drop `after` to wait for the command, or drop `wait` to queue it. The task was not started.",
         );
       }
+      if (params.waitSeconds !== undefined && params.wait !== true) {
+        // A bound with nothing held open would be ignored, and an ignored parameter reads
+        // as applied (ADR-0027). Name the parameter that caps the task instead.
+        return text(
+          "`waitSeconds` bounds how long a blocking call waits, so it needs `wait: true`; on its own it would bound nothing. To cap how long the task itself runs, use `timeoutSeconds`. The task was not started.",
+        );
+      }
+      let holdTimeoutMs: number | undefined;
+      if (params.waitSeconds !== undefined) {
+        try {
+          holdTimeoutMs = parseHoldSeconds(params.waitSeconds);
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : String(error);
+          return text(`${reason} The task was not started.`);
+        }
+      }
       if (params.wait === true) {
         const closed = options.blockingRefusal?.();
         if (closed !== undefined) return text(closed);
@@ -682,7 +709,10 @@ export function processTaskTools(
         // row, its output file and its place in the ceiling while this call hangs
         // (ADR-0025). Only the call is released early; the process is never touched.
         const scope = scopeOf(ctx);
-        const blocked = await tasks.awaitRun(scope, task.id, signal);
+        const blocked = await tasks.awaitRun(scope, task.id, {
+          ...(signal === undefined ? {} : { signal }),
+          ...(holdTimeoutMs === undefined ? {} : { timeoutMs: holdTimeoutMs }),
+        });
         if (blocked !== undefined) {
           const tail = await blockedTail(tasks, scope, task.id);
           if (blocked.stop === "ended") {
@@ -710,23 +740,26 @@ export function processTaskTools(
               details: { ...taskDetails(blocked.view), waited: true, stop: blocked.stop },
             };
           }
-          // Two endings, two receipts. A released call is a detach from the reader's
-          // side, so it closes with the same line a foreground detach does, naming the
-          // key that fired; Esc is not a detach — nobody moved anything, the call merely
-          // stopped waiting — so it says that and claims no trigger (ADR-0025).
+          // Three endings, three receipts, and no sentence shared between them (ADR-0027).
+          // A released call is a detach from the reader's side, so it closes with the same
+          // line a foreground detach does, naming the key that fired. Esc is not a detach,
+          // and neither is a deadline this call set for itself: nobody moved anything, the
+          // call merely stopped waiting, so each says its own thing and claims no trigger.
           const receipt =
-            blocked.stop === "aborted"
-              ? `Follow: pretty_task_bg_logs ${task.id} · Stop: pretty_task_bg_kill ${task.id}`
-              : detachedNotice({
+            blocked.stop === "released"
+              ? detachedNotice({
                   kind: "detached",
                   taskId: task.id,
                   trigger: "shortcut",
                   afterSeconds: blocked.afterSeconds,
-                });
+                })
+              : `Follow: pretty_task_bg_logs ${task.id} · Stop: pretty_task_bg_kill ${task.id}`;
           const why =
-            blocked.stop === "aborted"
-              ? "this call stopped waiting"
-              : "the shortcut let this call go";
+            blocked.stop === "released"
+              ? "the shortcut let this call go"
+              : blocked.stop === "deadline"
+                ? "this call's waitSeconds deadline passed and the task was not touched"
+                : "this call stopped waiting";
           return {
             content: [
               {

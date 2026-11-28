@@ -938,14 +938,15 @@ export class ProcessTasks {
 
   /**
    * Hold a tool call open until the task it started ends, the caller's Esc aborts,
-   * or the shortcut releases it from outside (ADR-0025). Undefined means the
-   * session has no such task. The process is never touched: a released or aborted
-   * wait answers with the record as it is and leaves the task running.
+   * the caller's own `waitSeconds` deadline passes, or the shortcut releases it from
+   * outside (ADR-0025, ADR-0027). Undefined means the session has no such task. The
+   * process is never touched: a released, aborted or timed-out wait answers with the
+   * record as it is and leaves the task running.
    */
   async awaitRun(
     scope: TaskScope,
     id: string,
-    signal?: AbortSignal,
+    options: { signal?: AbortSignal; timeoutMs?: number } = {},
   ): Promise<BlockedRunResult | undefined> {
     const session = await this.session(scope);
     const task = session.tasks.get(id);
@@ -964,7 +965,8 @@ export class ProcessTasks {
     let stop: WaitStop;
     try {
       stop = await this.holdTurn(session, id, {
-        ...(signal === undefined ? {} : { signal }),
+        ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
+        ...(options.signal === undefined ? {} : { signal: options.signal }),
         expose: (release) => {
           this.blocked.set(key, { taskId: id, startedAt, release });
         },

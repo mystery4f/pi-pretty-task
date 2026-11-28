@@ -42,7 +42,10 @@ interface BlockedDetails {
  */
 async function processes(dir: TempDir): Promise<readonly ProcessTask[]> {
   const path = taskRecordPath(sessionTaskDirectory(dir.path, SESSION));
-  const document = JSON.parse(await readFile(path, "utf8")) as { tasks: Task[] };
+  // A refusal that never started a task leaves no record file at all, and "no file"
+  // is the same claim as "no records" wherever this is called.
+  const raw = await readFile(path, "utf8").catch(() => '{"tasks":[]}');
+  const document = JSON.parse(raw) as { tasks: Task[] };
   return document.tasks.filter((task): task is ProcessTask => task.kind === "process");
 }
 
@@ -163,6 +166,61 @@ describe("pretty_task_bg_run with wait", () => {
     expect(await readFile(outputPath as string, "utf8")).toContain("work done");
   });
 
+  it("stops waiting when waitSeconds passes without touching the process", async () => {
+    const { harness, dir } = await setup();
+    const command = await writeScript(
+      dir.path,
+      "outlives.mjs",
+      [
+        "console.log('long work');",
+        "setTimeout(() => { console.log('too late'); process.exit(7); }, 8000);",
+        "",
+      ].join("\n"),
+    );
+
+    const startedAt = Date.now();
+    const result = await harness.call("pretty_task_bg_run", {
+      command,
+      wait: true,
+      waitSeconds: 1,
+    });
+    const took = Date.now() - startedAt;
+    const text = resultText(result);
+    const details = result.details as BlockedDetails;
+
+    // The deadline is the call's, not the task's: an eight-second child, a
+    // one-second wait, and the answer arrives long before the child ends (ADR-0027).
+    expect(took).toBeLessThan(6000);
+    expect(details.waited).toBe(false);
+    expect(details.stop).toBe("deadline");
+    expect(details.exitCode ?? null).toBeNull();
+    expect(text).toContain("waitSeconds deadline passed");
+    expect(text).toContain("the task was not touched");
+    // The tail may still be empty at one second, so the answer must not claim an
+    // ending — it says the task is still running and offers the two commands.
+    expect(text).toContain("is still running");
+
+    // Three exits, three sentences: the deadline borrows neither Esc's nor the
+    // shortcut's, and it moves nothing, so it draws no card.
+    expect(text).not.toContain("this call stopped waiting");
+    expect(text).not.toContain("the shortcut let this call go");
+    expect(text).not.toContain("↪ moved to");
+    expect(harness.entries.some((entry) => entry.customType === "task-detached")).toBe(false);
+
+    // The union the key reads is honest again: nothing is waiting on this call.
+    expect(harness.controller.processTasks.blockedCount()).toBe(0);
+
+    // The record is still the same live process: no restart, no ending, no kill.
+    await waitFor("the record to still show a running process", async () => {
+      const [record] = await processes(dir);
+      return record?.status === "running" && record.pid !== undefined;
+    });
+    const [running] = await processes(dir);
+    expect(running?.id).toBe(details.id);
+
+    await harness.call("pretty_task_bg_kill", { id: details.id });
+  });
+
   it("refuses to wait for a queued step", async () => {
     const { harness, dir } = await setup();
     const first = await writeScript(dir.path, "first.mjs", "setTimeout(() => {}, 1500);");
@@ -182,6 +240,22 @@ describe("pretty_task_bg_run with wait", () => {
     expect(await processes(dir)).toHaveLength(1);
 
     await harness.call("pretty_task_bg_kill", { id: firstId });
+  });
+
+  it("refuses a waitSeconds bound that nothing would hold open", async () => {
+    const { harness, dir } = await setup();
+
+    // A bound with no `wait` would be silently ignored, and an ignored parameter reads
+    // as applied; the refusal names the parameter that caps the task instead (ADR-0027).
+    const refused = await harness.call("pretty_task_bg_run", {
+      command: await writeScript(dir.path, "bounded-nowhere.mjs", "process.exit(0);"),
+      waitSeconds: 5,
+    });
+
+    expect(resultText(refused)).toContain("`waitSeconds` bounds how long a blocking call waits");
+    expect(resultText(refused)).toContain("`timeoutSeconds`");
+    expect(resultText(refused)).toContain("The task was not started.");
+    expect(await processes(dir)).toHaveLength(0);
   });
 
   // Two real children, two three-second tree kills and a wait on each record: under a

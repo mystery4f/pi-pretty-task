@@ -165,7 +165,7 @@ describe("pretty_task_bg_run with a template", () => {
 
     const description = harness.toolDescription("pretty_task_bg_run");
 
-    // 411 characters of base sentence, 27 of lead-in, 300 of list, 134 of reload
+    // 418 characters of base sentence, 27 of lead-in, 300 of list, 134 of reload
     // note: the base carries the `wait: true` contract since ADR-0025, so the ceiling
     // moved with it instead of the sentence being trimmed for the test's sake.
     expect(description.length).toBeLessThan(900);

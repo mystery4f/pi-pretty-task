@@ -33,7 +33,7 @@ _Avoid_: run, tick, execution, invocation
 _Avoid_: running command, live process, session command
 
 **Blocked run**:
-带 `wait: true` 的 `pretty_task_bg_run` 起的那条 Process task，从起进程起到调用返回之间。与 Foreground run 的分界是记录何时成立：Blocked run 从第一毫秒就是 Task——有记录、进面板、计入 `maxRunningTasks`，等它的调用只是 `session.waiters` 上多一个等待者，不是另一套生命周期。等待有三种结束方式：任务结束、调用方 Esc、`timeoutSeconds` 杀树；`ctrl+shift+b` 是第四条出口，只放走调用、不碰进程；放走时沿用 ADR-0020 的回执与那张 `task-detached` 卡（`trigger: "shortcut"`），所以用户看见的和一次前台改道一样（ADR-0025）。发起它的那次工具调用本身叫 blocking call。
+带 `wait: true` 的 `pretty_task_bg_run` 起的那条 Process task，从起进程起到调用返回之间。与 Foreground run 的分界是记录何时成立：Blocked run 从第一毫秒就是 Task——有记录、进面板、计入 `maxRunningTasks`，等它的调用只是 `session.waiters` 上多一个等待者，不是另一套生命周期。等待有四种结束方式：任务结束（含 `timeoutSeconds` 到点杀树，`stop: "ended"`）、调用方 Esc（`stop: "aborted"`）、调用方自己的 `waitSeconds` 到点（`stop: "deadline"`——只结束等待，任务不动，不画卡，ADR-0027）、`ctrl+shift+b` 放走调用（`stop: "released"`，只放走调用、不碰进程；沿用 ADR-0020 的回执与那张 `task-detached` 卡，`trigger: "shortcut"`，所以用户看见的和一次前台改道一样，ADR-0025）。不写 `waitSeconds` 时等待无上限，直到前三种之一发生。发起它的那次工具调用本身叫 blocking call。
 _Avoid_: foreground run, sync task, foreground task
 
 **Detached**:
