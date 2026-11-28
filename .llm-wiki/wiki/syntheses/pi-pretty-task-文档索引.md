@@ -50,6 +50,7 @@ updated: 2026-11-28
 | [0024 Loop 的提示词落盘，路径由 id 派生](../../docs/adr/0024-loop-prompt-lands-on-disk.md) | 提示词从记录里的冻结字符串改为 `.pi/tasks/<session>/<loop-id>.prompt.md`：地址只由 loop id 派生、任何工具都不收路径参数（AI 侧没有路径权力）、插件只在创建、显式改写与重建三处写、每发读一次、读失败重建后照常触发；记录上的 `prompt` 降为 seed 兼重建源 |
 | [0025 阻塞式 run 在调用里等任务结束](../../docs/adr/0025-blocking-run-waits-inside-the-call.md) | `wait: true` 仍是一条真 process task（第一毫秒起有记录、进面板、计入 `maxRunningTasks`），所以等待是 `session.waiters` 上多一个监听者，不复制 `foreground.ts` 的 `runs`；Esc 只结束等待、`timeoutSeconds` 照旧杀整棵树；只在结束时给一次回答（不流 `onUpdate`）；`after` + `wait` 直接拒；`ctrl+shift+b` 移出覆盖开关，按「前台 + 阻塞」合计数、恰好一条才动手 |
 | [0026 改道之后的一分钟里拒绝再起前台命令](../../docs/adr/0026-a-detach-closes-the-door-for-a-minute.md) | 模型只读得到三条通道：卡片 `appendEntry` 读不到、回执 `detachedNotice` 当次就读到、`sendNotice` 要开一轮；所以提醒用「拒绝」承载——改道后 60 s 内 `wait: true` 与前臺命令直接被拒、拒绝文案即提醒，回执末尾也加一句；任务记录补 `detached: { trigger, heldSeconds }`，补上 14 条只有 `origin` 的记录 |
+| [0027 `waitSeconds` 给阻塞调用一个自己的期限](../../docs/adr/0027-waitseconds-bounds-the-blocking-call.md) | 新参数叫 `waitSeconds` 而不是 `timeoutSeconds`（后者在 `bg_run` 上是杀树）；缺省仍无上限；到点复用 `WaitStop` 的 `deadline`，不给 `trigger` 加第四项；三条回执三句话、`stop` 为 `ended`/`aborted`/`deadline`/`released`；上限复用 `MAX_WAIT_SECONDS`（600）；只走 `holdTurn` 已有的 `timeoutMs` 接缝 |
 
 ## 工具链与代码风格
 
