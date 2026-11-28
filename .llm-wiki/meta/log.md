@@ -158,3 +158,12 @@
 ## [2026-11-28T13:22:13.768Z] observe
 - slug: "obs-2026-11-28-adr-0029-four-layer-settings-in-pretty-task-json-and-tasks-s", title: "ADR-0029 four-layer settings in pretty-task.json and /tasks settings view", relevance: "high"
 
+## [2026-11-28T14:31:46.095Z] retro
+- slug: "preview-pipeline-title-undefined-spread", title: "pi-preview writePage spread title:undefined over default", category: "uncategorized"
+
+## [2026-11-28T14:31:46.118Z] retro
+- slug: "settings-view-env-warning-truncated-at-106", title: "pi-pretty-task settings view env warning truncated at 106 columns", category: "uncategorized"
+
+## [2026-11-28T14:31:46.138Z] retro
+- slug: "preview-settings-frame-from-real-readsettings", title: "pi-preview settings frame built from a real readSettings snapshot", category: "uncategorized"
+

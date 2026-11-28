@@ -61,8 +61,11 @@
   "sources/pi-pretty-task-side-index-to-field": [
     "sources/pi-pretty-task-one-projection-and-formula"
   ],
+  "sources/preview-pipeline-title-undefined-spread": [],
   "sources/preview-rerun-shifts-untouched-images": [],
+  "sources/preview-settings-frame-from-real-readsettings": [],
   "sources/session-record-not-source-is-the-evidence": [],
+  "sources/settings-view-env-warning-truncated-at-106": [],
   "sources/slow-suite-timings-not-workers": [
     "sources/await-state-not-bytes-in-process-tests"
   ],
@@ -89,8 +92,11 @@
     "sources/await-state-not-bytes-in-process-tests",
     "sources/delete-remote-branch-via-gh-api",
     "sources/pi-git-install-omits-dev-deps-so-ship-ts-entry",
+    "sources/preview-pipeline-title-undefined-spread",
     "sources/preview-rerun-shifts-untouched-images",
+    "sources/preview-settings-frame-from-real-readsettings",
     "sources/session-record-not-source-is-the-evidence",
+    "sources/settings-view-env-warning-truncated-at-106",
     "sources/slow-suite-timings-not-workers",
     "sources/windows-taskkill-t-needs-force-for-console-node",
     "syntheses/pi-pretty-task-交接v02-收尾状态",

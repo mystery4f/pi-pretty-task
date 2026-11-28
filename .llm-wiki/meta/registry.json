@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "last_updated": "2026-11-28T13:22:13.868Z",
+  "last_updated": "2026-11-28T14:31:46.225Z",
   "pages": {
     "sources/adr-dated-status-and-index-guard": {
       "type": "source",
@@ -540,6 +540,14 @@
       "created": "2026-11-16",
       "updated": "2026-11-16"
     },
+    "sources/preview-pipeline-title-undefined-spread": {
+      "type": "source",
+      "title": "pi-preview writePage spread title:undefined over default",
+      "status": "insight",
+      "slug": "preview-pipeline-title-undefined-spread",
+      "created": "2026-11-28",
+      "updated": "2026-11-28"
+    },
     "sources/preview-rerun-shifts-untouched-images": {
       "type": "source",
       "title": "A full preview re-render rewrites images nothing changed",
@@ -549,6 +557,14 @@
       "created": "2026-11-27",
       "updated": "2026-11-27"
     },
+    "sources/preview-settings-frame-from-real-readsettings": {
+      "type": "source",
+      "title": "pi-preview settings frame built from a real readSettings snapshot",
+      "status": "insight",
+      "slug": "preview-settings-frame-from-real-readsettings",
+      "created": "2026-11-28",
+      "updated": "2026-11-28"
+    },
     "sources/session-record-not-source-is-the-evidence": {
       "type": "source",
       "title": "What the model saw is in the session record, not the source",
@@ -557,6 +573,14 @@
       "slug": "session-record-not-source-is-the-evidence",
       "created": "2026-11-27",
       "updated": "2026-11-27"
+    },
+    "sources/settings-view-env-warning-truncated-at-106": {
+      "type": "source",
+      "title": "pi-pretty-task settings view env warning truncated at 106 columns",
+      "status": "insight",
+      "slug": "settings-view-env-warning-truncated-at-106",
+      "created": "2026-11-28",
+      "updated": "2026-11-28"
     },
     "sources/slow-suite-timings-not-workers": {
       "type": "source",

@@ -43,8 +43,11 @@
 - [[sources/pi-pretty-task-preview-from-the-built-panel]] — README 截图从 dist 里的真面板渲染，三处状态陷阱 *(created: 2026-11-21)*
 - [[sources/pi-pretty-task-session-hub-required]] — 会话 hub 必须由入口注入，默认值会分裂写入权 *(created: 2026-11-16)*
 - [[sources/pi-pretty-task-side-index-to-field]] — 并行索引应当塌回记录上的一个字段 *(created: 2026-11-16)*
+- [[sources/preview-pipeline-title-undefined-spread]] — pi-preview writePage spread title:undefined over default *(created: 2026-11-28)*
 - [[sources/preview-rerun-shifts-untouched-images]] — A full preview re-render rewrites images nothing changed *(created: 2026-11-27)*
+- [[sources/preview-settings-frame-from-real-readsettings]] — pi-preview settings frame built from a real readSettings snapshot *(created: 2026-11-28)*
 - [[sources/session-record-not-source-is-the-evidence]] — What the model saw is in the session record, not the source *(created: 2026-11-27)*
+- [[sources/settings-view-env-warning-truncated-at-106]] — pi-pretty-task settings view env warning truncated at 106 columns *(created: 2026-11-28)*
 - [[sources/slow-suite-timings-not-workers]] — 慢测试先治写死的时长，再谈并行度 *(created: 2026-11-15)*
 - [[sources/subagent-structured-verdict-path]] — Subagent structured verdicts live in structured-output/output.json, not the artifact md *(created: 2026-11-25)*
 - [[sources/tool-choice-guidance-belongs-in-promptguidelines]] — Tool-choice guidance ships as promptGuidelines, not config *(created: 2026-11-28)*
@@ -61,4 +64,4 @@
 - [[syntheses/verify-red-tests-handoff]] — verify 红测修复交接（5 个 integration 用例） *(created: 2026-11-16)*
 
 ---
-*Last updated: 2026-11-28T13:22:13.868Z* | *Total pages: 52*
+*Last updated: 2026-11-28T14:31:46.225Z* | *Total pages: 55*

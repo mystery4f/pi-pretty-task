@@ -50,3 +50,6 @@
 {"slug":"tool-choice-guidance-belongs-in-promptguidelines","title":"Tool-choice guidance ships as promptGuidelines, not config","category":"architecture","timestamp":"2026-11-28T08:24:32.284Z","kind":"retro"}
 {"slug":"obs-2026-11-28-pi-p-hangs-on-extension-spawned-children-not-mcp","title":"`pi -p` hangs on extension-spawned children, not MCP","relevance":"high","timestamp":"2026-11-28T08:41:17.934Z","kind":"observe"}
 {"slug":"obs-2026-11-28-adr-0029-four-layer-settings-in-pretty-task-json-and-tasks-s","title":"ADR-0029 four-layer settings in pretty-task.json and /tasks settings view","relevance":"high","timestamp":"2026-11-28T13:22:13.768Z","kind":"observe"}
+{"slug":"preview-pipeline-title-undefined-spread","title":"pi-preview writePage spread title:undefined over default","category":"uncategorized","timestamp":"2026-11-28T14:31:46.095Z","kind":"retro"}
+{"slug":"settings-view-env-warning-truncated-at-106","title":"pi-pretty-task settings view env warning truncated at 106 columns","category":"uncategorized","timestamp":"2026-11-28T14:31:46.118Z","kind":"retro"}
+{"slug":"preview-settings-frame-from-real-readsettings","title":"pi-preview settings frame built from a real readSettings snapshot","category":"uncategorized","timestamp":"2026-11-28T14:31:46.138Z","kind":"retro"}
