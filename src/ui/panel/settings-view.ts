@@ -241,7 +241,8 @@ export function renderSettingsView(panel: PanelView, width: number): string[] {
       reload ? theme.fg("warning", "requires /reload") : theme.fg("success", "live"),
     ];
     if (shadowed) {
-      tags.push(theme.fg("warning", `shadowed by ${shadowingEnvVar(key, settings) ?? "env"}`));
+      // The column has ~27 cells: the variable's name goes on the line below, not here.
+      tags.push(theme.fg("warning", "⚠ env"));
     }
 
     body.push(` ${pointer} ${keyCell}${valueCell}${badge}${fileCell}${tags.join(" · ")}`);
@@ -259,7 +260,7 @@ export function renderSettingsView(panel: PanelView, width: number): string[] {
   );
   if (shadowedBy !== undefined) {
     body.push(
-      ` ${theme.fg("warning", `⚠ Shadowed by ${shadowedBy} in process.env — file edits save to ${scope} (${targetFile}) but stay inactive while ${shadowedBy} is set.`)}`,
+      ` ${theme.fg("warning", `⚠ ${shadowedBy} is set in process.env: ${scope} edits save but stay inactive.`)}`,
     );
   }
   if (panel.notice !== undefined) {

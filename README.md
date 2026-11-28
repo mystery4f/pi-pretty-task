@@ -85,6 +85,10 @@ Search matches the name, the command and a loop's prompt at once, and keeps filt
 
 ![The search box with a query that hits: seven records narrowed to the ones whose command contains "run"](https://raw.githubusercontent.com/mystery4f/pi-pretty-task/main/docs/preview-search.png)
 
+`s` opens the settings page on the same panel: every setting with the layer that owns it (`env`, `project`, `agent`, `default`), what the target file holds, and whether a change is live or needs `/reload`. A row shadowed by an environment variable says so, because a file edit there saves but never takes effect.
+
+![The settings page: eight settings with their source badge — one from env, one from project, two from agent, four from default — the project file's values beside them, and each row marked live or requires /reload; the selected row shows all four layers and the variable shadowing it](https://raw.githubusercontent.com/mystery4f/pi-pretty-task/main/docs/preview-settings.png)
+
 With the panel closed, one line stands in for it: how many records are running, how many command loops have a raised signal, how many have ended, and the way back in. It is a widget (`PI_PRETTY_TASK` slot), so another extension cannot take the line, and it reprints after every change the extension makes.
 
 ![The status line above the editor: 9 running · 1 signal · 9 finished, and the command that reopens the panel](https://raw.githubusercontent.com/mystery4f/pi-pretty-task/main/docs/preview-status.png)

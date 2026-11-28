@@ -21,6 +21,7 @@ npm run preview:dump --only <label>          # 只打文字帧，不起浏览器
 | `docs/preview-cmdloop.png` | 打开一个命令 loop：每次 fire 的结局、exit code、耗时、大小，新的在上 | 失败有 exit code 可查，不做成一串同色的行 |
 | `docs/preview-failed.png` | 列表按 `f` 筛到 `failed`：两行都带 `exit 1`，表头仍数着被筛掉多少 | 筛选不会把失败的原因一起筛掉 |
 | `docs/preview-search.png` | 搜索框输入 `run`，命中名字、命令与 loop 的 prompt | 一次查询能同时搜三种记录 |
+| `docs/preview-settings.png` | 按 `s` 进入设置页：八项设置各带来源徽标（env / project / agent / default）、目标文件里的值、`live` 还是 `requires /reload`；选中行下面列出四层的值和遮蔽它的环境变量 | 四层优先级是看得见的：改哪一层、改了生不生效，不用翻文档 |
 | `docs/preview-detach.png` | 改道卡本身：同一张卡的两个触发器（`ctrl+shift+b` 与计时器），带面板底色。卡片是会话条目，面板截图里看不到，只有这一张图能看 | 改道留得下，而且说清是谁结束的等待 |
 | `docs/preview-cards.png` | 三张消息卡片：失败任务的尾巴、signalled 命令 loop 的报告、一次唤醒送进来的 prompt | 不进 `/tasks` 也知道发生过什么，卡片和模型读到的是同一份事实 |
 | `docs/preview-status.png` | 面板关着时编辑器上方那一行：跑着 / 有信号 / 已结束 / 回来的入口 | 面板收起之后，摘要还在 |
@@ -34,7 +35,7 @@ README 引用的每一张都必须在上表里、也必须在磁盘上：`test/u
 
 在 `scripts/preview/` 里，十五个文件（`storyboard.d.mts` 只是给 TypeScript 的类型声明，不是脚本；`record/session.json` 是采证快照，不是代码）：
 
-- `render.mjs` — 用脚本按键驱动 `TasksPanel`，每按一次键 `await panel.settle()` 后 `render(106)` 抓一帧。面板从 `dist/` 导入，所以必须先 build。列表、进程页、loop 页、chain 页、命令 loop 页、筛到 `failed`、搜一次、改道那一帧都从这里出。
+- `render.mjs` — 用脚本按键驱动 `TasksPanel`，每按一次键 `await panel.settle()` 后 `render(106)` 抓一帧。面板从 `dist/` 导入，所以必须先 build。列表、进程页、loop 页、chain 页、命令 loop 页、筛到 `failed`、搜一次、按 `s` 进设置页、改道那一帧都从这里出。
 - `fixtures.mjs` — 固定的场景：九个进程、三个 loop、一个 chain、若干输出尾巴。时间基准是常量 `CLOCK`（2026-11-21 09:12 UTC），面板按本机时区渲染，所以图上永远是同一批时间戳。
 - `card.mjs` — 改道卡不是面板页，按键驱动碰不到它：这里把 `{id, trigger, afterSeconds}` 直接交给 `dist/ui/notification.js` 的 `renderTaskDetached`，两个触发器各画一张，同样的宽度断言。
 - `transcript.mjs` — 另外两类不是面板：三张消息卡交给 `renderTaskFinished` / `renderLoopSignal` / `renderLoopWake`，外面套上 pi 给自定义消息加的那层 `Box(1, 1, theme.bg("customMessageBg"))`；状态行直接调 `statusLineText(view.task)`，不复制一份文案。任何一行超宽就抛错，不会静默截断。
@@ -43,7 +44,7 @@ README 引用的每一张都必须在上表里、也必须在磁盘上：`test/u
 - `session.mjs` — 动画的开头四帧：普通会话里的命令、跑到一半的输出、`ctrl+shift+b` 落下的回执、回执之后那张卡。命令原文、输出、回执与卡片内容都来自快照，编辑器是页面里真画的 DOM。
 - `page.mjs` — ANSI 转 HTML span，套一个圆角深色终端窗口（标题栏三个圆点 + macOS 风格渐变背景）。字体优先 `Cascadia Mono`，关掉连字（否则 `--` 会被渲染成一根长横线）。
 - `shoot.mjs` — `playwright-core` 起本机浏览器截图；`pngjs` 解码 + `gifenc` 编码。每帧停多久由 `TOUR` 的 `ms` 经 `writeGif` 的 `delays` 给，脚本里不再写死 1.1 s / 末帧 2.6 s。
-- `dump.mjs` — 不起浏览器，把十张静图与 `TOUR` 的每一帧按纯文本打出来（`npm run preview:dump`，`--only <label>` 只看那一帧）。动画帧的顺序取自 `TOUR`，这里只做筛选，不另存一份顺序。改一帧之后最快的检查方式。GIF 的每帧 PNG 默认删掉，`PREVIEW_FRAMES=1 npm run preview` 保留到 `.tmp/preview/`。
+- `dump.mjs` — 不起浏览器，把十二张静图与 `TOUR` 的每一帧按纯文本打出来（`npm run preview:dump`，`--only <label>` 只看那一帧）。动画帧的顺序取自 `TOUR`，这里只做筛选，不另存一份顺序。改一帧之后最快的检查方式。GIF 的每帧 PNG 默认删掉，`PREVIEW_FRAMES=1 npm run preview` 保留到 `.tmp/preview/`。
 - `theme.mjs` — 24-bit ANSI 配色，换一个色值整份图就换主题；`customMessageBg` 是从 pi 的 `violet` 抄来的面板底色，消息卡靠它成框。脚本还会断言面板每行不超过 106 列、卡片每行不超过 96 列，给纯文本着色后宽度仍是 1，颜色一旦把布局挤歪会直接报错。
 - `storyboard.mjs` — 动画的唯一帧表：`TOUR` 逐条写 `label`（渲染器已经抓到的帧名）、`ms`（停多久）、`key`（这一帧答的是哪个键，`preview.mjs` 会拿渲染器给的 badge 逐帧核对）、`surface`（它证明的那一面，取自 `SURFACES`）、`topic`（这一帧讲什么）、`mark`（README alt 里必须出现的那句话）。窗口下方三行说明在 `LEGEND`，上限在 `LIMITS`。`preview.mjs` 按它取帧与逐帧延时，`dump.mjs` 只按它筛选，测试读它做断言——顺序不许有第二份。
 - `gif-check.mjs` — 不用浏览器，直接从 `docs/preview.gif` 的字节里读帧数、画布、逐帧延时与每帧数据量，要求帧数等于 `TOUR` 条数、画布高等于 `145 + 19 × 最高一页的文本行 + 19 × legend 行`（`145` 是标题栏、内边距与边框合起来的高度，实测得来；legend 一行就是一个文本行高）、逐帧延时逐项等于 `TOUR` 的 `ms`，并守住 36 s / 1024 KB 两个上限；`node scripts/preview/gif-check.mjs [gif 路径]` 红就说明图和帧表已经漂开，给个路径就能拿同样的尺子量候选编码器的产物。

@@ -26,6 +26,7 @@ import {
   renderIteration,
   renderList,
   renderSearch,
+  renderSettings,
   renderTail,
 } from "./render.mjs";
 import { launchBrowser, screenshot, writeGif } from "./shoot.mjs";
@@ -56,7 +57,9 @@ const kb = (path) => Math.round(statSync(path).size / 102.4) / 10;
  */
 function writePage(name, page) {
   const path = `${SCRATCH}${name}.html`;
-  writeFileSync(path, terminalPage({ title: TITLE, ...page }));
+  // `title: undefined` must not override the default: a still passes `title: shot.title`,
+  // which is `undefined` for every panel shot, and `escapeHtml(undefined)` throws.
+  writeFileSync(path, terminalPage({ title: TITLE, ...page, title: page.title ?? TITLE }));
   return path;
 }
 
@@ -73,6 +76,7 @@ async function main() {
   const commandLoop = lastLines(await renderCommandLoop());
   const failed = lastLines(await renderFailed());
   const search = lastLines(await renderSearch());
+  const settings = lastLines(await renderSettings());
   // The animation plays `TOUR`, in that order and with that timing: the two frames of
   // the takeover come first, so the detached task is already one of the rows the rest
   // of the walk moves through. Every frame is one a renderer already captured.
@@ -92,7 +96,7 @@ async function main() {
   const status = await renderStatusLine();
 
   // `--only <label>` writes one image and leaves every other file alone: a re-run
-  // otherwise rewrites all eleven, and the rasteriser moves a few hundred bytes on
+  // otherwise rewrites all twelve, and the rasteriser moves a few hundred bytes on
   // images nothing changed — noise in the diff, and clearing it with `git checkout --`
   // can throw away a real change sitting beside it.
   const onlyIndex = process.argv.indexOf("--only");
@@ -106,6 +110,7 @@ async function main() {
     { label: "cmd-loop", lines: commandLoop, out: "preview-cmdloop.png" },
     { label: "failed", lines: failed, out: "preview-failed.png" },
     { label: "search", lines: search, out: "preview-search.png" },
+    { label: "settings", lines: settings, out: "preview-settings.png" },
     { label: "detach", lines: cards, out: "preview-detach.png", title: TRANSCRIPT_TITLE },
     { label: "cards", lines: messages, out: "preview-cards.png", title: TRANSCRIPT_TITLE },
     { label: "status", lines: status, out: "preview-status.png", title: EDITOR_TITLE },

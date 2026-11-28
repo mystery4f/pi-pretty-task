@@ -25,6 +25,7 @@ import {
   renderIteration,
   renderList,
   renderSearch,
+  renderSettings,
   renderTail,
 } from "./render.mjs";
 import { TOUR } from "./storyboard.mjs";
@@ -44,6 +45,7 @@ const frames = [
   { label: "cmd-loop", lines: lastLines(await renderCommandLoop()) },
   { label: "failed", lines: lastLines(await renderFailed()) },
   { label: "search", lines: lastLines(await renderSearch()) },
+  { label: "settings", lines: lastLines(await renderSettings()) },
   // The three transcript surfaces: entries and messages, reached without keystrokes.
   { label: "detach-card", lines: renderDetachCards() },
   { label: "cards", lines: renderMessageCards() },

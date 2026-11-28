@@ -8,6 +8,10 @@
  */
 
 import { visibleWidth } from "@earendil-works/pi-tui";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { readSettings } from "../../dist/tasks/base/settings.js";
 import {
   LOOP_SIGNAL_CUSTOM_TYPE,
   TASK_FINISHED_CUSTOM_TYPE,
@@ -21,7 +25,7 @@ import {
 } from "../../dist/ui/panel/tasks-panel.js";
 import { renderBlockedResult } from "./blocked.mjs";
 import { renderDetachCards } from "./card.mjs";
-import { detachFront, growWeb, holdInFront, now, source } from "./fixtures.mjs";
+import { detachFront, growWeb, HOME, holdInFront, now, source } from "./fixtures.mjs";
 import * as story from "./record.mjs";
 import { renderSession } from "./session.mjs";
 import { renderNotice, renderNoticeOf, renderStatusLine } from "./transcript.mjs";
@@ -52,6 +56,52 @@ const KEY_TOKENS = new Map([
   ["\u001b[C", "→"],
   [ALT_Q, "alt+q"],
 ]);
+
+/**
+ * The settings page's data: a real `readSettings` over two files a user could have
+ * written, with one value pinned by the environment so the page shows every badge
+ * (`env`, `project`, `agent`, `default`) and one `shadowed by` line for real. Written
+ * to a scratch directory at module load and removed on exit, so nothing under the
+ * repository depends on the machine's own `pretty-task.json`.
+ */
+const settingsSnapshot = buildSettingsSnapshot();
+/** @returns {import("../../dist/tasks/base/settings.js").Settings} */
+function buildSettingsSnapshot() {
+  const dir = mkdtempSync(join(tmpdir(), "pi-pretty-task-preview-"));
+  process.on("exit", () => rmSync(dir, { recursive: true, force: true }));
+  const projectDir = join(dir, "project");
+  const agentDir = join(dir, "agent");
+  mkdirSync(join(projectDir, ".pi"), { recursive: true });
+  mkdirSync(agentDir, { recursive: true });
+  writeFileSync(
+    join(projectDir, ".pi", "pretty-task.json"),
+    JSON.stringify({
+      settings: { maxRunningTasks: 10, notify: "off" },
+      templates: { test: { command: "npm test" } },
+    }),
+  );
+  writeFileSync(
+    join(agentDir, "pretty-task.json"),
+    JSON.stringify({ settings: { retentionDays: 14, foregroundTimeoutSeconds: 120 } }),
+  );
+  const snapshot = readSettings({
+    env: { PI_PRETTY_TASK_MAX_RUNNING_TASKS: "6" },
+    projectDir,
+    agentDir,
+    platform: process.platform,
+    probe: () => true,
+  });
+  // The page prints both file paths: a temp directory there would be noise a reader
+  // cannot reproduce, so what it shows are the paths the other previews already use.
+  return {
+    ...snapshot,
+    templatePaths: {
+      // Not `path.join`: on Windows it would turn the POSIX home into backslashes.
+      projectFile: `${HOME}/.pi/pretty-task.json`,
+      agentFile: "/home/mystery/.pi/agent/pretty-task.json",
+    },
+  };
+}
 
 /**
  * What the badge says for one step: the panel key it pressed, or — for a shortcut
@@ -421,6 +471,29 @@ export async function renderSearch() {
       { name: "n", key: "n", badge: "/" },
     ],
     "search",
+  );
+  return frames;
+}
+
+/**
+ * The settings view: `s` from the list opens it on the first row, and the page shows
+ * what a reader needs to decide — which layer owns each value, and whether a change
+ * is live. The snapshot is built by `readSettings` from the same kind of files a user
+ * has, so the badges are the real resolution and not a caption typed by hand.
+ */
+export async function renderSettings() {
+  const panelSource = { ...source, settings: () => settingsSnapshot };
+  // One `↓` lands on `maxRunningTasks`, the row that shows the whole model at once:
+  // an env value, a project value, the `⚠ env` tag and a filled `Layers:` line.
+  const frames = await drive(
+    [
+      { name: "settings", key: "s" },
+      { name: "max-running-tasks", key: DOWN },
+    ],
+    "settings",
+    undefined,
+    "",
+    panelSource,
   );
   return frames;
 }

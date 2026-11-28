@@ -746,7 +746,9 @@ describe("four-layer settings precedence and file validation (ADR-0029)", () => 
     await panel.settle();
     expect(panel.mode).toBe("settings");
 
-    const initialScreen = panel.render(130).join("\n");
+    // 106 columns is the README's panel width: a warning that only fits wider is one a
+    // reader never sees in full.
+    const initialScreen = panel.render(106).join("\n");
     // Provenance badges for all four sources are rendered
     expect(initialScreen).toContain("[env]");
     expect(initialScreen).toContain("[project]");
@@ -759,10 +761,19 @@ describe("four-layer settings precedence and file validation (ADR-0029)", () => 
     expect(isReloadRequiredSetting("retentionDays")).toBe(true);
     expect(isReloadRequiredSetting("maxRunningTasks")).toBe(false);
     // Env shadow badge is shown on notify
-    expect(initialScreen).toContain("shadowed by PI_PRETTY_TASK_NOTIFY");
+    // The row carries a short `⚠ env` tag and the detail line names the variable; the
+    // long tag was cut at 106 columns, hiding the very name a reader needs to unset.
+    expect(initialScreen).toContain("⚠ env");
+    // Move down to `notify` (index 2): only the selected row prints its detail line
+    for (let i = 0; i < 2; i += 1) panel.handleInput("\u001b[B");
+    await panel.settle();
+    const notifyScreen = panel.render(106).join("\n");
+    expect(notifyScreen).toMatch(
+      /⚠ PI_PRETTY_TASK_NOTIFY is set in process\.env: project edits save but stay inactive\./,
+    );
 
-    // Move down to `adoptForeground` (index 4: outputCapBytes=0, maxRunningTasks=1, notify=2, retentionDays=3, adoptForeground=4)
-    for (let i = 0; i < 4; i += 1) panel.handleInput("\u001b[B");
+    // Two more down reaches `adoptForeground` (index 4)
+    for (let i = 0; i < 2; i += 1) panel.handleInput("\u001b[B");
     // Press Enter to toggle adoptForeground from "off" to "on" in project scope
     panel.handleInput("\r");
     await panel.settle();
