@@ -15,6 +15,13 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { type Component, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { formatBytes } from "../../tasks/base/format.js";
+import {
+  readSettings,
+  type SettingKey,
+  type SettingScope,
+  type Settings,
+  type SettingsFileLayer,
+} from "../../tasks/base/settings.js";
 import type { CmdLoopTask, FireRecord, PromptLoopTask, Task } from "../../tasks/base/task.js";
 import type { Iteration } from "../../tasks/loop/iteration.js";
 import type { PromptPreview } from "../../tasks/loop/prompt-file.js";
@@ -41,6 +48,15 @@ import {
 } from "./model.js";
 import { bestFieldMatch, type RowMatch } from "./query.js";
 import { inTab, passesFilter } from "./row-filter.js";
+import {
+  formatSettingSavedNotice,
+  initialDraftForSetting,
+  isCycleSettingKey,
+  nextCycledSettingPatch,
+  parseDraftSettingPatch,
+  renderSettingsView,
+  visibleSettingKeys,
+} from "./settings-view.js";
 import type { PanelView } from "./view.js";
 
 export * from "./format.js";
@@ -48,6 +64,7 @@ export * from "./keys.js";
 export * from "./model.js";
 export * from "./query.js";
 export * from "./row-filter.js";
+export * from "./settings-view.js";
 
 /** Refresh period; the tail of a running task should look alive. */
 const REFRESH_MS = 1000;
@@ -174,6 +191,11 @@ export class TasksPanel implements Component, PanelView {
   callTop = 0;
 
   notice: string | undefined;
+  settingsScope: SettingScope = "project";
+  settingsIndex = 0;
+  settingsEditing = false;
+  settingsDraft = "";
+  private cachedSettings: Settings | undefined;
   /** Bytes each task had at the previous refresh, so the list can show `+4.1KB ↑`. */
   readonly lastBytes = new Map<string, number>();
   readonly recentGrowth = new Map<string, { bytes: number; at: number }>();
@@ -339,6 +361,7 @@ export class TasksPanel implements Component, PanelView {
       this.tui.terminal === undefined
         ? DEFAULT_RENDER_ROWS
         : panelHeightBudget(this.tui.terminal.rows);
+    if (this.mode === "settings") return renderSettingsView(this, width);
     if (this.mode === "iteration") return renderIterationDetail(this, width);
     return this.mode === "detail" ? renderDetail(this, width) : renderList(this, width);
   }
@@ -595,6 +618,123 @@ export class TasksPanel implements Component, PanelView {
         this.paint();
       });
     }
+  }
+  /** Current four-layer settings snapshot, refreshing from the source when available. */
+  currentSettings(): Settings {
+    if (this.cachedSettings === undefined) {
+      this.cachedSettings = this.source.settings?.() ?? readSettings({ env: {} });
+    }
+    return this.cachedSettings;
+  }
+
+  /** `s` on the list: open the four-layer settings view (ADR-0029). */
+  openSettings(): void {
+    this.cachedSettings = this.source.settings?.() ?? readSettings({ env: {} });
+    this.mode = "settings";
+    this.settingsEditing = false;
+    this.settingsDraft = "";
+    this.notice = undefined;
+    this.paint();
+  }
+
+  /** `←` or `Esc` from the settings view: return to the task list. */
+  closeSettings(): void {
+    this.settingsEditing = false;
+    this.settingsDraft = "";
+    this.mode = "list";
+    this.notice = undefined;
+    this.paint();
+  }
+
+  /** `t` or `Tab` in the settings view: switch the target file between project and agent. */
+  toggleSettingsScope(): void {
+    this.settingsScope = this.settingsScope === "project" ? "agent" : "project";
+    this.settingsEditing = false;
+    this.settingsDraft = "";
+    this.notice = undefined;
+    this.paint();
+  }
+
+  /** `↑` / `↓` in the settings view: move across the platform's setting keys. */
+  moveSettingsCursor(delta: number): void {
+    const keys = visibleSettingKeys(this.currentSettings());
+    if (keys.length === 0) return;
+    this.settingsIndex = Math.min(keys.length - 1, Math.max(0, this.settingsIndex + delta));
+    this.paint();
+  }
+
+  /** `Enter` in the settings view: cycle an enum/toggle key or open inline text edit. */
+  activateSelectedSetting(): void {
+    const settings = this.currentSettings();
+    const keys = visibleSettingKeys(settings);
+    const key = keys[this.settingsIndex];
+    if (key === undefined) return;
+    if (isCycleSettingKey(key)) {
+      const patch = nextCycledSettingPatch(key, this.settingsScope, settings);
+      this.applySettingPatch(key, patch, false);
+      return;
+    }
+    this.settingsEditing = true;
+    this.settingsDraft = initialDraftForSetting(key, this.settingsScope, settings);
+    this.notice = undefined;
+    this.paint();
+  }
+
+  /** Update the inline text draft while editing a numeric or path setting. */
+  enterSettingsDraft(draft: string): void {
+    this.settingsDraft = draft.slice(0, 256);
+    this.paint();
+  }
+
+  /** `Esc` or `alt+q` while editing a setting value: discard the draft and stay in settings. */
+  cancelSettingEdit(): void {
+    this.settingsEditing = false;
+    this.settingsDraft = "";
+    this.paint();
+  }
+
+  /** `Enter` while editing a setting value: validate and write the draft to the active target file. */
+  commitSettingEdit(): void {
+    const settings = this.currentSettings();
+    const keys = visibleSettingKeys(settings);
+    const key = keys[this.settingsIndex];
+    if (key === undefined) return;
+    const cleared = this.settingsDraft.trim() === "";
+    const patch = parseDraftSettingPatch(key, this.settingsDraft, this.settingsScope, settings);
+    this.settingsEditing = false;
+    this.settingsDraft = "";
+    this.applySettingPatch(key, patch, cleared);
+  }
+
+  /** `d` in the settings view: remove the selected setting from the active target file. */
+  clearSelectedSettingFromFile(): void {
+    const settings = this.currentSettings();
+    const keys = visibleSettingKeys(settings);
+    const key = keys[this.settingsIndex];
+    if (key === undefined) return;
+    this.applySettingPatch(key, { [key]: undefined }, true);
+  }
+
+  private applySettingPatch(
+    key: SettingKey,
+    patch: Partial<Record<SettingKey, SettingsFileLayer[SettingKey] | undefined>>,
+    cleared: boolean,
+  ): void {
+    const update = this.source.updateSettings;
+    if (update === undefined) {
+      this.notify("Settings are read-only in this view.");
+      return;
+    }
+    const scope = this.settingsScope;
+    this.enqueue(async () => {
+      try {
+        this.cachedSettings = await update(scope, patch);
+        this.notice = formatSettingSavedNotice(key, scope, cleared, this.cachedSettings);
+      } catch (error) {
+        this.notice = messageOf(error);
+      }
+      this.paint();
+    });
   }
 
   // ---- data ----------------------------------------------------------------

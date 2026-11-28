@@ -73,8 +73,10 @@ export interface ShellPolicyOptions {
   run?: CommandRunner;
 }
 
-const WINDOWS_SHELLS = ["cmd", "bash"] as const;
-const POSIX_SHELLS = ["inherit", "bash", "sh"] as const;
+export const WINDOWS_SHELLS = ["cmd", "bash"] as const;
+export type WindowsShellName = (typeof WINDOWS_SHELLS)[number];
+export const POSIX_SHELLS = ["inherit", "bash", "sh"] as const;
+export type PosixShellName = (typeof POSIX_SHELLS)[number];
 
 function errorMessage(key: string, detail: string, received: string): string {
   return `${key} ${detail}; received ${JSON.stringify(received)}`;
@@ -89,7 +91,7 @@ function isFile(candidate: string): boolean {
 }
 
 /** Windows has no execute bit; POSIX does, and a file without it would not run. */
-function defaultProbe(platform: NodeJS.Platform): ExecutableProbe {
+export function defaultProbe(platform: NodeJS.Platform): ExecutableProbe {
   if (platform === "win32") return isFile;
   return (candidate) => {
     try {

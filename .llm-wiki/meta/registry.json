@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "last_updated": "2026-11-28T08:41:17.960Z",
+  "last_updated": "2026-11-28T13:22:13.868Z",
   "pages": {
     "sources/adr-dated-status-and-index-guard": {
       "type": "source",
@@ -392,6 +392,23 @@
       "source_context": "Making foreground detach announce its trigger to model and user",
       "created": "2026-11-27",
       "updated": "2026-11-27"
+    },
+    "sources/obs-2026-11-28-adr-0029-four-layer-settings-in-pretty-task-json-and-tasks-s": {
+      "type": "source",
+      "title": "Observation: ADR-0029 four-layer settings in pretty-task.json and /tasks settings view",
+      "tags": [
+        "settings",
+        "configuration",
+        "tui",
+        "adr-0029"
+      ],
+      "status": "observation",
+      "slug": "obs-2026-11-28-adr-0029-four-layer-settings-in-pretty-task-json-and-tasks-s",
+      "relevance": "high",
+      "observed_at": "2026-11-28T13:22:13.728Z",
+      "source_context": "ADR-0029 four-layer settings and /tasks panel settings view",
+      "created": "2026-11-28",
+      "updated": "2026-11-28"
     },
     "sources/obs-2026-11-28-full-test-suite-flakes-at-6-workers-green-at-2": {
       "type": "source",

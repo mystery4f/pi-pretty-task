@@ -17,13 +17,12 @@
 
 ### 四个键
 
-| 键 | 平台 | 取值 | 默认 |
-|---|---|---|---|
-| `PI_PRETTY_TASK_SHELL` | Windows | `cmd`、`bash` | `bash` |
-| `PI_PRETTY_TASK_SHELL_PATH` | Windows | 绝对路径，给上一条点名的 shell 用 | 无（`cmd` 取 `ComSpec`，`bash` 按下面的顺序找） |
-| `PI_PRETTY_TASK_POSIX_SHELL` | POSIX | `inherit`、`bash`、`sh` | `bash` |
-| `PI_PRETTY_TASK_POSIX_SHELL_PATH` | POSIX | 绝对路径，且必须是可执行文件 | 无（先找 `/bin/<name>`，再找 PATH） |
-
+| 环境变量 | `pretty-task.json` (`settings.*`) | 平台 | 取值 | 默认 |
+|---|---|---|---|---|
+| `PI_PRETTY_TASK_SHELL` | `shell` | Windows | `cmd`、`bash` | `bash` |
+| `PI_PRETTY_TASK_SHELL_PATH` | `shellPath` | Windows | 绝对路径，给同层点名的 `shell` 用 | 无（`cmd` 取 `ComSpec`，`bash` 按下面的顺序找） |
+| `PI_PRETTY_TASK_POSIX_SHELL` | `posixShell` | POSIX | `inherit`、`bash`、`sh` | `bash` |
+| `PI_PRETTY_TASK_POSIX_SHELL_PATH` | `posixShellPath` | POSIX | 绝对路径，且必须是可执行文件 | 无（先找 `/bin/<name>`，再找 PATH） |
 Windows 上的 `bash.exe` 按这个顺序找，第一个存在的就用：pi 从 Git Bash 里启动时，用它那份 Git 的 `bin\bash.exe`（看 `EXEPATH` 和 `SHELL`）；否则看 `where git` 报告的每个 `git.exe` 旁边的 `<Git>\bin\bash.exe`；否则看注册表 `HKLM`、`HKCU` 下 `SOFTWARE\GitForWindows` 的 `InstallPath`；否则看 `%ProgramFiles%\Git`、`%ProgramFiles(x86)%\Git`、`%LOCALAPPDATA%\Programs\Git`；最后才在 PATH 上找 `bash.exe`、`bash.com`。只用 `bin\bash.exe`，不用 `usr\bin\bash.exe`：前者自己会把 `mingw64\bin` 和 `usr\bin` 放进 PATH，后者不会，`git`、`grep` 这些命令就找不到。
 
 Windows 上退回 cmd（没装 Git for Windows 的机器必须这样写，否则加载时报下面那条找不到 bash 的错）：
@@ -80,9 +79,9 @@ shell "sh" is not available on win32; use one of: default, cmd, bash
 | 项 | 值 |
 |---|---|
 | 环境变量 | `PI_PRETTY_TASK_OUTPUT_CAP_BYTES` |
+| 配置文件字段 | `settings.outputCapBytes` |
 | 默认值 | `20971520`（20 MiB） |
 | 合法值 | 大于 0 的安全整数（字节数） |
-
 一个 process task 的输出文件最多写入这么多字节。跨过上限的那个 chunk 会先按剩余空间截断写入，之后到达的 chunk 直接丢弃——文件精确停在上限，超出的内容不会落盘。与此同时，任务按与 `pretty_task_bg_kill` 完全相同的路径终止：先礼后兵，整棵进程树一起处理。任务最终状态为 `killed`，终止原因为 `output_cap`，`pretty_task_bg_status` 与 `pretty_task_bg_logs` 都会显示 `kill reason: output_cap`。
 
 恰好写满上限而没有丢弃任何字节的任务不算超限，照常记 `completed`。
@@ -107,9 +106,9 @@ pi 会把这条信息报告为 “Failed to load extension: …”。**不做静
 | 项 | 值 |
 |---|---|
 | 环境变量 | `PI_PRETTY_TASK_MAX_RUNNING_TASKS` |
+| 配置文件字段 | `settings.maxRunningTasks` |
 | 默认值 | `20` |
 | 合法值 | 大于 0 的安全整数（任务数） |
-
 `docs/scope-v1.md` 承诺每个会话同时最多 20 个 running 的 process task，这个键就是那条上限。计数只数记录：一个会话里状态为 `running` 的 process 记录，子任务也算——`pretty_task_bg_run` 的 child、cmd loop 的一次 fire（父任务是一条 loop）、chain 的一个 step（父任务是一条 chain）都是 process 记录，所以它们共享同一个上限（ADR-0014）。loop 的上限（50）数的是调度，不是进程，两者互不抵消。
 
 三处入口都要过这道门：
@@ -127,9 +126,9 @@ pi 会把这条信息报告为 “Failed to load extension: …”。**不做静
 | 项 | 值 |
 |---|---|
 | 环境变量 | `PI_PRETTY_TASK_NOTIFY` |
+| 配置文件字段 | `settings.notify` |
 | 默认值 | `on` |
 | 合法值 | `on`、`off` |
-
 task 结束时向终端的 stdout 写一条 OSC 9 转义：
 
 ```
@@ -154,9 +153,9 @@ ESC ] 9 ; <任务名> <结束状态> BEL
 | 项 | 值 |
 |---|---|
 | 环境变量 | `PI_PRETTY_TASK_RETENTION_DAYS` |
+| 配置文件字段 | `settings.retentionDays` |
 | 默认值 | `7` |
 | 合法值 | 大于 0 的安全整数（天数） |
-
 一个会话的记录文件与它的全部输出文件住在同一个目录里：`<项目根>/.pi/tasks/<会话 id>/`，其中 `tasks.json` 是记录、`<任务 id>.output` 是每个 process task 的输出。所以“旧”是目录的属性——目录的修改时间在这些文件每次落盘时都会前移——清理一个旧会话就是删掉这一个目录：记录和输出一起消失，不留半份。
 
 目录不是会话一开始就建的：只有这个会话真的写进第一条记录时（启动第一个 process task 时，它的输出文件也落在同一个目录里）才创建。只开一个会话、什么都没跑，就不留空目录——读记录与清理都按“目录不存在”这件事处理，不依赖它先存在。
@@ -237,29 +236,61 @@ Unknown template "tset". Known templates: "lint", "test". The task was not start
 
 默认关闭。打开后，本扩展用同名 `registerTool` 覆盖内置 `bash`、并接管 `!` 命令，命令由本扩展 spawn——只有自己 spawn 的进程才有句柄可接管（[ADR-0020](adr/0020-foreground-command-detaches-to-a-task.md)）。`powershell` 工具也由本扩展注册，但它跑的是 pi 自带的 PowerShell 操作（有 `pwsh` 用 `pwsh`，否则用 Windows PowerShell），不经过本扩展的进程，没有下面的改道；`defaultTools` 里没开 `powershell` 的会话只有这一个来源。之后两种触发器能把一条正在前台跑的命令改道成 Process task：
 
-| 键 | 取值 | 默认 | 说明 |
-|---|---|---|---|
-| `PI_PRETTY_TASK_ADOPT_FOREGROUND` | `on`、`off` | `off` | 覆盖内置 shell 工具并接管 `!` 命令 |
-| `PI_PRETTY_TASK_FOREGROUND_TIMEOUT` | 正整数秒（上限 2147483），或 `0` | `0` | 前台命令跑到该秒数自动改道；`0` 为关 |
-
+| 环境变量 | 配置文件字段 (`settings.*`) | 取值 | 默认 | 说明 |
+|---|---|---|---|---|
+| `PI_PRETTY_TASK_ADOPT_FOREGROUND` | `adoptForeground` | `on`、`off` | `off` | 覆盖内置 shell 工具并接管 `!` 命令 |
+| `PI_PRETTY_TASK_FOREGROUND_TIMEOUT` | `foregroundTimeoutSeconds` | 正整数秒（上限 2147483），或 `0` | `0` | 前台命令跑到该秒数自动改道；`0` 为关 |
 快捷键 `ctrl+shift+b` 只对唯一一条「在等」的命令生效，前台命令与阻塞调用（`pretty_task_bg_run` 带 `wait: true`，见 [ADR-0025](adr/0025-blocking-run-waits-inside-the-call.md)）合起来数：恰好一条才动手，两条以上只给一条提示。按键与改道开关无关——关闭覆盖的项目里它也注册，只是那时它只放走阻塞调用。改道的命令不重跑、不换 PID，输出继续写到 `.pi/tasks/` 下的任务文件；它计入同时运行的任务上限，撞上限时改道失败、命令留在前台继续跑。`PI_PRETTY_TASK_FOREGROUND_TIMEOUT` 与内置 `timeout` 参数是两件事：前者「放它走」，后者「到点就杀」，Esc 仍是杀。
 
 改道发生时，两个读者各得一句话，两句话都写明**是谁**结束了这次等待——按键、到点，还是会话在退出。模型唯一的渠道是那次工具调用的返回，形状是 `↪ moved to <id> — <原因>。Still running in the background. Follow: … · Stop: …`，拿到它说明命令还在跑、不是失败；用户那边得到一张会话卡片（`pi.appendEntry` + `registerEntryRenderer`），带底色的标题行（记录 id 与 `held 40.0s`）、一个空行、同一条原因从句，以及 `follow` / `stop` 两行命令，内边距和底色由渲染器自己建的 `Box` 给。卡片随会话落盘，重载后照样画出来，而且**不进模型上下文**——工具返回已经说过同样的事实，再发一条消息就是重复一遍。随后状态行立刻重画。反过来，没有前台命令、并行不止一条、撞上任务上限这三种情况只提示用户，模型那边看到的是命令照旧在前台跑完——没有人请求改道，也就没有什么要对模型说。被 `wait: true` 放走的那一条拿到的是同一张卡：它没有 runner，卡由快捷键处理器自己落，原因从句同样是按键，工具返回同样以那句 `↪ moved to …` 收尾。
 
 阻塞调用自己的边界在 [ADR-0027](adr/0027-waitseconds-bounds-the-blocking-call.md)：`pretty_task_bg_run` 的可选 `waitSeconds`（1–600 秒）到点只结束这次等待，任务不动、不画卡，回执写 `this call's waitSeconds deadline passed and the task was not touched`。四条出口 `stop` 依次取 `ended` / `aborted` / `deadline` / `released`，四句话互不借用；上限与 `pretty_task_bg_wait` 共用 `MAX_WAIT_SECONDS`，所以环境变量表里没有新键。
 
-## 为什么配置只从一个地方读
+## 四层配置、面板编辑与为什么只从一个地方读
 
-所有由环境变量决定的东西——输出上限、同时运行的任务上限、shell 策略、通知开关、旧会话保留天数、agent 设置目录——都在 `src/tasks/base/settings.ts` 里读一次，合成一个 `Settings` 值交给需要它的模块；`src/tasks/process/limits.ts` 只剩与时间有关的数值校验，`src/tasks/process/shell.ts` 从传入的环境里解析，扩展只经 `Settings` 调用它。一个键一种形状——见 `docs/scope-v1.md`。这样测试可以把一份显式环境（或一个普通对象）交给扩展入口，宿主也可以用同样的方式传入，而“读哪里、什么时候校验”只有一个答案：某个模块自己再读一次 `process.env` 是缺陷，不是优化。
+十项运行期配置全部在 `src/tasks/base/settings.ts` 里统一读取并合成一个 `Settings` 值交给需要它的模块（[ADR-0029](adr/0029-settings-in-config-files-and-panel.md)），按四层优先级从高到低决出当前生效值：
 
-`PI_PRETTY_TASK_*` 里这个版本不认识的键同样是错误：
+- `env`：`process.env` 中的十个 `PI_PRETTY_TASK_*` 环境变量（已冻结为最高优先级覆盖层，未来新增配置项只进 `pretty-task.json`，不再新增环境变量）；
+- `project`：项目级 `<项目根>/.pi/pretty-task.json` 的 `"settings"` 对象；
+- `agent`：全局 `$PI_CODING_AGENT_DIR/pretty-task.json`（默认 `~/.pi/agent/pretty-task.json`）的 `"settings"` 对象；
+- `default`：内置默认值。
+
+两层 `pretty-task.json` 同时承载 `"settings"` 与 `"templates"`，顶层只允许这两个键：
+
+```json
+{
+  "settings": {
+    "outputCapBytes": 20971520,
+    "maxRunningTasks": 20,
+    "notify": "on",
+    "retentionDays": 7,
+    "adoptForeground": "off",
+    "foregroundTimeoutSeconds": 0,
+    "shell": "bash"
+  },
+  "templates": {
+    "test": { "command": "npm test -- --run", "cwd": "packages/app", "timeoutSeconds": 600 }
+  }
+}
+```
+
+前六个标量项按字段独立取最高已定义层。当前平台的 `(*Shell, *ShellPath)`（Windows 为 `shell` + `shellPath`，POSIX 为 `posixShell` + `posixShellPath`）作为**单层内成对、跨层整组覆盖**的原子对：
+- 任一层只要给出了 `*ShellPath`，同一层必须同时给出对应的 `*Shell`，禁止跨层凑对；
+- 按 `env` > `project` > `agent` > `default` 找到第一个定义了 `*Shell` 的层后，整组采用该层的 `(*Shell, *ShellPath)`；该决胜层未写 `*ShellPath` 时即对该 shell 执行自动搜寻，绝不继承更低层的 `*ShellPath`。
+
+`PI_PRETTY_TASK_*` 环境变量与两层 `pretty-task.json` 的 `"settings"` 均采取严格入口校验：
 
 ```
 PI_PRETTY_TASK_NOTIFY_TIMEOUT is not a key this version reads; known keys: PI_PRETTY_TASK_OUTPUT_CAP_BYTES, PI_PRETTY_TASK_MAX_RUNNING_TASKS, PI_PRETTY_TASK_NOTIFY, PI_PRETTY_TASK_RETENTION_DAYS, PI_PRETTY_TASK_SHELL, PI_PRETTY_TASK_SHELL_PATH, PI_PRETTY_TASK_POSIX_SHELL, PI_PRETTY_TASK_POSIX_SHELL_PATH, PI_PRETTY_TASK_ADOPT_FOREGROUND, PI_PRETTY_TASK_FOREGROUND_TIMEOUT
 ```
 
-拼错的名字不该变成一个用户以为生效、扩展却默默忽略的设置。唯一例外是命名模板：模板要跨会话复用，所以放在项目与 agent 的 `pretty-task.json`；它也按 `Settings` 给出的路径在扩展入口读一次、校验一次，坏文件只报告，不阻断加载。
+只要环境变量或任一存在的 `pretty-task.json` 出现 JSON 语法错误、顶层未知键、`"settings"` 未知键、非法类型、越界值、非当前平台的 shell 键或未同层配对的 `*ShellPath`，`readSettings()` 直接抛错阻断扩展加载；只有 JSON 与 `"settings"` 均合法而 `"templates"` 内有字段错误时，才由 `loadTemplates()` 报告 stderr 并按文件降级模板。
 
+在 `/tasks` 面板列表页按 `s` 可进入配置视图（`mode = "settings"`，`←` 返回列表）：
+- 标题栏显示当前写回的目标文件作用域，默认 `project`，按 `t`（或 `Tab`）切换为 `agent`；
+- 每行展示配置项名、当前生效值、来源标记（`env` / `project` / `agent` / `default`）及当前目标文件中的值；若某项正被 `env` 覆盖，界面显式提示文件修改被环境变量遮蔽；
+- 按 `Enter` 切换枚举/开关项或编辑数值/路径项，按 `d` 清除当前目标文件中该项的设定（清除 `shell` / `posixShell` 时同层的 `*ShellPath` 一并清除），所有写回均通过 `writeAtomic` 原子更新 `"settings"` 并完整保留同文件内的 `"templates"`；
+- `outputCapBytes`、`maxRunningTasks`、`notify`、`foregroundTimeoutSeconds` 与当前平台的 shell/路径在保存后对当前会话立即生效（作用于后续新启动的任务与通知）；`adoptForeground` 与 `retentionDays` 固定标注 `requires /reload`，需重载后生效。
 ## 上限如何落到进程上
 
 上限与 shell 策略都来自同一个 `Settings`：扩展入口 `src/index.ts` 在注册任何工具之前调用 `readSettings()`，把环境读成 `Settings`，再按 `settings.templatePaths` 读模板文件；`settings.outputCapBytes`、`settings.maxRunningTasks` 与 `settings.shellPolicy` 交给 `ProcessTasks`，输出上限与 shell 进入 supervisor 的输出写入点与 `spawn` 调用，任务上限在 `start` 与 `launch` 之前数一次记录。`pretty_task_bg_run` 的 `shell` 在 `spawn` 之前解析完，不支持的取值不会留下一条跑不起来的记录。超限与超时都不引入第二套终止机制：它们只是带着原因调用 `ProcessTasks.stop()`，与 `pretty_task_bg_kill` 走同一条路。读输出时 `src/tasks/base/decode.ts` 是唯一解码点，`src/tasks/base/output.ts` 的尾巴读取与 `pretty_task_bg_logs` 的整段读取共用它。

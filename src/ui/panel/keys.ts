@@ -14,10 +14,10 @@ import { PANEL_TABS, type PanelTab, TAB_KEY } from "./model.js";
  * near the right edge never meets half a key (ticket #34).
  */
 export const LIST_KEYS: readonly string[] = [
-  "↑/↓ · Enter logs · k stop · f filter · o others · 1/2/3 tabs · / search · R rerun · a stop all · alt+q close",
-  "↑/↓ · Enter logs · k stop · f filter · o others · 1/2/3 · / search · R rerun · alt+q close",
-  "↑/↓ · Enter logs · k stop · f filter · / search · alt+q close",
-  "↑/↓ · Enter · k stop · alt+q close",
+  "↑/↓ · Enter logs · k stop · f filter · o others · 1/2/3 tabs · / search · R rerun · a stop all · s settings · alt+q close",
+  "↑/↓ · Enter logs · k stop · f filter · o others · 1/2/3 · / search · R rerun · s settings · alt+q close",
+  "↑/↓ · Enter logs · k stop · f filter · / search · s settings · alt+q close",
+  "↑/↓ · Enter · k stop · s · alt+q close",
 ];
 
 /** The keys under a process detail, widest first, for the same reason as `LIST_KEYS`. */
@@ -25,6 +25,19 @@ export const PROCESS_KEYS: readonly string[] = [
   "↑/↓ scroll · r follow · ← list · k stop · R rerun · c path · alt+q close",
   "↑/↓ scroll · r follow · ← list · k stop · R rerun · c · alt+q",
   "↑/↓ · r follow · ← list · k stop · alt+q",
+];
+
+/** The keys under the settings view, widest first (ADR-0029). */
+export const SETTINGS_KEYS: readonly string[] = [
+  "↑/↓ · Enter edit/toggle · d clear from file · t target (project/agent) · ← list · alt+q close",
+  "↑/↓ · Enter edit · d clear · t target · ← list · alt+q close",
+  "↑/↓ · Enter · d clear · t target · ← list · alt+q",
+];
+
+/** The keys while typing an inline setting value in the settings view. */
+export const SETTINGS_EDIT_KEYS: readonly string[] = [
+  "type value · Enter save · Esc/alt+q cancel",
+  "type · Enter save · Esc cancel",
 ];
 
 /**

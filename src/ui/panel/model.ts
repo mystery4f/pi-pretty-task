@@ -11,6 +11,12 @@ import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { Terminal, TUI } from "@earendil-works/pi-tui";
 import { elapsedOf } from "../../tasks/base/format.js";
 import type { OutputTail } from "../../tasks/base/output.js";
+import type {
+  SettingKey,
+  SettingScope,
+  Settings,
+  SettingsFileLayer,
+} from "../../tasks/base/settings.js";
 import type { Task } from "../../tasks/base/task.js";
 import type { PromptPreview } from "../../tasks/loop/prompt-file.js";
 
@@ -209,6 +215,16 @@ export interface PanelSource {
    * same key serves both (ADR-0025).
    */
   blocked?(): number;
+  /** Current four-layer settings snapshot for the settings view (ADR-0029). */
+  settings?(): Settings;
+  /**
+   * Atomically update one `pretty-task.json` scope (`project` or `agent`), apply
+   * live settings to the session's stores, and return the refreshed snapshot.
+   */
+  updateSettings?(
+    scope: SettingScope,
+    patch: Partial<Record<SettingKey, SettingsFileLayer[SettingKey] | undefined>>,
+  ): Promise<Settings>;
 }
 
 /**
@@ -233,7 +249,7 @@ export interface TasksPanelOptions {
 }
 
 /** List → task detail → iteration detail; the third level exists only under a loop. */
-export type PanelMode = "list" | "detail" | "iteration";
+export type PanelMode = "list" | "detail" | "iteration" | "settings";
 
 /**
  * The panel's three pages (ADR-0012). Every record belongs to one page, and a child

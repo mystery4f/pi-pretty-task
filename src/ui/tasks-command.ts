@@ -20,6 +20,12 @@ import {
   sessionTaskDirectory,
   type TaskScope,
 } from "../tasks/base/runtime-state.js";
+import type {
+  SettingKey,
+  SettingScope,
+  Settings,
+  SettingsFileLayer,
+} from "../tasks/base/settings.js";
 import type { Task } from "../tasks/base/task.js";
 import type { ChainTasks, ChainTaskView } from "../tasks/chain/chain-tasks.js";
 import type { LoopTasks, LoopTaskView } from "../tasks/loop/loop-tasks.js";
@@ -97,6 +103,16 @@ export function statusLineText(tasks: readonly Task[]): string {
  * decides for itself which ones get a row; it still only ever sees these four calls,
  * so it cannot signal a process, fire a loop or bypass the stores' rules.
  */
+/** Hooks connecting the panel's settings view to the four-layer settings reader and atomic writer. */
+export interface PanelSettingsBindings {
+  readonly settings: (cwd?: string) => Settings;
+  readonly updateSettings: (
+    cwd: string,
+    scope: SettingScope,
+    patch: Partial<Record<SettingKey, SettingsFileLayer[SettingKey] | undefined>>,
+  ) => Promise<Settings>;
+}
+
 export function panelSourceFor(
   processes: ProcessTasks,
   loops: LoopTasks,
@@ -105,6 +121,7 @@ export function panelSourceFor(
   now: () => number = Date.now,
   foreground?: () => number,
   blocked?: () => number,
+  settingsBindings?: PanelSettingsBindings,
 ): PanelSource {
   // One projection builds every row; these three only say which field of their own
   // a view adds to it, so a new row field cannot reach one kind and miss another.
@@ -122,6 +139,13 @@ export function panelSourceFor(
     // blocked call is the store's own count, and the second waiting kind (ADR-0025).
     ...(foreground === undefined ? {} : { foreground }),
     ...(blocked === undefined ? {} : { blocked }),
+    ...(settingsBindings === undefined
+      ? {}
+      : {
+          settings: () => settingsBindings.settings(scope.cwd),
+          updateSettings: (targetScope, patch) =>
+            settingsBindings.updateSettings(scope.cwd, targetScope, patch),
+        }),
     async list() {
       // Children are listed too: the header counts them even when no page shows them
       // as a row, and a chain's detail resolves its steps by id (ADR-0014).
@@ -228,11 +252,12 @@ export function registerTasksCommand(
   chains: ChainTasks,
   foreground?: () => number,
   blocked?: () => number,
+  settingsBindings?: PanelSettingsBindings,
 ): void {
   pi.registerCommand(TASKS_COMMAND, {
     description: "Open the task panel: background processes, loops and chains",
     handler: async (_args, ctx) => {
-      await openPanel(ctx, processes, loops, chains, foreground, blocked);
+      await openPanel(ctx, processes, loops, chains, foreground, blocked, settingsBindings);
     },
   });
   // The status line advertises this key, so it has to work: the panel is the only
@@ -240,7 +265,7 @@ export function registerTasksCommand(
   pi.registerShortcut(TASKS_SHORTCUT, {
     description: "Open the task panel",
     handler: async (ctx) => {
-      await openPanel(ctx, processes, loops, chains, foreground, blocked);
+      await openPanel(ctx, processes, loops, chains, foreground, blocked, settingsBindings);
     },
   });
 }
@@ -258,6 +283,7 @@ async function openPanel(
   chains: ChainTasks,
   foreground?: () => number,
   blocked?: () => number,
+  settingsBindings?: PanelSettingsBindings,
 ): Promise<void> {
   if (ctx.mode !== "tui" || !ctx.hasUI) {
     ctx.ui.notify(
@@ -267,7 +293,16 @@ async function openPanel(
     return;
   }
   const scope: TaskScope = { cwd: ctx.cwd, sessionId: ctx.sessionManager.getSessionId() };
-  const source = panelSourceFor(processes, loops, chains, scope, Date.now, foreground, blocked);
+  const source = panelSourceFor(
+    processes,
+    loops,
+    chains,
+    scope,
+    Date.now,
+    foreground,
+    blocked,
+    settingsBindings,
+  );
 
   await ctx.ui.custom<void>(
     (tui, theme, _keybindings, done) =>

@@ -27,6 +27,10 @@ function detailWindowRows(panel: TasksPanel): number {
 }
 
 export function handlePanelInput(panel: TasksPanel, data: string): void {
+  if (panel.mode === "settings") {
+    handleSettingsInput(panel, data);
+    return;
+  }
   if (matchesKey(data, "alt+q")) {
     // Leaving search keeps the query, which the header goes on showing; a second
     // press closes the panel, exactly as `x` does.
@@ -59,9 +63,70 @@ export function handlePanelInput(panel: TasksPanel, data: string): void {
   else handleListInput(panel, data);
 }
 
+function handleSettingsInput(panel: TasksPanel, data: string): void {
+  if (panel.settingsEditing) {
+    if (matchesKey(data, "escape") || matchesKey(data, "alt+q")) {
+      panel.cancelSettingEdit();
+      return;
+    }
+    if (matchesKey(data, "enter")) {
+      panel.commitSettingEdit();
+      return;
+    }
+    if (data === "\x7f" || data === "\b") {
+      panel.enterSettingsDraft(panel.settingsDraft.slice(0, -1));
+      return;
+    }
+    const pasted = pastedQuery(data);
+    if (pasted !== undefined) {
+      panel.enterSettingsDraft(`${panel.settingsDraft}${pasted}`);
+      return;
+    }
+    const typed = typedQuery(data);
+    if (typed !== undefined) panel.enterSettingsDraft(`${panel.settingsDraft}${typed}`);
+    return;
+  }
+  if (matchesKey(data, "alt+q")) {
+    panel.done();
+    return;
+  }
+  if (matchesKey(data, "left") || matchesKey(data, "escape") || data === "s") {
+    panel.closeSettings();
+    return;
+  }
+  if (data === "1" || data === "2" || data === "3") {
+    const page = pageKey(data, panel.tab);
+    if (page !== undefined) panel.selectPage(page);
+    return;
+  }
+  if (data === "t" || matchesKey(data, "tab")) {
+    panel.toggleSettingsScope();
+    return;
+  }
+  if (matchesKey(data, "up")) {
+    panel.moveSettingsCursor(-1);
+    return;
+  }
+  if (matchesKey(data, "down")) {
+    panel.moveSettingsCursor(1);
+    return;
+  }
+  if (matchesKey(data, "enter") || data === " ") {
+    panel.activateSelectedSetting();
+    return;
+  }
+  if (data === "d" || data === "\x7f" || data === "\b") {
+    panel.clearSelectedSettingFromFile();
+  }
+}
+
 function handleListInput(panel: TasksPanel, data: string): void {
   if (data === "/") {
     panel.beginSearch();
+    return;
+  }
+  if (data === "s") {
+    panel.openSettings();
     return;
   }
   if (matchesKey(data, "up")) {
@@ -91,7 +156,6 @@ function handleListInput(panel: TasksPanel, data: string): void {
   if (data === "R") rerunSelected(panel);
   if (data === "c") showOutputPath(panel);
 }
-
 function handleSearchInput(panel: TasksPanel, data: string): void {
   if (data === "\x7f" || data === "\b") {
     panel.enterQuery(panel.query.slice(0, -1));

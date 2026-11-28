@@ -345,7 +345,7 @@ export class ForegroundRun {
  */
 export class ForegroundRunner {
   private readonly tasks: ProcessTasks;
-  private readonly detachAfterMs: number;
+  private detachAfterMs: number;
   private readonly now: () => number;
   private readonly platform: NodeJS.Platform;
   private readonly pollMs: number;
@@ -371,6 +371,11 @@ export class ForegroundRunner {
    */
   setScope(scope: TaskScope): void {
     this.scope = scope;
+  }
+
+  /** Update the foreground detach timeout for subsequent foreground commands (ADR-0029). */
+  setDetachAfterMs(detachAfterMs: number): void {
+    this.detachAfterMs = detachAfterMs;
   }
 
   /** Foreground commands that are still being waited for. */

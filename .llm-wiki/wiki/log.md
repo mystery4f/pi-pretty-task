@@ -2,6 +2,7 @@
 
 ## 2026-11-28
 
+- **observe**: {"relevance":"high","slug":"obs-2026-11-28-adr-0029-four-layer-settings-in-pretty-task-json-and-tasks-s","title":"ADR-0029 four-layer settings in pretty-task.json and /tasks settings view"}
 - **observe**: {"relevance":"high","slug":"obs-2026-11-28-pi-p-hangs-on-extension-spawned-children-not-mcp","title":"`pi -p` hangs on extension-spawned children, not MCP"}
 - **retro**: {"category":"architecture","slug":"tool-choice-guidance-belongs-in-promptguidelines","title":"Tool-choice guidance ships as promptGuidelines, not config"}
 - **observe**: {"relevance":"medium","slug":"obs-2026-11-28-pi-p-does-not-exit-probe-loops-need-timeout","title":"`pi -p` does not exit; probe loops need timeout"}

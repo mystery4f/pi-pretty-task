@@ -400,9 +400,9 @@ export class ProcessTasks {
   private readonly blocked = new Map<string, BlockedCall>();
   private readonly killGraceMs: number | undefined;
   private readonly killConfirmMs: number | undefined;
-  private readonly outputCapBytes: number;
+  private outputCapBytes: number;
   /** The ceiling `docs/scope-v1.md` promises, and the key that moves it. */
-  private readonly maxRunningTasks: number;
+  private maxRunningTasks: number;
   private readonly supervise: (options: StartProcessOptions) => RunningProcess;
   /** How long a stop that lost to a surviving tree waits before trying again. */
   private readonly survivedRetryMs: number;
@@ -410,7 +410,7 @@ export class ProcessTasks {
   private readonly followPollMs: number;
   private readonly onFinish: ((view: ProcessTaskView) => void) | undefined;
   /** The shell every task starts in, resolved once so a bad config fails at load. */
-  private readonly shellPolicy: ShellPolicy;
+  private shellPolicy: ShellPolicy;
 
   /** Loads and saves the shared record set; both kinds write through it. */
   private readonly hub: TaskSessions;
@@ -431,6 +431,17 @@ export class ProcessTasks {
     this.onFinish = options.onFinish;
     this.shellPolicy =
       options.shellPolicy ?? resolveShellPolicy({ platform: this.platform, env: this.env });
+  }
+
+  /** Apply live-reloadable settings changes for subsequent tasks (ADR-0029). */
+  updateSettings(next: {
+    readonly outputCapBytes: number;
+    readonly maxRunningTasks: number;
+    readonly shellPolicy: ShellPolicy;
+  }): void {
+    this.outputCapBytes = next.outputCapBytes;
+    this.maxRunningTasks = next.maxRunningTasks;
+    this.shellPolicy = next.shellPolicy;
   }
 
   /** Start a command in the background and return its record immediately. */

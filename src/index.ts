@@ -20,7 +20,7 @@ import { publishLoopFired, publishTaskFinished } from "./tasks/base/events.js";
 import { fireLabel } from "./tasks/base/format.js";
 import { pruneSessions } from "./tasks/base/retention.js";
 import type { TaskScope } from "./tasks/base/runtime-state.js";
-import { readSettings } from "./tasks/base/settings.js";
+import { readSettings, type Settings, writeSettingsFile } from "./tasks/base/settings.js";
 import { TaskSessions } from "./tasks/base/task-sessions.js";
 import { ChainTasks } from "./tasks/chain/chain-tasks.js";
 import { Iterations, retryBudget } from "./tasks/loop/iterations.js";
@@ -189,11 +189,13 @@ export function createExtension(
   // Configuration is read first, before anything is registered: a value that is
   // not usable has to fail the load with a message that names the key, because a
   // limit that silently becomes `NaN` would end every task on its first byte.
-  const settings = readSettings({
-    env: options.env,
-    projectDir: options.projectDir,
-    agentDir: options.agentDir,
-  });
+  const readCurrentSettings = (projectDir?: string): Settings =>
+    readSettings({
+      env: options.env,
+      projectDir: options.projectDir ?? projectDir,
+      agentDir: options.agentDir,
+    });
+  let settings = readCurrentSettings();
   // Templates are configuration too, but a bad file only costs that file's
   // names: say what is wrong, keep the extension loaded, and let the other file
   // still supply templates.
@@ -489,6 +491,29 @@ export function createExtension(
     chainTasks,
     () => foreground.live().length,
     () => processTasks.blockedCount(),
+    {
+      settings: (cwd) => {
+        settings = readCurrentSettings(cwd);
+        return settings;
+      },
+      updateSettings: async (cwd, targetScope, patch) => {
+        const before = readCurrentSettings(cwd);
+        const filePath =
+          targetScope === "project"
+            ? before.templatePaths.projectFile
+            : before.templatePaths.agentFile;
+        await writeSettingsFile(filePath, patch, { platform: before.platform });
+        settings = readCurrentSettings(cwd);
+        processTasks.updateSettings({
+          outputCapBytes: settings.outputCapBytes,
+          maxRunningTasks: settings.maxRunningTasks,
+          shellPolicy: settings.shellPolicy,
+        });
+        foreground.setDetachAfterMs(settings.foregroundTimeoutMs);
+        terminal.setEnabled(settings.notify);
+        return settings;
+      },
+    },
   );
 
   // The takeover is opt-in and covers only what this extension spawns: a tool it

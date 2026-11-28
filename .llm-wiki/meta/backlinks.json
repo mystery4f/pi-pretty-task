@@ -34,6 +34,7 @@
     "sources/filtering-guards-silently-shrink-their-own-scope"
   ],
   "sources/obs-2026-11-27-pi-pretty-task": [],
+  "sources/obs-2026-11-28-adr-0029-four-layer-settings-in-pretty-task-json-and-tasks-s": [],
   "sources/obs-2026-11-28-full-test-suite-flakes-at-6-workers-green-at-2": [
     "sources/tool-choice-guidance-belongs-in-promptguidelines"
   ],

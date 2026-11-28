@@ -29,6 +29,7 @@
 - [Observation: 改道卡必须是会话条目而非自定义消息](obs-2026-11-27-.md)
 - [Observation: footer 打印字形、handleInput 收的是终端序列：按键测试必须翻译](obs-2026-11-27-footer-handleinput.md)
 - [Observation: pi-pretty-task：改道通知带触发器，静默分支以负断言固化](obs-2026-11-27-pi-pretty-task.md)
+- [Observation: ADR-0029 four-layer settings in pretty-task.json and /tasks settings view](obs-2026-11-28-adr-0029-four-layer-settings-in-pretty-task-json-and-tasks-s.md)
 - [Observation: Full test suite flakes at 6 workers, green at 2](obs-2026-11-28-full-test-suite-flakes-at-6-workers-green-at-2.md)
 - [Observation: `pi -p` does not exit; probe loops need timeout](obs-2026-11-28-pi-p-does-not-exit-probe-loops-need-timeout.md)
 - [Observation: `pi -p` hangs on extension-spawned children, not MCP](obs-2026-11-28-pi-p-hangs-on-extension-spawned-children-not-mcp.md)

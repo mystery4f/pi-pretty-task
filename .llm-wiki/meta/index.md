@@ -31,6 +31,7 @@
 - [[sources/obs-2026-11-27-]] — Observation: 改道卡必须是会话条目而非自定义消息 *(created: 2026-11-27)*
 - [[sources/obs-2026-11-27-footer-handleinput]] — Observation: footer 打印字形、handleInput 收的是终端序列：按键测试必须翻译 *(created: 2026-11-27)*
 - [[sources/obs-2026-11-27-pi-pretty-task]] — Observation: pi-pretty-task：改道通知带触发器，静默分支以负断言固化 *(created: 2026-11-27)*
+- [[sources/obs-2026-11-28-adr-0029-four-layer-settings-in-pretty-task-json-and-tasks-s]] — Observation: ADR-0029 four-layer settings in pretty-task.json and /tasks settings view *(created: 2026-11-28)*
 - [[sources/obs-2026-11-28-full-test-suite-flakes-at-6-workers-green-at-2]] — Observation: Full test suite flakes at 6 workers, green at 2 *(created: 2026-11-28)*
 - [[sources/obs-2026-11-28-pi-p-does-not-exit-probe-loops-need-timeout]] — Observation: `pi -p` does not exit; probe loops need timeout *(created: 2026-11-28)*
 - [[sources/obs-2026-11-28-pi-p-hangs-on-extension-spawned-children-not-mcp]] — Observation: `pi -p` hangs on extension-spawned children, not MCP *(created: 2026-11-28)*
@@ -60,4 +61,4 @@
 - [[syntheses/verify-red-tests-handoff]] — verify 红测修复交接（5 个 integration 用例） *(created: 2026-11-16)*
 
 ---
-*Last updated: 2026-11-28T08:41:17.960Z* | *Total pages: 51*
+*Last updated: 2026-11-28T13:22:13.868Z* | *Total pages: 52*

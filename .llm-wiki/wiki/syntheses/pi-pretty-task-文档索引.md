@@ -17,7 +17,7 @@ updated: 2026-11-28
 | [GLOSSARY.md](../../GLOSSARY.md) | 术语：Task（四种 kind：process / prompt-loop / cmd-loop / chain）/ Iteration / Fire / Step / Panel | 已定 |
 | [scope-v1.md](../../docs/scope-v1.md) | v0.1 范围：做 / 不做 / 延后（含复杂度与风险） | 已定，随实现更新 |
 | [panel-narrow-detail.md](../../docs/panel-narrow-detail.md) | 窄 pane / 矮 pane 下的面板：高度预算、字段与窗口分账、宽度两档与长值折行、子行状态前置 | 已定，随实现更新 |
-| [configuration.md](../../docs/configuration.md) | 配置面：十个 `PI_PRETTY_TASK_*` 键（输出上限、并发上限、通知、保留天数、两种 shell 与路径、前台接管与其超时）、启动即校验、两类终止原因、命令模板的两个文件 | 已定，随实现更新 |
+| [configuration.md](../../docs/configuration.md) | 配置面：十项配置（四层优先级：`env` > `project` > `agent` > `default`、冻结的十个 `PI_PRETTY_TASK_*` 键与两层 `pretty-task.json` 的 `settings.*`）、启动即校验、面板 `s` 配置视图与热生效边界、两类终止原因、命令模板 | 已定，随实现更新 |
 | [previews.md](../../docs/previews.md) | README 十一张图怎么来：`scripts/preview/` 驱动真实面板与真实卡片渲染器抓帧、ANSI→HTML→截图→GIF，`--only` 单张重跑、踩坑 | 已定，随面板更新 |
 
 ## 决策记录（ADR）
@@ -52,6 +52,7 @@ updated: 2026-11-28
 | [0026 改道之后的一分钟里拒绝再起前台命令](../../docs/adr/0026-a-detach-closes-the-door-for-a-minute.md) | 模型只读得到三条通道：卡片 `appendEntry` 读不到、回执 `detachedNotice` 当次就读到、`sendNotice` 要开一轮；所以提醒用「拒绝」承载——改道后 60 s 内 `wait: true` 与前臺命令直接被拒、拒绝文案即提醒，回执末尾也加一句；任务记录补 `detached: { trigger, heldSeconds }`，补上 14 条只有 `origin` 的记录 |
 | [0027 `waitSeconds` 给阻塞调用一个自己的期限](../../docs/adr/0027-waitseconds-bounds-the-blocking-call.md) | 新参数叫 `waitSeconds` 而不是 `timeoutSeconds`（后者在 `bg_run` 上是杀树）；缺省仍无上限；到点复用 `WaitStop` 的 `deadline`，不给 `trigger` 加第四项；三条回执三句话、`stop` 为 `ended`/`aborted`/`deadline`/`released`；上限复用 `MAX_WAIT_SECONDS`（600）；只走 `holdTurn` 已有的 `timeoutMs` 接缝 |
 | [0028 起命令前的三选一随插件一起装好](../../docs/adr/0028-the-run-choice-rule-ships-with-the-plugin.md) | 实测 4.0% 的 run 带 `wait: true`、33.5% 的 run 后面跟着本可在 run 里等掉的 `bg_wait`；四格（`wait` + `waitSeconds` / 真后台 / `bash` / 起一次 + `follow`）写成编译期常量进 `promptGuidelines`，不写 AGENTS.md；只在常量上注入以保缓存，`bg_wait` 命中上一次 run 时追加一行纠偏；判据是 `scripts/wait-stats.mjs` 的 `wait: true` 占比与 run→wait 相邻率 |
+| [0029 配置落入 `pretty-task.json` 与面板配置视图，环境变量冻结为最高覆盖层](../../docs/adr/0029-settings-in-config-files-and-panel.md) | 复用项目与全局两层 `pretty-task.json`，顶层并列 `"settings"` 与 `"templates"`（十个字段一一对应冻结的十个 `PI_PRETTY_TASK_*` 环境变量，未来不再新增环境变量）；按 `env` > `project` > `agent` > `default` 四层合成，`(*Shell, *ShellPath)` 同层成对、跨层整组覆盖；`readSettings()` 对坏 JSON / 坏 `"settings"` 严格抛错阻断；`/tasks` 面板按 `s` 进 `mode = "settings"`，支持切换 `project`/`agent` 作用域、显示来源标记、经 `writeAtomic` 无损保留 `"templates"`，六项热更新即时生效、`adoptForeground` 与 `retentionDays` 标注 `requires /reload` |
 
 ## 工具链与代码风格
 

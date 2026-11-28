@@ -9,6 +9,7 @@
  * @author mystery4f <40482524+mystery4f@users.noreply.github.com>
  */
 import type { Theme } from "@earendil-works/pi-coding-agent";
+import type { SettingScope, Settings } from "../../tasks/base/settings.js";
 import type { CmdLoopTask, FireRecord, PromptLoopTask } from "../../tasks/base/task.js";
 import type { Iteration } from "../../tasks/loop/iteration.js";
 import type { PromptPreview } from "../../tasks/loop/prompt-file.js";
@@ -57,6 +58,11 @@ export interface PanelView {
   readonly iterationTop: number;
   readonly callTop: number;
   readonly notice: string | undefined;
+  readonly settingsScope: SettingScope;
+  readonly settingsIndex: number;
+  readonly settingsEditing: boolean;
+  readonly settingsDraft: string;
+  currentSettings(): Settings;
   detailRow(): PanelTaskView | undefined;
   currentIteration(task: PromptLoopTask): Iteration | undefined;
   currentFire(task: CmdLoopTask): FireRecord | undefined;

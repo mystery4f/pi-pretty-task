@@ -81,7 +81,7 @@ _Avoid_: trigger, timer, recurrence
 _Avoid_: label, title, description, 任务名
 
 **Panel**:
-打开在一屏之上的 `/tasks` 视图，三个标签页：`Processes`、`Loops`、`Chains`。每页只列根（链的步骤与命名循环的触发布单独成行），展开根才看到它的步骤、触发或 Iteration。
+打开在一屏之上的 `/tasks` 视图，三个标签页：`Processes`、`Loops`、`Chains`。每页只列根（链的步骤与命名循环的触发布单独成行），展开根才看到它的步骤、触发或 Iteration；在列表页按 `s` 可切入配置视图查看与编辑运行期配置。
 _Avoid_: dock, dashboard, overlay, task manager
 
 **Summary line**:
@@ -91,3 +91,7 @@ _Avoid_: status line, header, footer, ticker
 **Search mode**:
 面板里按 `/` 进入的过滤状态：输入即按「子序列」匹配 Name、id、命令或 prompt、状态词与 kind 词（`dbg` 能命中 `deploy-bg`）。命中的字符在行内高亮；排序先看命中质量——连续命中和词首优先、字段越短越靠前——再按 `updatedAt` 降序，空查询只按时间不重排。命中的词不在行上（`command`、`prompt`，或链自己的 name 已被步骤取代）时，行尾注明 `via command` / `via prompt` / `via name`。`alt+q` 第一次退出搜索并保留过滤条件，再按一次关闭面板。
 _Avoid_: filter box, query mode, find
+
+**Settings**:
+扩展的运行期配置，按四层来源从高到低决出当前生效值：环境变量（`env`）、项目配置文件（`project`）、全局配置文件（`agent`）、内置默认值（`default`）。环境变量作为冻结的最高覆盖层保留现有十个键，后续新增配置只进配置文件；面板配置视图展示每项的生效值与来源标记，并按项目或全局作用域落盘。
+_Avoid_: config, preferences, options, flags

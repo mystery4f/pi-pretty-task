@@ -155,3 +155,6 @@
 ## [2026-11-28T08:41:17.934Z] observe
 - slug: "obs-2026-11-28-pi-p-hangs-on-extension-spawned-children-not-mcp", title: "`pi -p` hangs on extension-spawned children, not MCP", relevance: "high"
 
+## [2026-11-28T13:22:13.768Z] observe
+- slug: "obs-2026-11-28-adr-0029-four-layer-settings-in-pretty-task-json-and-tasks-s", title: "ADR-0029 four-layer settings in pretty-task.json and /tasks settings view", relevance: "high"
+

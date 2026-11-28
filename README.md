@@ -65,12 +65,14 @@ Deliberately not here: subagent/delegate/fusion tools, monitors-with-shell, work
 
 Opens with `/tasks` or `Shift↓`, and has three tabs — processes, loops, chains — plus five filters (`all`, `running`, `failed`, `done`, `signal`). It opens on `all`, so a session whose work has all ended still shows its rows; `f` narrows. One summary line above the editor stays after it closes; the footer row is shared with every other extension, so the count lives where it can be read.
 
-List keys: `↑/↓` select, `Enter` open, `k` stop, `a` stop all, `f` cycle filter (`all`/`running`/`failed`/`done`/`signal`), `o` toggle other sessions' records, `R` rerun, `c` show the output path, `/` search, `x` close from the list, `1/2/3` pick a tab, `alt+q` close from anywhere (the first press leaves search mode).
+List keys: `↑/↓` select, `Enter` open, `k` stop, `a` stop all, `f` cycle filter (`all`/`running`/`failed`/`done`/`signal`), `o` toggle other sessions' records, `R` rerun, `c` show the output path, `/` search, `s` open settings, `x` close from the list, `1/2/3` pick a tab, `alt+q` close from anywhere (the first press leaves search mode).
 
 Detail keys: `↑/↓` scroll, `r` follow the log, `←` back to the list, `k` stop the one that is open, `R` rerun, `c` show the output path, `1/2/3` pick a tab, `alt+q` close.
 
+Settings keys: `↑/↓` select a setting, `Enter` toggle or edit, `d` clear from the target file, `t` switch target file (`project` / `agent`), `←` back to the list, `alt+q` close.
+
 ```text
-↑/↓ · Enter logs · k stop · f filter · o others · 1/2/3 tabs · / search · R rerun · a stop all · alt+q close
+↑/↓ · Enter logs · k stop · f filter · o others · 1/2/3 tabs · / search · R rerun · a stop all · s settings · alt+q close
 ```
 
 ![The /tasks panel: every process, loop and chain in one list, with the dev server's row still growing](https://raw.githubusercontent.com/mystery4f/pi-pretty-task/main/docs/preview.png)
@@ -178,24 +180,24 @@ Two skills ship with the package and are offered by name: `pretty-task-unattende
 
 ## Configuration
 
-Every key is read once at load; a value it cannot use fails the extension with the key name instead of silently falling back.
+Every setting resolves across four layers — `process.env` (`PI_PRETTY_TASK_*`) > `<project>/.pi/pretty-task.json` (`"settings"`) > `~/.pi/agent/pretty-task.json` (`"settings"`) > built-in defaults — and can also be inspected and edited from the `/tasks` panel by pressing `s`. A value that cannot be honoured fails the extension load with the key or file name instead of silently falling back.
 
-| Key | Default | Meaning |
+| Key (`"settings"` / env) | Default | Meaning |
 |---|---|---|
-| `PI_PRETTY_TASK_OUTPUT_CAP_BYTES` | `20971520` (20 MiB) | Output file cap; crossing it kills the tree with reason `output_cap` |
-| `PI_PRETTY_TASK_MAX_RUNNING_TASKS` | `20` | Running process records per session, children and steps included |
-| `PI_PRETTY_TASK_NOTIFY` | `on` | Write an OSC 9 notification to the terminal when a task ends |
-| `PI_PRETTY_TASK_RETENTION_DAYS` | `7` | Session directories older than this are pruned at startup |
-| `PI_PRETTY_TASK_SHELL` / `_SHELL_PATH` | `bash` | Windows shell (`cmd`, `bash`) and its absolute path; `bash.exe` comes from Git for Windows — the one pi was started from, then the `git` on PATH, the registry, the usual install dirs, then PATH |
-| `PI_PRETTY_TASK_POSIX_SHELL` / `_POSIX_SHELL_PATH` | `bash` | POSIX shell (`inherit`, `bash`, `sh`) and its path |
-| `PI_PRETTY_TASK_ADOPT_FOREGROUND` | `off` | Run pi's `bash` tool and `!` commands through this extension, so the command in front can be moved to a task; the `powershell` tool it registers has no such move |
-| `PI_PRETTY_TASK_FOREGROUND_TIMEOUT` | `0` | Seconds before the command in front is moved to the background by itself; `0` never moves; either trigger says which one it was, once, in the tool result and on a card |
+| `outputCapBytes` / `PI_PRETTY_TASK_OUTPUT_CAP_BYTES` | `20971520` (20 MiB) | Output file cap; crossing it kills the tree with reason `output_cap` |
+| `maxRunningTasks` / `PI_PRETTY_TASK_MAX_RUNNING_TASKS` | `20` | Running process records per session, children and steps included |
+| `notify` / `PI_PRETTY_TASK_NOTIFY` | `on` | Write an OSC 9 notification to the terminal when a task ends |
+| `retentionDays` / `PI_PRETTY_TASK_RETENTION_DAYS` | `7` | Session directories older than this are pruned at startup (requires `/reload`) |
+| `shell`, `shellPath` / `PI_PRETTY_TASK_SHELL`, `_SHELL_PATH` | `bash` | Windows shell (`cmd`, `bash`) and its absolute path; `bash.exe` comes from Git for Windows — the one pi was started from, then the `git` on PATH, the registry, the usual install dirs, then PATH |
+| `posixShell`, `posixShellPath` / `PI_PRETTY_TASK_POSIX_SHELL`, `_POSIX_SHELL_PATH` | `bash` | POSIX shell (`inherit`, `bash`, `sh`) and its path |
+| `adoptForeground` / `PI_PRETTY_TASK_ADOPT_FOREGROUND` | `off` | Run pi's `bash` tool and `!` commands through this extension, so the command in front can be moved to a task; the `powershell` tool it registers has no such move (requires `/reload`) |
+| `foregroundTimeoutSeconds` / `PI_PRETTY_TASK_FOREGROUND_TIMEOUT` | `0` | Seconds before the command in front is moved to the background by itself; `0` never moves; either trigger says which one it was, once, in the tool result and on a card |
 
-The OSC 9 notification rings once per task and only on an ending: `completed`, `failed`, `killed` and `interrupted` write `\u001b]9;<name> <status>\u0007`, a running or paused task writes nothing, and `PI_PRETTY_TASK_NOTIFY=off` silences all of it. A terminal that ignores OSC 9 shows nothing at all, which is why the same ending is also a card.
+The OSC 9 notification rings once per task and only on an ending: `completed`, `failed`, `killed` and `interrupted` write `\u001b]9;<name> <status>\u0007`, a running or paused task writes nothing, and `PI_PRETTY_TASK_NOTIFY=off` (or `"notify": "off"`) silences all of it. A terminal that ignores OSC 9 shows nothing at all, which is why the same ending is also a card.
 
-Command templates live in `<project>/.pi/pretty-task.json` and `~/.pi/agent/pretty-task.json`, project first, and are read once at load — a file edited mid-session applies after `/reload`. Adding or changing one is covered by the bundled `pretty-task-templates` skill.
+Command templates and `"settings"` share `<project>/.pi/pretty-task.json` and `~/.pi/agent/pretty-task.json`, project first. Editing settings from `/tasks` (`s`) writes atomically and preserves `"templates"` in the same file; templates and startup-only settings (`adoptForeground`, `retentionDays`) apply after `/reload`, while the remaining settings update the live session immediately. Adding or changing a template is covered by the bundled `pretty-task-templates` skill.
 
-Full detail, including the shell rules, decoding order and per-call `cwd`/`env`: [docs/configuration.md](docs/configuration.md).
+Full detail, including the four-layer rules, shell pairing, decoding order and per-call `cwd`/`env`: [docs/configuration.md](docs/configuration.md).
 
 ## Documentation
 

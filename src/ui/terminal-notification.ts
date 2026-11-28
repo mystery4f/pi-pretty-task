@@ -72,6 +72,8 @@ export interface TerminalNotificationOptions {
 export interface TerminalNotifications {
   /** Raise the notification for a task that just ended; silent in every other case. */
   finished(name: string, status: TaskStatus): void;
+  /** Update the live notification toggle without recreating the extension (ADR-0029). */
+  setEnabled(enabled: boolean): void;
 }
 
 /**
@@ -83,14 +85,17 @@ export function createTerminalNotifications(
   options: TerminalNotificationOptions,
 ): TerminalNotifications {
   const write = options.write ?? writeToStdout;
+  let enabled = options.enabled;
   return {
     finished(name, status) {
-      if (!options.enabled || !ENDINGS.includes(status) || !options.attached()) return;
+      if (!enabled || !ENDINGS.includes(status) || !options.attached()) return;
       write(terminalNotification(name, status));
+    },
+    setEnabled(next) {
+      enabled = next;
     },
   };
 }
-
 /**
  * stdout is the terminal only when it is one: a TUI whose stdout is a pipe
  * (`pi | tee`) must not find escape bytes in the pipe, so the default writer
