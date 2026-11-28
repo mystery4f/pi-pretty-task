@@ -53,3 +53,4 @@
 {"slug":"preview-pipeline-title-undefined-spread","title":"pi-preview writePage spread title:undefined over default","category":"uncategorized","timestamp":"2026-11-28T14:31:46.095Z","kind":"retro"}
 {"slug":"settings-view-env-warning-truncated-at-106","title":"pi-pretty-task settings view env warning truncated at 106 columns","category":"uncategorized","timestamp":"2026-11-28T14:31:46.118Z","kind":"retro"}
 {"slug":"preview-settings-frame-from-real-readsettings","title":"pi-preview settings frame built from a real readSettings snapshot","category":"uncategorized","timestamp":"2026-11-28T14:31:46.138Z","kind":"retro"}
+{"slug":"obs-2026-11-28-pi-plugin","title":"pi-plugin 六相链补入发版、四层配置与设置页的实测规则","relevance":"high","timestamp":"2026-11-28T14:51:09.214Z","kind":"observe"}

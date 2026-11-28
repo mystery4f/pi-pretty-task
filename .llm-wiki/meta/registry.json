@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "last_updated": "2026-11-28T14:31:46.225Z",
+  "last_updated": "2026-11-28T14:51:09.267Z",
   "pages": {
     "sources/adr-dated-status-and-index-guard": {
       "type": "source",
@@ -465,6 +465,25 @@
       "relevance": "high",
       "observed_at": "2026-11-28T08:41:17.931Z",
       "source_context": "Diagnosing why probe loops of `pi -p` never advanced",
+      "created": "2026-11-28",
+      "updated": "2026-11-28"
+    },
+    "sources/obs-2026-11-28-pi-plugin": {
+      "type": "source",
+      "title": "Observation: pi-plugin 六相链补入发版、四层配置与设置页的实测规则",
+      "tags": [
+        "skill",
+        "pi-plugin-chain",
+        "release",
+        "oidc",
+        "configuration",
+        "skills"
+      ],
+      "status": "observation",
+      "slug": "obs-2026-11-28-pi-plugin",
+      "relevance": "high",
+      "observed_at": "2026-11-28T14:51:09.207Z",
+      "source_context": "pi-pretty-task v1.5.1 发版后的 $retro-full，用户随后调用 $skill-creator",
       "created": "2026-11-28",
       "updated": "2026-11-28"
     },

@@ -167,3 +167,6 @@
 ## [2026-11-28T14:31:46.138Z] retro
 - slug: "preview-settings-frame-from-real-readsettings", title: "pi-preview settings frame built from a real readSettings snapshot", category: "uncategorized"
 
+## [2026-11-28T14:51:09.214Z] observe
+- slug: "obs-2026-11-28-pi-plugin", title: "pi-plugin 六相链补入发版、四层配置与设置页的实测规则", relevance: "high"
+

@@ -35,6 +35,7 @@
 - [[sources/obs-2026-11-28-full-test-suite-flakes-at-6-workers-green-at-2]] — Observation: Full test suite flakes at 6 workers, green at 2 *(created: 2026-11-28)*
 - [[sources/obs-2026-11-28-pi-p-does-not-exit-probe-loops-need-timeout]] — Observation: `pi -p` does not exit; probe loops need timeout *(created: 2026-11-28)*
 - [[sources/obs-2026-11-28-pi-p-hangs-on-extension-spawned-children-not-mcp]] — Observation: `pi -p` hangs on extension-spawned children, not MCP *(created: 2026-11-28)*
+- [[sources/obs-2026-11-28-pi-plugin]] — Observation: pi-plugin 六相链补入发版、四层配置与设置页的实测规则 *(created: 2026-11-28)*
 - [[sources/pi-extension-stale-instance-unhandled-rejection]] — pi 扩展实例失效后的 sendMessage 抛出会杀死进程 *(created: 2026-11-24)*
 - [[sources/pi-git-install-omits-dev-deps-so-ship-ts-entry]] — pi 的 git 安装不带 devDeps，入口要写 .ts 而不是靠 prepare 构建 *(created: 2026-11-15)*
 - [[sources/pi-pretty-task-full-suite-parallel-flake]] — 全量 integration 套件在 8 worker 下间歇超时，串行才是确定性证据 *(created: 2026-11-24)*
@@ -64,4 +65,4 @@
 - [[syntheses/verify-red-tests-handoff]] — verify 红测修复交接（5 个 integration 用例） *(created: 2026-11-16)*
 
 ---
-*Last updated: 2026-11-28T14:31:46.225Z* | *Total pages: 55*
+*Last updated: 2026-11-28T14:51:09.267Z* | *Total pages: 56*

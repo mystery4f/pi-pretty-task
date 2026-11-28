@@ -2,6 +2,7 @@
 
 ## 2026-11-28
 
+- **observe**: {"relevance":"high","slug":"obs-2026-11-28-pi-plugin","title":"pi-plugin 六相链补入发版、四层配置与设置页的实测规则"}
 - **retro**: {"category":"uncategorized","slug":"preview-settings-frame-from-real-readsettings","title":"pi-preview settings frame built from a real readSettings snapshot"}
 - **retro**: {"category":"uncategorized","slug":"settings-view-env-warning-truncated-at-106","title":"pi-pretty-task settings view env warning truncated at 106 columns"}
 - **retro**: {"category":"uncategorized","slug":"preview-pipeline-title-undefined-spread","title":"pi-preview writePage spread title:undefined over default"}
