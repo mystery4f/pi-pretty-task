@@ -43,5 +43,6 @@
 - [What the model saw is in the session record, not the source](session-record-not-source-is-the-evidence.md)
 - [慢测试先治写死的时长，再谈并行度](slow-suite-timings-not-workers.md)
 - [Subagent structured verdicts live in structured-output/output.json, not the artifact md](subagent-structured-verdict-path.md)
+- [Tool-choice guidance ships as promptGuidelines, not config](tool-choice-guidance-belongs-in-promptguidelines.md)
 - [Windows CI: fsync per state write outran the record wait](windows-ci-slow-fsync-record-write.md)
 - [Windows 上 taskkill /T 不加 /F 停不下控制台 node](windows-taskkill-t-needs-force-for-console-node.md)

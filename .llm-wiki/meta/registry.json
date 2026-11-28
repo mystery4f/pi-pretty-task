@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "last_updated": "2026-11-28T08:17:11.346Z",
+  "last_updated": "2026-11-28T08:24:32.308Z",
   "pages": {
     "sources/adr-dated-status-and-index-guard": {
       "type": "source",
@@ -536,6 +536,15 @@
       "slug": "subagent-structured-verdict-path",
       "created": "2026-11-25",
       "updated": "2026-11-25"
+    },
+    "sources/tool-choice-guidance-belongs-in-promptguidelines": {
+      "type": "source",
+      "title": "Tool-choice guidance ships as promptGuidelines, not config",
+      "category": "architecture",
+      "status": "insight",
+      "slug": "tool-choice-guidance-belongs-in-promptguidelines",
+      "created": "2026-11-28",
+      "updated": "2026-11-28"
     },
     "sources/windows-ci-slow-fsync-record-write": {
       "type": "source",

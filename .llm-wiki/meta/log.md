@@ -149,3 +149,6 @@
 ## [2026-11-28T08:17:11.326Z] observe
 - slug: "obs-2026-11-28-pi-p-does-not-exit-probe-loops-need-timeout", title: "`pi -p` does not exit; probe loops need timeout", relevance: "medium"
 
+## [2026-11-28T08:24:32.284Z] retro
+- slug: "tool-choice-guidance-belongs-in-promptguidelines", title: "Tool-choice guidance ships as promptGuidelines, not config", category: "architecture"
+

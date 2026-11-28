@@ -45,6 +45,7 @@
 - [[sources/session-record-not-source-is-the-evidence]] — What the model saw is in the session record, not the source *(created: 2026-11-27)*
 - [[sources/slow-suite-timings-not-workers]] — 慢测试先治写死的时长，再谈并行度 *(created: 2026-11-15)*
 - [[sources/subagent-structured-verdict-path]] — Subagent structured verdicts live in structured-output/output.json, not the artifact md *(created: 2026-11-25)*
+- [[sources/tool-choice-guidance-belongs-in-promptguidelines]] — Tool-choice guidance ships as promptGuidelines, not config *(created: 2026-11-28)*
 - [[sources/windows-ci-slow-fsync-record-write]] — Windows CI: fsync per state write outran the record wait *(created: 2026-11-16)*
 - [[sources/windows-taskkill-t-needs-force-for-console-node]] — Windows 上 taskkill /T 不加 /F 停不下控制台 node *(created: 2026-11-15)*
 
@@ -58,4 +59,4 @@
 - [[syntheses/verify-red-tests-handoff]] — verify 红测修复交接（5 个 integration 用例） *(created: 2026-11-16)*
 
 ---
-*Last updated: 2026-11-28T08:17:11.346Z* | *Total pages: 49*
+*Last updated: 2026-11-28T08:24:32.308Z* | *Total pages: 50*

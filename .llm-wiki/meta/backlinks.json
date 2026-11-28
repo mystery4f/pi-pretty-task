@@ -34,7 +34,9 @@
     "sources/filtering-guards-silently-shrink-their-own-scope"
   ],
   "sources/obs-2026-11-27-pi-pretty-task": [],
-  "sources/obs-2026-11-28-full-test-suite-flakes-at-6-workers-green-at-2": [],
+  "sources/obs-2026-11-28-full-test-suite-flakes-at-6-workers-green-at-2": [
+    "sources/tool-choice-guidance-belongs-in-promptguidelines"
+  ],
   "sources/obs-2026-11-28-pi-p-does-not-exit-probe-loops-need-timeout": [],
   "sources/pi-extension-stale-instance-unhandled-rejection": [],
   "sources/pi-git-install-omits-dev-deps-so-ship-ts-entry": [
@@ -63,6 +65,7 @@
     "sources/await-state-not-bytes-in-process-tests"
   ],
   "sources/subagent-structured-verdict-path": [],
+  "sources/tool-choice-guidance-belongs-in-promptguidelines": [],
   "sources/windows-ci-slow-fsync-record-write": [],
   "sources/windows-taskkill-t-needs-force-for-console-node": [
     "sources/slow-suite-timings-not-workers"

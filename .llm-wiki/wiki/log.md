@@ -2,6 +2,7 @@
 
 ## 2026-11-28
 
+- **retro**: {"category":"architecture","slug":"tool-choice-guidance-belongs-in-promptguidelines","title":"Tool-choice guidance ships as promptGuidelines, not config"}
 - **observe**: {"relevance":"medium","slug":"obs-2026-11-28-pi-p-does-not-exit-probe-loops-need-timeout","title":"`pi -p` does not exit; probe loops need timeout"}
 - **observe**: {"relevance":"high","slug":"obs-2026-11-28-full-test-suite-flakes-at-6-workers-green-at-2","title":"Full test suite flakes at 6 workers, green at 2"}
 
