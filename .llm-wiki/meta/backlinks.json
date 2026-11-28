@@ -34,6 +34,8 @@
     "sources/filtering-guards-silently-shrink-their-own-scope"
   ],
   "sources/obs-2026-11-27-pi-pretty-task": [],
+  "sources/obs-2026-11-28-full-test-suite-flakes-at-6-workers-green-at-2": [],
+  "sources/obs-2026-11-28-pi-p-does-not-exit-probe-loops-need-timeout": [],
   "sources/pi-extension-stale-instance-unhandled-rejection": [],
   "sources/pi-git-install-omits-dev-deps-so-ship-ts-entry": [
     "syntheses/release-1-0-0-publish-support"

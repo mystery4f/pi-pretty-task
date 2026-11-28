@@ -101,7 +101,7 @@ A fourth card, `task-detached`, is a session entry rather than a message: it rec
 
 ```text
 pretty_task_bg_run    command: "npm run build", name: "build"
-pretty_task_bg_run    command: "npm test", wait: true
+pretty_task_bg_run    command: "npm test", wait: true, waitSeconds: 240
 pretty_task_bg_status id: "bg-4xq81"
 pretty_task_bg_logs   id: "bg-4xq81", follow: true
 pretty_task_bg_grep   id: "bg-4xq81", pattern: "error"
@@ -137,10 +137,12 @@ The key also works with the takeover off: the other waiting kind is a [blocking 
 
 `pretty_task_bg_run` normally answers as soon as the process is running. With `wait: true` it stays open instead and answers when the command ends: the status, exit code and kill reason, then the last 200 lines of its output. Either way it is the same task — recorded, listed in the panel, counted against `PI_PRETTY_TASK_MAX_RUNNING_TASKS` from the first millisecond — so nothing here waits for a record to appear first.
 
+The choice is not taste. Wait when the command ends by itself, its result is what the next step needs, it should finish within 600 seconds, and nothing else is waiting for you to do meanwhile — and then pass `waitSeconds` as well, the expected seconds plus 60, at most 600. Start it in the background when you have other work you could be doing while it runs: finish that work, then read the result with `pretty_task_bg_logs` or a `pretty_task_bg_wait` on a task started earlier. Leave the wait off too when the result is not needed yet, when the command may run past ten minutes, or when you cannot say how long it takes — a task id is enough, and the tool call returns in the same second. Work that ends in seconds belongs in `bash`, not in a task. A command that never ends — a dev server, a watcher — is started once and read with `pretty_task_bg_logs follow`, never as `tail -f` in a task. And a `pretty_task_bg_wait` on the task your own previous call started is always the wrong shape: that wait belonged inside the run, which is why `wait: true` exits with three receipts instead of a second turn.
 Nothing streams while the call waits; the panel already shows the growing output, and a second copy in the transcript would cost the same bytes twice. Three ways out early: Esc ends the wait and leaves the task running, the same way `pretty_task_bg_wait` does; `waitSeconds` (1–600) is the caller's own deadline, and passing it ends only the wait — the task is untouched and the answer says so, which is what makes it different from `timeoutSeconds`, where the whole tree stops and the call answers with the ending that says `timeout`; `ctrl+shift+b` lets the call go: it answers with what it had captured plus `↪ moved to bg-…` — no exit code, because none exists yet — and the press leaves the same detach card in the transcript that a foreground detach leaves. Leaving `waitSeconds` out keeps the wait unbounded; a queued step cannot be waited for at all, because `after` together with `wait` is refused before anything starts.
 
 A detach closes the front for a minute. In that minute a foreground command and a `wait: true` call are both refused, and the refusal is the reminder itself — it names what just moved, why, and how many seconds are left — because a long command started right after one was moved would only be moved the same way. The receipt of the detach ends with the same rule. Background starts are never refused: putting work in the background is the answer, not the problem.
 
+The rule above ships in the tool's `promptGuidelines`, so it is in every session without anyone writing it into a config file; [ADR-0028](docs/adr/0028-the-run-choice-rule-ships-with-the-plugin.md) records the boundary and the measurement it is judged by.
 See [ADR-0025](docs/adr/0025-blocking-run-waits-inside-the-call.md), [ADR-0026](docs/adr/0026-a-detach-closes-the-door-for-a-minute.md) and [ADR-0027](docs/adr/0027-waitseconds-bounds-the-blocking-call.md).
 
 ## Leave it running while you are away

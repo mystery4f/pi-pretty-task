@@ -45,3 +45,5 @@
 {"slug":"obs-2026-11-27-footer-handleinput","title":"footer 打印字形、handleInput 收的是终端序列：按键测试必须翻译","relevance":"high","timestamp":"2026-11-27T18:04:20.133Z","kind":"observe"}
 {"slug":"css-inside-a-js-template-literal-has-no-syntax-check","title":"模板字面量里的 CSS 没有语法检查，坏了只出一个丑图","category":"bugfix","timestamp":"2026-11-27T18:10:27.911Z","kind":"retro"}
 {"slug":"filtering-guards-silently-shrink-their-own-scope","title":"靠正则筛项的守卫会悄悄缩小自己的检查范围","category":"architecture","timestamp":"2026-11-27T18:10:35.614Z","kind":"retro"}
+{"slug":"obs-2026-11-28-full-test-suite-flakes-at-6-workers-green-at-2","title":"Full test suite flakes at 6 workers, green at 2","relevance":"high","timestamp":"2026-11-28T08:17:11.320Z","kind":"observe"}
+{"slug":"obs-2026-11-28-pi-p-does-not-exit-probe-loops-need-timeout","title":"`pi -p` does not exit; probe loops need timeout","relevance":"medium","timestamp":"2026-11-28T08:17:11.326Z","kind":"observe"}

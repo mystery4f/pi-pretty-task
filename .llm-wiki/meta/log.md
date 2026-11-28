@@ -143,3 +143,9 @@
 ## [2026-11-27T18:10:35.614Z] retro
 - slug: "filtering-guards-silently-shrink-their-own-scope", title: "靠正则筛项的守卫会悄悄缩小自己的检查范围", category: "architecture"
 
+## [2026-11-28T08:17:11.320Z] observe
+- slug: "obs-2026-11-28-full-test-suite-flakes-at-6-workers-green-at-2", title: "Full test suite flakes at 6 workers, green at 2", relevance: "high"
+
+## [2026-11-28T08:17:11.326Z] observe
+- slug: "obs-2026-11-28-pi-p-does-not-exit-probe-loops-need-timeout", title: "`pi -p` does not exit; probe loops need timeout", relevance: "medium"
+

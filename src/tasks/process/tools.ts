@@ -49,6 +49,29 @@ import type {
 } from "./process-tasks.js";
 import type { CommandTemplate } from "./templates.js";
 
+/**
+ * The run-choice rule the model reads on every request, in two halves: how a
+ * command is started (here) and which started task may be waited for (below).
+ *
+ * `ToolDefinition.promptGuidelines` is where pi puts a constant into its own
+ * Guidelines section, so this text is paid once and then stays in the cached
+ * prefix. That is why every entry is a literal: a timestamp, a count or a task
+ * list would change every turn and turn every request into a cache miss
+ * (ADR-0028). A test pins the text for the same reason.
+ */
+export const RUN_CHOICE_GUIDELINES = [
+  "If you have other work you could do while a command runs, do not wait for it: start it with no `wait`, keep the task id, finish that work, then read the result with `pretty_task_bg_logs`, `pretty_task_bg_grep` or `pretty_task_bg_wait`.",
+  "Wait inside the call only when all four hold: the command ends by itself, its result is what the next step needs, it should finish within 600 seconds, and you have nothing else to do meanwhile — then pass `wait: true` and `waitSeconds` (expected seconds plus 60, at most 600).",
+  "Leave `wait` off when the result is not needed yet, when the command may run past 600 seconds, or when its duration cannot be estimated; a task id is enough and the answer returns the same second.",
+  "Spend no task on work that ends in a few seconds: use `bash`. A command that never ends (a dev server, a watcher) is started once in the background and read with `pretty_task_bg_logs follow`; `tail -f` is never started as a task.",
+];
+/** The other half of the rule: which existing task a wait is for. */
+export const WAIT_CHOICE_GUIDELINES = [
+  "Never `pretty_task_bg_wait` the task your previous `pretty_task_bg_run` started: when its result is what you need, wait inside that run with `wait: true` and `waitSeconds`.",
+];
+/** The nudge a matching `bg_wait` ends with: one line, so it cannot be read as general advice. */
+export const WAIT_AFTER_RUN_NUDGE =
+  "Next time put the wait in that run: `pretty_task_bg_run` with `wait: true` and `waitSeconds` answers with the output tail itself, without a second turn.";
 const RunParameters = Type.Object({
   command: Type.Optional(
     Type.String({
@@ -104,7 +127,7 @@ const RunParameters = Type.Object({
   wait: Type.Optional(
     Type.Boolean({
       description:
-        "Keep the call open until the command ends, then answer with its output tail, exit code and kill reason instead of a task id. One answer, at the end — nothing streams while it waits, and the panel already shows the same output. Esc ends the wait and leaves the task running; `timeoutSeconds` still kills it; `ctrl+shift+b` moves the call to the background with `↪ moved to bg-…` and no exit code. `waitSeconds` bounds how long this call waits; a command that never ends otherwise holds it until Esc. Cannot be combined with `after`: a queued step has not started yet. Refused for a minute after a detach: the front has just been freed, and this call would hold it again.",
+        "Keep the call open until the command ends, then answer with its output tail, exit code and kill reason instead of a task id. Choose it only when the command ends by itself, its result is what the next step needs, it should finish within 600 seconds, and you have nothing else to do meanwhile, and then pass `waitSeconds` with it (expected seconds plus 60, at most 600). One answer, at the end — nothing streams while it waits, and the panel already shows the same output. Esc ends the wait and leaves the task running; `timeoutSeconds` still kills it; `ctrl+shift+b` moves the call to the background with `↪ moved to bg-…` and no exit code. `waitSeconds` bounds how long this call waits; a command that never ends otherwise holds it until Esc. Cannot be combined with `after`: a queued step has not started yet. Refused for a minute after a detach: the front has just been freed, and this call would hold it again.",
     }),
   ),
   waitSeconds: Type.Optional(
@@ -394,7 +417,7 @@ const RELOAD_NOTE =
  */
 function runDescription(templates: ReadonlyMap<string, CommandTemplate>): string {
   const base =
-    "Run a shell command in the background and return a task id at once, without waiting for it to finish. stdout and stderr are captured together in one output file. With `after`, it queues behind a task or chain instead. With `wait: true`, the call answers when the command ends, with its output tail, exit code and kill reason; Esc or ctrl+shift+b ends the wait, leaving the task running; `waitSeconds` bounds that wait.";
+    "Run a command in the background and return a task id at once, without waiting. With `after`, it queues behind a task or chain instead. With `wait: true` it answers when the command ends — only when it ends by itself, its result is what the next step needs, it should finish within 600 seconds, and nothing else is waiting for you; pass `waitSeconds` (expected seconds plus 60, at most 600), else start it and collect the result later.";
   // pi-lens-ignore: no-sort-without-comparator -- template names are plain words and the default string order is the intended one
   const names = [...templates.keys()].sort();
   if (names.length === 0) {
@@ -536,6 +559,15 @@ export function processTaskTools(
   options: ProcessToolOptions = {},
 ): ToolDefinition[] {
   /**
+   * The task this session's last `pretty_task_bg_run` started, and whether that
+   * call already waited for it. Only a `bg_wait` for exactly that task is the
+   * pattern ADR-0028 names; every other wait is an ordinary one and gets no
+   * advice. Keyed per scope, because two sessions in one directory are two
+   * readers and neither should be told about the other's run.
+   */
+  const lastStarted = new Map<string, { readonly id: string; readonly waited: boolean }>();
+  const scopeKey = (scope: TaskScope): string => `${scope.cwd}\u0000${scope.sessionId}`;
+  /**
    * What an id names here, decided once. Every tool that takes an id asks this
    * instead of guessing the same way twice, so a chain is found the same way by
    * all of them and "there is no such task" is one sentence.
@@ -569,6 +601,7 @@ export function processTaskTools(
     label: "Run in background",
     description: runDescription(templates),
     parameters: RunParameters,
+    promptGuidelines: [...RUN_CHOICE_GUIDELINES],
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       // Resolve the template before any store call: an unknown name must not
       // leave a task behind, and an explicit field on the call wins over the
@@ -699,7 +732,9 @@ export function processTaskTools(
         const reason = error instanceof Error ? error.message : String(error);
         return text(`${reason} The task was not started.`);
       }
-      const view = (await tasks.get(scopeOf(ctx), task.id)) ?? {
+      const started = scopeOf(ctx);
+      lastStarted.set(scopeKey(started), { id: task.id, waited: params.wait === true });
+      const view = (await tasks.get(started, task.id)) ?? {
         task,
         elapsedMs: 0,
         outputBytes: task.outputBytes,
@@ -708,7 +743,7 @@ export function processTaskTools(
         // The wait is one more listener on the record, so the task keeps its panel
         // row, its output file and its place in the ceiling while this call hangs
         // (ADR-0025). Only the call is released early; the process is never touched.
-        const scope = scopeOf(ctx);
+        const scope = started;
         const blocked = await tasks.awaitRun(scope, task.id, {
           ...(signal === undefined ? {} : { signal }),
           ...(holdTimeoutMs === undefined ? {} : { timeoutMs: holdTimeoutMs }),
@@ -936,8 +971,9 @@ export function processTaskTools(
     name: "pretty_task_bg_wait",
     label: "Wait for a background task",
     description:
-      "Wait for a background task to end, then return its final view. A timeout is not an error: it returns the running view with waited: false. Cancelling the call (Esc) ends the wait at once and leaves the task running.",
+      "Wait for a background task to end, then return its final view. A timeout is not an error: it returns the running view with waited: false. Cancelling the call (Esc) ends the wait at once and leaves the task running. Wait only for a task started earlier and left running; the task your previous `pretty_task_bg_run` started should have been waited for inside that call.",
     parameters: WaitParameters,
+    promptGuidelines: [...WAIT_CHOICE_GUIDELINES],
     // The abort signal is honoured: an Esc must release the turn instead of
     // holding it until the deadline. The task itself is never touched.
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
@@ -958,10 +994,11 @@ export function processTaskTools(
         return text(`${reason} Nothing was waited for.`);
       }
 
-      const result = await tasks.wait(scopeOf(ctx), id, timeoutMs, signal);
+      const scope = scopeOf(ctx);
+      const result = await tasks.wait(scope, id, timeoutMs, signal);
       if (result === undefined) {
         // Waiting on a chain would wait on the wrong thing: its steps come and go.
-        const chain = await chains.get(scopeOf(ctx), id);
+        const chain = await chains.get(scope, id);
         return text(
           chain === undefined
             ? missing(id)
@@ -971,8 +1008,18 @@ export function processTaskTools(
 
       const { view, waited, cancelled } = result;
       const headline = waitHeadline(id, result);
+      // The one pattern the rule exists to prevent: collecting the task this
+      // session's own last run started, when that run could have carried the
+      // wait itself (ADR-0028). Another task's wait is not the reader's mistake.
+      const previous = lastStarted.get(scopeKey(scope));
+      const nudge =
+        previous !== undefined && previous.id === id && !previous.waited
+          ? WAIT_AFTER_RUN_NUDGE
+          : undefined;
+      const lines = [headline, "", describeTask(view)];
+      if (nudge !== undefined) lines.push("", nudge);
       return {
-        content: [{ type: "text", text: [headline, "", describeTask(view)].join("\n") }],
+        content: [{ type: "text", text: lines.join("\n") }],
         details: { ...taskDetails(view), waited, cancelled },
       };
     },

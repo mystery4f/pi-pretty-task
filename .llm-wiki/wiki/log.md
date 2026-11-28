@@ -1,5 +1,10 @@
 # Wiki Update Log
 
+## 2026-11-28
+
+- **observe**: {"relevance":"medium","slug":"obs-2026-11-28-pi-p-does-not-exit-probe-loops-need-timeout","title":"`pi -p` does not exit; probe loops need timeout"}
+- **observe**: {"relevance":"high","slug":"obs-2026-11-28-full-test-suite-flakes-at-6-workers-green-at-2","title":"Full test suite flakes at 6 workers, green at 2"}
+
 ## 2026-11-27
 
 - **retro**: {"category":"architecture","slug":"filtering-guards-silently-shrink-their-own-scope","title":"靠正则筛项的守卫会悄悄缩小自己的检查范围"}

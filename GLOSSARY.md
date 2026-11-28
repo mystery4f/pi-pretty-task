@@ -36,6 +36,10 @@ _Avoid_: running command, live process, session command
 带 `wait: true` 的 `pretty_task_bg_run` 起的那条 Process task，从起进程起到调用返回之间。与 Foreground run 的分界是记录何时成立：Blocked run 从第一毫秒就是 Task——有记录、进面板、计入 `maxRunningTasks`，等它的调用只是 `session.waiters` 上多一个等待者，不是另一套生命周期。等待有四种结束方式：任务结束（含 `timeoutSeconds` 到点杀树，`stop: "ended"`）、调用方 Esc（`stop: "aborted"`）、调用方自己的 `waitSeconds` 到点（`stop: "deadline"`——只结束等待，任务不动，不画卡，ADR-0027）、`ctrl+shift+b` 放走调用（`stop: "released"`，只放走调用、不碰进程；沿用 ADR-0020 的回执与那张 `task-detached` 卡，`trigger: "shortcut"`，所以用户看见的和一次前台改道一样，ADR-0025）。不写 `waitSeconds` 时等待无上限，直到前三种之一发生。发起它的那次工具调用本身叫 blocking call。
 _Avoid_: foreground run, sync task, foreground task
 
+**Run choice**:
+每次起命令前的三选一。占前台的普通 `bash`：几秒就结束的琐事。Blocked run（`wait: true`）：命令自己会结束、结果正是下一步的前提、预计 ≤600 秒，并且此刻手上没有别的活可干——四条全中才等，且必须带 `waitSeconds`（预计秒数加 60，上限 600）。真后台（不带 `wait`）：结果现在不用，或预计超过 600 秒，或估不出时长，或者手上还有别的活可以在它跑着的时候干——那就先干别的，回头用 `pretty_task_bg_logs` / `pretty_task_bg_grep` / 对更早起任务的 `pretty_task_bg_wait` 取结果。永不结束的命令（dev server、watcher）起一次后台后用 `pretty_task_bg_logs follow` 看，绝不把 `tail -f` 当任务起；对上一次调用刚起的任务再 `bg_wait` 不属于任何一格，那次等待本该在 run 里。规则以常量形式随插件装在 `promptGuidelines` 里，装好即生效，不靠人写进配置文件（ADR-0028）。
+_Avoid_: wait policy, blocking strategy, sync mode
+
 **Detached**:
 一条前台命令被改道而成的那条 Process task：进程没重启，只是不再有人等它的结果。记录带 `origin: "foreground"`，在面板里与普通 Process task 同页同行，用 `pretty_task_bg_logs` / `bg_wait` / `bg_kill` 一视同仁。改道不是失败也不是取消：Esc 仍是「杀掉」，改道是「放它走」。
 _Avoid_: promoted task, adopted task, transferred job, bg-ified
