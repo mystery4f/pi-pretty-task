@@ -259,8 +259,11 @@ describe("pretty_task_bg_run with wait", () => {
   });
 
   // Two real children, two three-second tree kills and a wait on each record: under a
-  // loaded machine (the full suite runs both projects at once) 30 s is not enough.
-  it("lets no call go while two are blocked", { timeout: 60_000 }, async () => {
+  // loaded machine (the full suite runs both projects at once) 30 s is not enough, and
+  // 60 s lost the race too (2026-11-28, three workers) while the test finishes in a few
+  // seconds alone. Its own waits fail by name well before this ceiling, so a longer
+  // bound hides nothing.
+  it("lets no call go while two are blocked", { timeout: 120_000 }, async () => {
     const { harness, dir } = await setup();
     const first = harness.call("pretty_task_bg_run", {
       command: await writeScript(dir.path, "one.mjs", "setInterval(() => {}, 1000);"),

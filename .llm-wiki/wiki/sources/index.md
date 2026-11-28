@@ -31,6 +31,7 @@
 - [Observation: pi-pretty-task：改道通知带触发器，静默分支以负断言固化](obs-2026-11-27-pi-pretty-task.md)
 - [Observation: Full test suite flakes at 6 workers, green at 2](obs-2026-11-28-full-test-suite-flakes-at-6-workers-green-at-2.md)
 - [Observation: `pi -p` does not exit; probe loops need timeout](obs-2026-11-28-pi-p-does-not-exit-probe-loops-need-timeout.md)
+- [Observation: `pi -p` hangs on extension-spawned children, not MCP](obs-2026-11-28-pi-p-hangs-on-extension-spawned-children-not-mcp.md)
 - [pi 扩展实例失效后的 sendMessage 抛出会杀死进程](pi-extension-stale-instance-unhandled-rejection.md)
 - [pi 的 git 安装不带 devDeps，入口要写 .ts 而不是靠 prepare 构建](pi-git-install-omits-dev-deps-so-ship-ts-entry.md)
 - [全量 integration 套件在 8 worker 下间歇超时，串行才是确定性证据](pi-pretty-task-full-suite-parallel-flake.md)

@@ -152,3 +152,6 @@
 ## [2026-11-28T08:24:32.284Z] retro
 - slug: "tool-choice-guidance-belongs-in-promptguidelines", title: "Tool-choice guidance ships as promptGuidelines, not config", category: "architecture"
 
+## [2026-11-28T08:41:17.934Z] observe
+- slug: "obs-2026-11-28-pi-p-hangs-on-extension-spawned-children-not-mcp", title: "`pi -p` hangs on extension-spawned children, not MCP", relevance: "high"
+

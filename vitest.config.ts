@@ -34,9 +34,12 @@ const shared = {
   // Eight was the cap until the suite reached 500 tests: at that size eight
   // workers failed a different one or two timing tests on every run, each of
   // them green when re-run alone, while `--no-file-parallelism` ran all 500
-  // green in 4m03s. Six is the cap again; `--maxWorkers` on the command line
-  // still wins for a run that wants another number.
-  maxWorkers: Math.min(6, availableParallelism()),
+  // green in 4m03s. Three is the cap now: at 643 tests over 52 files on
+  // 2026-11-28 six workers failed four or five timing tests per run, four
+  // workers failed two, and three ran all 643 green in 3m03s — no slower than
+  // four, so the queue, not the CPU, was the limit. `--maxWorkers` on the
+  // command line still wins for a run that wants another number.
+  maxWorkers: Math.min(3, availableParallelism()),
 };
 export default defineConfig({
   test: {

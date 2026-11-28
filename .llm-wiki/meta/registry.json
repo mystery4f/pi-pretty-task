@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "last_updated": "2026-11-28T08:24:32.308Z",
+  "last_updated": "2026-11-28T08:41:17.960Z",
   "pages": {
     "sources/adr-dated-status-and-index-guard": {
       "type": "source",
@@ -426,6 +426,28 @@
       "relevance": "medium",
       "observed_at": "2026-11-28T08:17:11.323Z",
       "source_context": "Running six deepseek-flash probe sessions for the wait-rule measurement",
+      "created": "2026-11-28",
+      "updated": "2026-11-28"
+    },
+    "sources/obs-2026-11-28-pi-p-hangs-on-extension-spawned-children-not-mcp": {
+      "type": "source",
+      "title": "Observation: `pi -p` hangs on extension-spawned children, not MCP",
+      "tags": [
+        "pi",
+        "-p",
+        "hang",
+        "extension",
+        "child",
+        "process",
+        "qmd",
+        "llm-wiki",
+        "messenger-swarm"
+      ],
+      "status": "observation",
+      "slug": "obs-2026-11-28-pi-p-hangs-on-extension-spawned-children-not-mcp",
+      "relevance": "high",
+      "observed_at": "2026-11-28T08:41:17.931Z",
+      "source_context": "Diagnosing why probe loops of `pi -p` never advanced",
       "created": "2026-11-28",
       "updated": "2026-11-28"
     },

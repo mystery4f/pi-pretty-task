@@ -38,6 +38,7 @@
     "sources/tool-choice-guidance-belongs-in-promptguidelines"
   ],
   "sources/obs-2026-11-28-pi-p-does-not-exit-probe-loops-need-timeout": [],
+  "sources/obs-2026-11-28-pi-p-hangs-on-extension-spawned-children-not-mcp": [],
   "sources/pi-extension-stale-instance-unhandled-rejection": [],
   "sources/pi-git-install-omits-dev-deps-so-ship-ts-entry": [
     "syntheses/release-1-0-0-publish-support"
